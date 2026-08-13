@@ -1,0 +1,10 @@
+{
+  "name": "@openclaw-control-plane/openclaw-railway-installer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./cli": "./src/cli.ts"
+  }
+}
