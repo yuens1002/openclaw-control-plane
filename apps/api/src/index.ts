@@ -16,6 +16,17 @@ export function createControlPlaneApp(
 ) {
   const app = new Hono();
 
+  app.get("/", (context) =>
+    context.json({
+      ok: true,
+      service: "openclaw-control-plane-api",
+      status: "ready",
+      database: "not_connected",
+      worker_registry: [],
+      endpoints: ["/health", "/pipelines", "/events"]
+    })
+  );
+
   app.get("/health", (context) =>
     context.json({
       ok: true,
