@@ -1,0 +1,21 @@
+{
+  "template": "clawdbot-railway-template",
+  "upstreamRepo": "vignesh07/clawdbot-railway-template",
+  "upstreamBranch": "main",
+  "upstreamRef": "refs/heads/main",
+  "pinnedCommit": "b9e2467189d02dfe51a80173c40bad650a58eaf2",
+  "mirror": {
+    "requiredForImmutableProofInstance": true,
+    "approvedBranch": "openclaw-control-plane-approved",
+    "status": "planned"
+  },
+  "policy": {
+    "updateCadence": "weekly",
+    "autoApply": false,
+    "requiresSmokeBeforeBump": true
+  },
+  "notes": [
+    "The Railway dashboard may display a template source branch label that is not a public Git ref.",
+    "This lock pins the verifiable public upstream ref used by the repo-level detector."
+  ]
+}

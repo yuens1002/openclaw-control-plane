@@ -7,6 +7,6 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@openclaw-control-plane/contracts": "file:../../packages/contracts"
+    "zod": "^3.24.1"
   }
 }

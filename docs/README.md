@@ -33,3 +33,8 @@ Examples:
 Docs must not contain client data, private credentials, production tokens,
 handoff passwords, or private operational URLs. Put local-only values in ignored
 files such as `.env.local` or generated `*.local.md` handoff files.
+
+Public docs should describe OpenClaw Control Plane as a workflow-neutral
+baseline. Business workflows, connectors, credentials, and client automations
+belong in private repos or plugin packages unless they are explicitly framed as
+fake/manual examples.

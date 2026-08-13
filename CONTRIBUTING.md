@@ -2,10 +2,10 @@
 
 Thanks for taking a look at OpenClaw Control Plane.
 
-This repo is early and private-first in its development style. Contributions
+This repo is early and public-safe in its development style. Contributions
 should keep the reusable core free of client-specific assumptions, real customer
 data, private credentials, and external connector commitments that have not been
-modeled with fake data first.
+modeled with fake/manual examples first.
 
 ## Development
 

@@ -1,6 +1,10 @@
 import { z } from "zod";
 
-export const DomainSchema = z.enum(["vending"]);
+export const DomainSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[a-z0-9][a-z0-9._-]*$/, "Domain must be a safe lowercase identifier.");
 export type Domain = z.infer<typeof DomainSchema>;
 
 export const WorkItemStatusSchema = z.enum([
