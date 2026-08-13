@@ -19,6 +19,10 @@ No blocking findings.
 - `git check-ignore -v .env.local openclaw-railway-handoff.local.md`: PASS
 - Tracked-file secret grep for current setup password and obvious test secrets:
   PASS, no tracked matches
+- Live Railway smoke test in throwaway project
+  `openclaw-smoke-20260813-codex`: PASS. Installer ran with `-NoLocalFiles`,
+  deployment `eac0d187-ccb5-48ff-8828-1c1503b689ad` reached `SUCCESS`, domain
+  target port was corrected to `8080`, and `/setup/healthz` returned HTTP 200.
 
 ## AC Coverage
 
@@ -28,8 +32,6 @@ pending human review.
 
 ## Residual Risk
 
-- Tests mock Railway CLI behavior; no live Railway smoke test was run for this
-  branch.
 - The installer assumes the Railway CLI is authenticated and linked to the
   intended client project.
 - Public release still needs a git-history secret scan and explicit visibility
@@ -37,5 +39,6 @@ pending human review.
 
 ## Recommendation
 
-Approve for commit after human review, then optionally run a live smoke test in a
-throwaway Railway project before making this the standard client onboarding path.
+Approved, smoke-tested, and merged in PR #1. Use this as the baseline client
+onboarding path, with the live smoke procedure repeated before changing
+provider assumptions or installer behavior.
