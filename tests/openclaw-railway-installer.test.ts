@@ -80,14 +80,17 @@ describe("OpenClaw Railway installer", () => {
     );
 
     expect(result.reusedExistingService).toBe(false);
-    expect(result.setupUrl).toBe("https://client-openclaw.up.railway.app/setup");
-    expect(result.openclawUrl).toBe("https://client-openclaw.up.railway.app/openclaw");
+    expect(result.setupUrl).toBe("https://example-openclaw.example.com/setup");
+    expect(result.openclawUrl).toBe("https://example-openclaw.example.com/openclaw");
     expect(result.wroteEnvLocal).toBe(true);
     expect(result.wroteHandoff).toBe(true);
     expect(runner.calls.some((call) => call.args[0] === "deploy")).toBe(true);
     expect(runner.calls.some((call) => call.args[0] === "domain" && call.args[1] === "update")).toBe(true);
     expect(writes.get(".env.local")).toContain("OPENCLAW_RAILWAY_SETUP_PASSWORD=setup-secret");
     expect(writes.get("handoff.local.md")).toContain("Password: setup-secret");
+    expect(writes.get("handoff.local.md")).toContain(
+      "Attach client-specific tools, connectors, and workflows only after the shell install is healthy."
+    );
   });
 
   it("reuses an existing successful service without deploying a duplicate", async () => {
@@ -175,13 +178,13 @@ function service(status: "BUILDING" | "CRASHED" | "FAILED" | "SUCCESS") {
       id: "dep_client",
       status
     },
-    url: "https://client-openclaw.up.railway.app"
+    url: "https://example-openclaw.example.com"
   };
 }
 
 function serviceDomain(targetPort: number) {
   return {
-    domain: "client-openclaw.up.railway.app",
+    domain: "example-openclaw.example.com",
     type: "service",
     targetPort
   };

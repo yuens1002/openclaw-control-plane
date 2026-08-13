@@ -1,6 +1,8 @@
-# Vending Worker
+# Vending Worker Example
 
-The vending worker is the first vertical slice. M1 supports only fake/manual lead ingestion and call transcript ingestion.
+The vending worker is an example vertical slice. It is not installed by the
+shell OpenClaw/Railway onboarding path and is not a default production workflow.
+M1 supports only fake/manual lead ingestion and call transcript ingestion.
 
 ## Current Behaviors
 
@@ -8,4 +10,5 @@ The vending worker is the first vertical slice. M1 supports only fake/manual lea
 - Validate a call transcript with `VendingCallTranscriptSchema`.
 - Produce an approval-gated placeholder follow-up draft from a transcript.
 
-Duplicate lead detection is represented in the Postgres migration with a unique `(company_name, location_name)` constraint.
+The example worker keeps its schemas local to `workers/vending`. It does not add
+baseline database tables, seed rows, connectors, or installed pipeline state.

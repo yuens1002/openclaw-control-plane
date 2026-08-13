@@ -35,12 +35,3 @@ export const VendingFollowUpDraftSchema = z.object({
   created_at: z.string().datetime()
 });
 export type VendingFollowUpDraft = z.infer<typeof VendingFollowUpDraftSchema>;
-
-export const VendingEventPayloadSchema = z.object({
-  leadCreated: z.object({
-    lead: VendingLeadSchema
-  }),
-  callTranscribed: z.object({
-    transcript: VendingCallTranscriptSchema
-  })
-});

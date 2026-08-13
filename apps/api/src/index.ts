@@ -21,7 +21,7 @@ export function createControlPlaneApp(
       ok: true,
       service: "openclaw-control-plane-api",
       database: "not_connected",
-      worker_registry: ["vending"],
+      worker_registry: [],
       failed_runs: 0,
       stale_workers: []
     })
@@ -29,17 +29,7 @@ export function createControlPlaneApp(
 
   app.get("/pipelines", (context) =>
     context.json({
-      pipelines: [
-        {
-          domain: "vending",
-          stage: "m1_foundation",
-          owner: "vending-worker",
-          health: "stubbed",
-          next_scheduled_run: null,
-          blockers: [],
-          pending_approvals: 0
-        }
-      ]
+      pipelines: []
     })
   );
 
