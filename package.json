@@ -1,8 +1,17 @@
 {
   "name": "openclaw-control-plane",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
+  "license": "MIT",
   "type": "module",
+  "homepage": "https://github.com/yuens1002/openclaw-control-plane#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yuens1002/openclaw-control-plane.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yuens1002/openclaw-control-plane/issues"
+  },
   "scripts": {
     "build": "tsc -b",
     "test": "vitest run",
