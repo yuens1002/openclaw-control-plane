@@ -39,6 +39,7 @@ pending human review.
 
 ## Recommendation
 
-Approved, smoke-tested, and merged in PR #1. Use this as the baseline client
-onboarding path, with the live smoke procedure repeated before changing
-provider assumptions or installer behavior.
+Approved, smoke-tested, and merged in
+[PR #1](https://github.com/yuens1002/openclaw-control-plane/pull/1). Use this
+as the baseline client onboarding path, with the live smoke procedure repeated
+before changing provider assumptions or installer behavior.

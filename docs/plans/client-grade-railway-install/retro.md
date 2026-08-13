@@ -15,10 +15,10 @@ success, real health probe, cleanup, and local context restoration.
 
 **Fix applied to:**
 
-- `C:\Users\yuens\dotfiles\commands\devops.md` - added rules for live
+- Out-of-repo canonical `/devops` command - added rules for live
   throwaway PaaS installer smokes, numeric CLI flag validation, and package
   metadata/build-output alignment.
-- `C:\Users\yuens\dotfiles\commands\commit.md` - added squash-merge local sync
+- Out-of-repo canonical `/commit` command - added squash-merge local sync
   guidance for the case where GitHub merges successfully but local `main`
   diverges from `origin/main`.
 - `docs/plans/client-grade-railway-install/review.md` - updated verification
