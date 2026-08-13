@@ -39,6 +39,9 @@ npm run --workspace @openclaw-control-plane/api dev
 ```
 
 The API listens on `PORT` from `.env` or `8787` by default.
+Set `SETUP_PASSWORD` to require HTTP Basic auth on the API root and
+control-plane endpoints. `/health` stays public for platform healthchecks. The
+default username is `openclaw`; override it with `OPENCLAW_SETUP_USERNAME`.
 
 ## Verification
 
