@@ -1,10 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { createControlPlaneApp } from "@openclaw-control-plane/api";
 import { DomainSchema } from "@openclaw-control-plane/contracts";
 
 describe("control-plane shell defaults", () => {
+  const originalSetupPassword = process.env.SETUP_PASSWORD;
+  const originalSetupUsername = process.env.OPENCLAW_SETUP_USERNAME;
+
+  afterEach(() => {
+    restoreEnv("SETUP_PASSWORD", originalSetupPassword);
+    restoreEnv("OPENCLAW_SETUP_USERNAME", originalSetupUsername);
+  });
+
   it("serves a public root status response", async () => {
+    delete process.env.SETUP_PASSWORD;
     const app = createControlPlaneApp();
 
     const response = await app.request("/");
@@ -22,7 +31,41 @@ describe("control-plane shell defaults", () => {
     expect(root.endpoints).toContain("/health");
   });
 
+  it("keeps health public when operator auth is configured", async () => {
+    process.env.SETUP_PASSWORD = "setup-secret";
+    const app = createControlPlaneApp();
+
+    const response = await app.request("/health");
+
+    expect(response.status).toBe(200);
+  });
+
+  it("requires operator auth on the public root when setup password is configured", async () => {
+    process.env.SETUP_PASSWORD = "setup-secret";
+    const app = createControlPlaneApp();
+
+    const response = await app.request("/");
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toContain("OpenClaw Control Plane");
+  });
+
+  it("accepts operator auth with the configured setup password", async () => {
+    process.env.SETUP_PASSWORD = "setup-secret";
+    process.env.OPENCLAW_SETUP_USERNAME = "operator";
+    const app = createControlPlaneApp();
+
+    const response = await app.request("/", {
+      headers: {
+        authorization: `Basic ${Buffer.from("operator:setup-secret").toString("base64")}`
+      }
+    });
+
+    expect(response.status).toBe(200);
+  });
+
   it("starts without registering a vertical workflow", async () => {
+    delete process.env.SETUP_PASSWORD;
     const app = createControlPlaneApp();
 
     const healthResponse = await app.request("/health");
@@ -49,3 +92,12 @@ describe("control-plane shell defaults", () => {
     expect(DomainSchema.safeParse("ClientLocation").success).toBe(false);
   });
 });
+
+function restoreEnv(key: "SETUP_PASSWORD" | "OPENCLAW_SETUP_USERNAME", value: string | undefined) {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+
+  process.env[key] = value;
+}

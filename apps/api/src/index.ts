@@ -1,5 +1,7 @@
 import { Hono } from "hono";
+import { basicAuth } from "hono/basic-auth";
 import { HTTPException } from "hono/http-exception";
+import type { MiddlewareHandler } from "hono";
 import {
   EventEnvelopeSchema,
   DomainSchema,
@@ -16,17 +18,6 @@ export function createControlPlaneApp(
 ) {
   const app = new Hono();
 
-  app.get("/", (context) =>
-    context.json({
-      ok: true,
-      service: "openclaw-control-plane-api",
-      status: "ready",
-      database: "not_connected",
-      worker_registry: [],
-      endpoints: ["/health", "/pipelines", "/events"]
-    })
-  );
-
   app.get("/health", (context) =>
     context.json({
       ok: true,
@@ -35,6 +26,22 @@ export function createControlPlaneApp(
       worker_registry: [],
       failed_runs: 0,
       stale_workers: []
+    })
+  );
+
+  const operatorAuth = createOperatorAuthMiddleware();
+  if (operatorAuth) {
+    app.use("*", operatorAuth);
+  }
+
+  app.get("/", (context) =>
+    context.json({
+      ok: true,
+      service: "openclaw-control-plane-api",
+      status: "ready",
+      database: "not_connected",
+      worker_registry: [],
+      endpoints: ["/health", "/pipelines", "/events"]
     })
   );
 
@@ -153,6 +160,19 @@ export function createControlPlaneApp(
   );
 
   return app;
+}
+
+function createOperatorAuthMiddleware(): MiddlewareHandler | null {
+  const password = process.env.SETUP_PASSWORD;
+  if (!password) {
+    return null;
+  }
+
+  return basicAuth({
+    username: process.env.OPENCLAW_SETUP_USERNAME ?? "openclaw",
+    password,
+    realm: "OpenClaw Control Plane"
+  });
 }
 
 export type ControlPlaneApp = ReturnType<typeof createControlPlaneApp>;
