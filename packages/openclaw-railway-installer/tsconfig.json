@@ -3,7 +3,7 @@
   "compilerOptions": {
     "composite": true,
     "rootDir": "src",
-    "outDir": "../../dist/packages/openclaw-railway-installer"
+    "outDir": "dist"
   },
   "include": ["src/**/*.ts"]
 }

@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { access } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { installOpenClawOnRailway, type InstallerOptions, type RailwayRunner } from "./index.js";
 
@@ -23,7 +24,7 @@ async function main(): Promise<void> {
   console.log(`Handoff written: ${result.wroteHandoff}`);
 }
 
-function parseArgs(args: string[]): InstallerOptions {
+export function parseArgs(args: string[]): InstallerOptions {
   const options: InstallerOptions = {};
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -38,15 +39,15 @@ function parseArgs(args: string[]): InstallerOptions {
         index += 1;
         break;
       case "--target-port":
-        options.targetPort = Number.parseInt(requireValue(arg, value), 10);
+        options.targetPort = parseIntegerFlag(arg, value);
         index += 1;
         break;
       case "--poll-seconds":
-        options.pollSeconds = Number.parseInt(requireValue(arg, value), 10);
+        options.pollSeconds = parseIntegerFlag(arg, value);
         index += 1;
         break;
       case "--timeout-minutes":
-        options.timeoutMinutes = Number.parseInt(requireValue(arg, value), 10);
+        options.timeoutMinutes = parseIntegerFlag(arg, value);
         index += 1;
         break;
       case "--setup-username":
@@ -79,6 +80,20 @@ function requireValue(flag: string, value: string | undefined): string {
     throw new Error(`Missing value for ${flag}`);
   }
   return value;
+}
+
+function parseIntegerFlag(flag: string, value: string | undefined): number {
+  const rawValue = requireValue(flag, value);
+  if (!/^\d+$/.test(rawValue)) {
+    throw new Error(`${flag} must be a positive integer.`);
+  }
+
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`${flag} must be a positive integer.`);
+  }
+
+  return parsed;
 }
 
 async function resolveRailwayExecutable(): Promise<string> {
@@ -125,7 +140,14 @@ function runCommand(command: string, args: string[]): Promise<{ stdout: string }
   });
 }
 
-main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
-});
+if (isEntrypoint()) {
+  main().catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
+}
+
+function isEntrypoint(): boolean {
+  const invokedPath = process.argv[1];
+  return Boolean(invokedPath && fileURLToPath(import.meta.url) === invokedPath);
+}
