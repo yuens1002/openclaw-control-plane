@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "src",
+    "outDir": "../../dist/packages/openclaw-railway-installer"
+  },
+  "include": ["src/**/*.ts"]
+}

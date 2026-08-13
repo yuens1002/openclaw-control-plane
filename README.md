@@ -47,8 +47,9 @@ npm run build
 ```
 
 The current test suite covers event envelope validation and event idempotency.
-Client-grade Railway install verification is planned as a separate feature with
-mocked Railway CLI tests and optional live smoke tests.
+Client-grade Railway install verification uses mocked Railway CLI tests. Live
+Railway smoke tests are intentionally opt-in so normal CI does not create cloud
+resources.
 
 ## OpenClaw on Railway
 
@@ -56,6 +57,9 @@ Use the OpenClaw-recommended Railway template flow in
 [deploy/openclaw-railway](deploy/openclaw-railway/README.md). Do not deploy the
 raw OpenClaw image directly for hosted Control UI installs; the template wrapper
 handles setup, persistent `/data` state, public routing, and `/openclaw` proxying.
+
+The installer writes local handoff values to ignored files such as `.env.local`
+and `openclaw-railway-handoff.local.md`.
 
 ## Documentation
 

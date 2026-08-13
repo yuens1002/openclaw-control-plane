@@ -24,6 +24,7 @@ Never commit:
 - OAuth tokens
 - client data
 - generated client handoff artifacts
+- `*.local.md` files
 
 Before making the repository public, run a working-tree and git-history secret
 scan and rotate any secret that may have been exposed.

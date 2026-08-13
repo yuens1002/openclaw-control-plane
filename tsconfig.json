@@ -3,6 +3,7 @@
   "references": [
     { "path": "./packages/contracts" },
     { "path": "./packages/db" },
+    { "path": "./packages/openclaw-railway-installer" },
     { "path": "./packages/openclaw-adapter" },
     { "path": "./workers/vending" },
     { "path": "./apps/api" },

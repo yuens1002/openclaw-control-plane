@@ -7,6 +7,8 @@ and uses semantic versioning once releases begin.
 
 ## [Unreleased]
 
+- 2026-08-13 - feat(railway): add client-grade installer
+
 ### Added
 
 - M1 TypeScript monorepo scaffold for the control-plane API, worker, contracts,

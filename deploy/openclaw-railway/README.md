@@ -17,13 +17,27 @@ The script:
 
 - deploys the `clawdbot-railway-template` marketplace template
 - generates `SETUP_PASSWORD` and `OPENCLAW_GATEWAY_TOKEN`
+- reuses an existing healthy template service on rerun
 - waits for the newest deployment to reach `SUCCESS`
 - updates the generated Railway domain to target port `8080`
 - verifies `/setup/healthz`
-- prints the setup URL and setup password
+- writes `.env.local` and `openclaw-railway-handoff.local.md`
+- prints the setup URL and setup password for the current run
 
 The setup password is needed for HTTP Basic auth on `/setup` and `/openclaw`.
 Use any username.
+
+Both local output files are ignored by git. They are handoff conveniences, not
+source artifacts.
+
+Useful options:
+
+```powershell
+.\deploy\openclaw-railway\install-template.ps1 -SetupUsername client-admin
+.\deploy\openclaw-railway\install-template.ps1 -ForceNew
+.\deploy\openclaw-railway\install-template.ps1 -NoLocalFiles
+.\deploy\openclaw-railway\install-template.ps1 -HandoffPath "client-handoff.local.md"
+```
 
 ## Manual Install
 
@@ -52,3 +66,6 @@ https://<your-railway-domain>/setup
 - The wrapper healthcheck is `/setup/healthz`; public runtime status is `/healthz`.
 - Do not deploy the raw OpenClaw image directly on Railway for this flow. It does
   not provide the wrapper behavior the hosted Control UI needs.
+- Client installs should use a client-owned Railway project or workspace.
+- Rotate temporary handoff credentials after onboarding if the client stores
+  different long-term credentials.
