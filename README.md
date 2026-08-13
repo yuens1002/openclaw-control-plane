@@ -21,3 +21,9 @@ The API listens on `PORT` from `.env` or `8787` by default.
 OpenClaw manages the system; it does not become the system. The adapter calls the API, the API owns control-plane state transitions, the DB package owns persistence, and workers own domain behavior.
 
 No external connectors are included in M1.
+
+## OpenClaw Railway Deploy Target
+
+This repo includes a Railway deploy target for the hosted OpenClaw Gateway in `deploy/openclaw-railway`.
+
+Use it as a separate Railway service with root directory `deploy/openclaw-railway`, a `/data` volume, public HTTP proxy on port `8080`, and the variables documented in [deploy/openclaw-railway/README.md](deploy/openclaw-railway/README.md).
