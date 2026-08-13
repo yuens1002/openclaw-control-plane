@@ -1,0 +1,13 @@
+{
+  "id": "00000000-0000-4000-8000-000000000101",
+  "location_name": "North Loop Studio",
+  "business_type": "creative studio",
+  "address": null,
+  "contact_name": "Jordan Lee",
+  "contact_role": "office manager",
+  "email": "jordan@example.com",
+  "phone": "555-0101",
+  "source": "fake_fixture",
+  "source_refs": ["fixture:north-loop-studio"],
+  "notes": "Interested in pantry vending for a 40-person office."
+}

@@ -1,0 +1,12 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/contracts" },
+    { "path": "./packages/db" },
+    { "path": "./packages/openclaw-adapter" },
+    { "path": "./workers/vending" },
+    { "path": "./apps/api" },
+    { "path": "./apps/worker" },
+    { "path": "./tests" }
+  ]
+}

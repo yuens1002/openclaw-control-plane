@@ -1,0 +1,32 @@
+{
+  "event_id": "00000000-0000-4000-8000-000000001001",
+  "event_type": "location_lead.created",
+  "occurred_at": "2026-08-13T12:00:00.000Z",
+  "source": "fixture",
+  "domain": "vending",
+  "actor": {
+    "type": "user",
+    "id": "sunny"
+  },
+  "subject": {
+    "type": "opportunity",
+    "id": null
+  },
+  "payload": {
+    "lead": {
+      "id": "00000000-0000-4000-8000-000000000101",
+      "location_name": "North Loop Studio",
+      "business_type": "creative studio",
+      "address": null,
+      "contact_name": "Jordan Lee",
+      "contact_role": "office manager",
+      "email": "jordan@example.com",
+      "phone": "555-0101",
+      "source": "fake_fixture",
+      "source_refs": ["fixture:north-loop-studio"],
+      "notes": "Interested in pantry vending for a 40-person office."
+    }
+  },
+  "sensitivity": "business",
+  "idempotency_key": "manual-lead-import-north-loop-studio"
+}

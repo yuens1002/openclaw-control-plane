@@ -1,0 +1,13 @@
+{
+  "name": "@openclaw-control-plane/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@openclaw-control-plane/vending-worker": "file:../../workers/vending"
+  }
+}
