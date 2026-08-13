@@ -4,6 +4,24 @@ import { createControlPlaneApp } from "@openclaw-control-plane/api";
 import { DomainSchema } from "@openclaw-control-plane/contracts";
 
 describe("control-plane shell defaults", () => {
+  it("serves a public root status response", async () => {
+    const app = createControlPlaneApp();
+
+    const response = await app.request("/");
+    const root = (await response.json()) as {
+      ok: boolean;
+      service: string;
+      worker_registry: string[];
+      endpoints: string[];
+    };
+
+    expect(response.status).toBe(200);
+    expect(root.ok).toBe(true);
+    expect(root.service).toBe("openclaw-control-plane-api");
+    expect(root.worker_registry).toEqual([]);
+    expect(root.endpoints).toContain("/health");
+  });
+
   it("starts without registering a vertical workflow", async () => {
     const app = createControlPlaneApp();
 
