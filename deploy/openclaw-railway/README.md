@@ -1,67 +1,54 @@
 # OpenClaw on Railway
 
-This directory is a Railway deploy target for a hosted OpenClaw Gateway + Control UI.
+Use OpenClaw's Railway-recommended template instead of deploying the raw
+`ghcr.io/openclaw/openclaw` image directly. The template runs a Railway wrapper
+that listens on the public port, stores state on `/data`, serves `/setup`, and
+proxies the Control UI at `/openclaw`.
 
-It wraps the official OpenClaw container image and keeps the Railway-specific contract in code:
+## One-Command Install
 
-- Gateway port: `8080`
-- Persistent volume mount: `/data`
-- State directory: `/data/.openclaw`
-- Workspace directory: `/data/workspace`
-- Healthcheck: `/healthz`
-
-## Railway Setup
-
-Create a Railway service from the GitHub repo and set the service root directory to:
-
-```text
-deploy/openclaw-railway
-```
-
-Attach a Railway volume mounted at:
-
-```text
-/data
-```
-
-Set these service variables:
-
-```text
-OPENCLAW_GATEWAY_PORT=8080
-OPENCLAW_GATEWAY_TOKEN=<generated-admin-secret>
-OPENCLAW_STATE_DIR=/data/.openclaw
-OPENCLAW_WORKSPACE_DIR=/data/workspace
-OPENCLAW_DISABLE_BONJOUR=1
-```
-
-Enable Public Networking with HTTP Proxy on port `8080`.
-
-After deploy, open:
-
-```text
-https://<your-railway-domain>/openclaw
-```
-
-Connect using `OPENCLAW_GATEWAY_TOKEN`.
-
-## Generate a Gateway Token
-
-Do not commit the token. Generate it locally and paste it into Railway Variables:
+From a Railway-linked project directory:
 
 ```powershell
-[Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32)).ToLower()
+.\deploy\openclaw-railway\install-template.ps1
 ```
 
-## Post-Deploy Preflight
+The script:
 
-From Railway shell:
+- deploys the `clawdbot-railway-template` marketplace template
+- generates `SETUP_PASSWORD` and `OPENCLAW_GATEWAY_TOKEN`
+- waits for the newest deployment to reach `SUCCESS`
+- updates the generated Railway domain to target port `8080`
+- verifies `/setup/healthz`
+- prints the setup URL and setup password
 
-```bash
-openclaw doctor --json
+The setup password is needed for HTTP Basic auth on `/setup` and `/openclaw`.
+Use any username.
+
+## Manual Install
+
+```powershell
+railway deploy -t clawdbot-railway-template `
+  -v "SETUP_PASSWORD=<generated-setup-password>" `
+  -v "OPENCLAW_GATEWAY_TOKEN=<generated-gateway-token>"
+```
+
+After deployment, verify the service domain target port:
+
+```powershell
+railway domain list --service clawdbot-railway-template --json
+railway domain update <domain> --service clawdbot-railway-template --port 8080 --json
+```
+
+Then open:
+
+```text
+https://<your-railway-domain>/setup
 ```
 
 ## Notes
 
-- Railway injects `PORT`, but OpenClaw expects `OPENCLAW_GATEWAY_PORT`; keep both Railway public networking and `OPENCLAW_GATEWAY_PORT` aligned at `8080`.
-- The `/data` volume is required for persistent OpenClaw state, auth profiles, sessions, plugin installs, and workspace files.
-- External connectors, channels, and provider credentials should be configured after the gateway is reachable.
+- The template creates and mounts a Railway volume at `/data`.
+- The wrapper healthcheck is `/setup/healthz`; public runtime status is `/healthz`.
+- Do not deploy the raw OpenClaw image directly on Railway for this flow. It does
+  not provide the wrapper behavior the hosted Control UI needs.

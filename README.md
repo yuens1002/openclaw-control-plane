@@ -1,8 +1,30 @@
 # OpenClaw Control Plane
 
-Private-first TypeScript control plane for durable business workflows managed by OpenClaw through stable tools.
+OpenClaw Control Plane is a private-first TypeScript monorepo for durable
+business workflows managed by OpenClaw through stable tools.
 
-M1 is intentionally small: contracts, Postgres migrations, Hono API stubs, a vending worker skeleton, OpenClaw adapter stubs, fake fixtures, and tests for event validation plus idempotency.
+The first vertical is intentionally small: contracts, Postgres migrations, Hono
+API stubs, a vending worker skeleton, OpenClaw adapter stubs, fake fixtures, and
+tests for event validation plus idempotency.
+
+## Status
+
+This project is in early M1 foundation work. It is structured to become public,
+but production connectors and client-specific assumptions are intentionally out
+of scope until the reusable core is stable.
+
+## Architecture
+
+OpenClaw manages the system; it does not become the system.
+
+- `apps/api`: control-plane HTTP API
+- `apps/worker`: background worker runner
+- `packages/contracts`: shared schemas and TypeScript types
+- `packages/db`: migrations and typed persistence primitives
+- `packages/openclaw-adapter`: OpenClaw-facing API wrappers
+- `workers/vending`: first vertical worker
+- `deploy/openclaw-railway`: OpenClaw Railway template installer
+- `docs`: architecture, feature, and operations documentation
 
 ## Local Setup
 
@@ -16,14 +38,42 @@ npm run --workspace @openclaw-control-plane/api dev
 
 The API listens on `PORT` from `.env` or `8787` by default.
 
-## Boundaries
+## Verification
 
-OpenClaw manages the system; it does not become the system. The adapter calls the API, the API owns control-plane state transitions, the DB package owns persistence, and workers own domain behavior.
+```bash
+npm run typecheck
+npm test
+npm run build
+```
 
-No external connectors are included in M1.
+The current test suite covers event envelope validation and event idempotency.
+Client-grade Railway install verification is planned as a separate feature with
+mocked Railway CLI tests and optional live smoke tests.
 
-## OpenClaw Railway Deploy Target
+## OpenClaw on Railway
 
-This repo includes a Railway deploy target for the hosted OpenClaw Gateway in `deploy/openclaw-railway`.
+Use the OpenClaw-recommended Railway template flow in
+[deploy/openclaw-railway](deploy/openclaw-railway/README.md). Do not deploy the
+raw OpenClaw image directly for hosted Control UI installs; the template wrapper
+handles setup, persistent `/data` state, public routing, and `/openclaw` proxying.
 
-Use it as a separate Railway service with root directory `deploy/openclaw-railway`, a `/data` volume, public HTTP proxy on port `8080`, and the variables documented in [deploy/openclaw-railway/README.md](deploy/openclaw-railway/README.md).
+## Documentation
+
+See [docs/README.md](docs/README.md) for the documentation layout and naming
+conventions.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). This repo uses a private-first workflow:
+new client-specific behavior should prove itself with fake data and no private
+assumptions before being promoted into the reusable core.
+
+## Security
+
+See [SECURITY.md](SECURITY.md). Do not commit `.env`, `.env.local`, Railway
+tokens, setup passwords, provider API keys, client data, or generated handoff
+artifacts.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
