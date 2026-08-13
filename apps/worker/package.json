@@ -6,8 +6,5 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts"
-  },
-  "dependencies": {
-    "@openclaw-control-plane/vending-worker": "file:../../workers/vending"
   }
 }

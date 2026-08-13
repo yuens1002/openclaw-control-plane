@@ -19,10 +19,9 @@ No blocking findings.
 - `git check-ignore -v .env.local openclaw-railway-handoff.local.md`: PASS
 - Tracked-file secret grep for current setup password and obvious test secrets:
   PASS, no tracked matches
-- Live Railway smoke test in throwaway project
-  `openclaw-smoke-20260813-codex`: PASS. Installer ran with `-NoLocalFiles`,
-  deployment `eac0d187-ccb5-48ff-8828-1c1503b689ad` reached `SUCCESS`, domain
-  target port was corrected to `8080`, and `/setup/healthz` returned HTTP 200.
+- Live Railway smoke test in a throwaway project: PASS. Installer ran with
+  `-NoLocalFiles`, deployment reached `SUCCESS`, domain target port was
+  corrected to `8080`, and `/setup/healthz` returned HTTP 200.
 
 ## AC Coverage
 

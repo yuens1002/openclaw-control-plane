@@ -5,7 +5,9 @@ import {
   type VendingCallTranscript,
   type VendingFollowUpDraft,
   type VendingLead
-} from "@openclaw-control-plane/contracts";
+} from "./schemas.js";
+
+export * from "./schemas.js";
 
 export interface VendingWorker {
   name: "vending";

@@ -1,24 +1,14 @@
 import { z } from "zod";
 import { DomainSchema } from "./control-plane.js";
-import { VendingEventPayloadSchema } from "./vending.js";
 
-export const EventTypeSchema = z.enum([
-  "user_instruction.received",
-  "call.started",
-  "location_lead.created",
-  "call.completed",
-  "call.transcribed",
-  "call.processing_failed",
-  "call.followup_due",
-  "followup.due",
-  "worker.run_requested",
-  "approval.response_received",
-  "briefing.requested",
-  "schedule.tick"
-]);
+export const EventTypeSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/, "Event type must be a safe identifier.");
 export type EventType = z.infer<typeof EventTypeSchema>;
 
-const BaseEventEnvelopeSchema = z.object({
+export const EventEnvelopeSchema = z.object({
   event_id: z.string().uuid(),
   event_type: EventTypeSchema,
   occurred_at: z.string().datetime(),
@@ -33,42 +23,9 @@ const BaseEventEnvelopeSchema = z.object({
     id: z.string().min(1).nullable()
   }),
   sensitivity: z.enum(["public", "business", "private"]),
-  idempotency_key: z.string().min(8)
-});
-
-export const LocationLeadCreatedEventSchema = BaseEventEnvelopeSchema.extend({
-  event_type: z.literal("location_lead.created"),
-  domain: z.literal("vending"),
-  payload: VendingEventPayloadSchema.shape.leadCreated
-});
-
-export const CallTranscribedEventSchema = BaseEventEnvelopeSchema.extend({
-  event_type: z.literal("call.transcribed"),
-  domain: z.literal("vending"),
-  payload: VendingEventPayloadSchema.shape.callTranscribed
-});
-
-export const GenericEventEnvelopeSchema = BaseEventEnvelopeSchema.extend({
-  event_type: z.enum([
-    "user_instruction.received",
-    "call.started",
-    "call.completed",
-    "call.processing_failed",
-    "call.followup_due",
-    "followup.due",
-    "worker.run_requested",
-    "approval.response_received",
-    "briefing.requested",
-    "schedule.tick"
-  ]),
+  idempotency_key: z.string().min(8),
   payload: z.record(z.unknown()).default({})
 });
-
-export const EventEnvelopeSchema = z.discriminatedUnion("event_type", [
-  LocationLeadCreatedEventSchema,
-  CallTranscribedEventSchema,
-  GenericEventEnvelopeSchema
-]);
 
 export type EventEnvelope = z.infer<typeof EventEnvelopeSchema>;
 

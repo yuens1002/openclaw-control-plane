@@ -24,6 +24,37 @@ The script:
 - writes `.env.local` and `openclaw-railway-handoff.local.md`
 - prints the setup URL and setup password for the current run
 
+This install path is intentionally a shell Chief of Staff install. It brings up
+OpenClaw, setup auth, public routing, and persistent state, but it does not
+install, enable, or assume any client-specific pipeline, connector, service, or
+workflow. Client tools and workflows should be attached after the shell install
+from the client's private source of truth.
+
+The template source is an upstream runtime dependency of this public control
+plane, not a client workflow repository. A Railway service connected to the
+template can be used as a proof instance for the shell setup; client-specific
+workflows or plugins should be connected separately after the baseline is
+healthy.
+
+## Template Pinning and Updates
+
+This repo pins the verifiable upstream template ref in
+`template-lock.json`. The weekly GitHub Action runs:
+
+```bash
+npm run railway-template:check
+```
+
+If the upstream ref has moved, the check fails and reports the pinned commit and
+latest upstream commit. It does not update the lock automatically. Bump the lock
+only after a Railway proof smoke confirms `/setup/healthz`, `/setup`,
+`/openclaw`, domain/port behavior, and persistent `/data` state still work.
+
+For an immutable proof instance, eject or mirror the upstream template into an
+OpenClaw-controlled GitHub repo and point Railway at an approved branch such as
+`openclaw-control-plane-approved`. Advance that branch only through a reviewed
+PR after the smoke test passes.
+
 The setup password is needed for HTTP Basic auth on `/setup` and `/openclaw`.
 Use any username.
 

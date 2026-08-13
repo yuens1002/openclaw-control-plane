@@ -1,17 +1,19 @@
 # OpenClaw Control Plane
 
-OpenClaw Control Plane is a private-first TypeScript monorepo for durable
-business workflows managed by OpenClaw through stable tools.
+OpenClaw Control Plane is a reusable TypeScript monorepo for durable business
+workflows managed by OpenClaw through stable tools.
 
-The first vertical is intentionally small: contracts, Postgres migrations, Hono
-API stubs, a vending worker skeleton, OpenClaw adapter stubs, fake fixtures, and
-tests for event validation plus idempotency.
+It is intentionally a workflow-neutral baseline. The public repo provides the
+control-plane shell, contracts, persistence primitives, adapter patterns, Railway
+installer, fake/manual examples, and tests. Client-specific workflows,
+connectors, credentials, and automations are attached after onboarding from the
+client's private source of truth.
 
 ## Status
 
-This project is in early M1 foundation work. It is structured to become public,
-but production connectors and client-specific assumptions are intentionally out
-of scope until the reusable core is stable.
+This project is in early M1 foundation work. Production connectors and
+client-specific assumptions are intentionally out of scope. The default API and
+worker runner start with no registered workflows.
 
 ## Architecture
 
@@ -22,7 +24,7 @@ OpenClaw manages the system; it does not become the system.
 - `packages/contracts`: shared schemas and TypeScript types
 - `packages/db`: migrations and typed persistence primitives
 - `packages/openclaw-adapter`: OpenClaw-facing API wrappers
-- `workers/vending`: first vertical worker
+- `workers/vending`: fake/manual example worker package
 - `deploy/openclaw-railway`: OpenClaw Railway template installer
 - `docs`: architecture, feature, and operations documentation
 
@@ -51,12 +53,23 @@ Client-grade Railway install verification uses mocked Railway CLI tests. Live
 Railway smoke tests are intentionally opt-in so normal CI does not create cloud
 resources.
 
+Workspace packages are marked `private: true` intentionally. The GitHub repo can
+be public while npm publishing remains out of scope for the M1 baseline.
+
 ## OpenClaw on Railway
 
 Use the OpenClaw-recommended Railway template flow in
 [deploy/openclaw-railway](deploy/openclaw-railway/README.md). Do not deploy the
 raw OpenClaw image directly for hosted Control UI installs; the template wrapper
 handles setup, persistent `/data` state, public routing, and `/openclaw` proxying.
+The Railway flow is a shell Chief of Staff install only: it does not install or
+enable the vending vertical, location-spec automation, or any other
+client-specific pipeline.
+
+The Railway template source, currently `vignesh07/clawdbot-railway-template`, is
+treated as an upstream runtime/template dependency. This repo can document or
+orchestrate that baseline install, but client workflows and plugins should live
+outside the public baseline and be connected afterward.
 
 The installer writes local handoff values to ignored files such as `.env.local`
 and `openclaw-railway-handoff.local.md`.
@@ -68,9 +81,9 @@ conventions.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). This repo uses a private-first workflow:
-new client-specific behavior should prove itself with fake data and no private
-assumptions before being promoted into the reusable core.
+See [CONTRIBUTING.md](CONTRIBUTING.md). New client-specific behavior should
+prove itself with fake/manual examples and no private assumptions before being
+promoted into the reusable core.
 
 ## Security
 

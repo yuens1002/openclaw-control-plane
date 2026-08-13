@@ -1,0 +1,32 @@
+name: Railway Template Update Check
+
+on:
+  schedule:
+    - cron: "17 14 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-template:
+    name: Check pinned Railway template
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check Railway template lock
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: npm run railway-template:check

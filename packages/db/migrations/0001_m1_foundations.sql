@@ -25,10 +25,6 @@ CREATE TABLE workers (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-INSERT INTO domains (id, display_name) VALUES ('vending', 'Vending');
-INSERT INTO pipelines (id, domain, display_name) VALUES ('vending', 'vending', 'Vending pipeline');
-INSERT INTO workers (id, domain, display_name, status) VALUES ('vending', 'vending', 'Vending worker', 'pending');
-
 CREATE TABLE events (
   event_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   idempotency_key text NOT NULL UNIQUE,
@@ -156,55 +152,5 @@ CREATE TABLE tool_invocations (
   input jsonb NOT NULL,
   output jsonb,
   status text NOT NULL,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE vending_opportunities (
-  id uuid PRIMARY KEY,
-  location_name text NOT NULL,
-  business_type text,
-  address text,
-  contact_name text,
-  contact_role text,
-  email text,
-  phone text,
-  current_machine_status text,
-  foot_traffic_signal text,
-  placement_fit text,
-  commission_terms text,
-  machine_requirements text,
-  decision_maker_status text,
-  stage text NOT NULL DEFAULT 'discovered',
-  risk_notes text,
-  source_refs text[] NOT NULL DEFAULT '{}',
-  last_contacted_at timestamptz,
-  next_followup_at timestamptz,
-  source text NOT NULL,
-  notes text NOT NULL DEFAULT '',
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE UNIQUE INDEX vending_opportunities_duplicate_location_idx
-  ON vending_opportunities (lower(location_name), COALESCE(address, ''));
-
-CREATE TABLE vending_call_transcripts (
-  id uuid PRIMARY KEY,
-  opportunity_id uuid REFERENCES vending_opportunities(id),
-  transcript text NOT NULL,
-  summary text,
-  captured_at timestamptz NOT NULL,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE vending_followups (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  opportunity_id uuid NOT NULL REFERENCES vending_opportunities(id),
-  call_record_id uuid REFERENCES vending_call_transcripts(id),
-  channel text NOT NULL,
-  draft_subject text NOT NULL,
-  draft_body text NOT NULL,
-  approval_request_id uuid REFERENCES approval_requests(id),
-  status text NOT NULL DEFAULT 'drafted',
   created_at timestamptz NOT NULL DEFAULT now()
 );

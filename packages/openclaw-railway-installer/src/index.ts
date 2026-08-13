@@ -155,7 +155,8 @@ This file is local-only and should not be committed.
 1. Open the setup URL.
 2. Use any username or the username above with the setup password.
 3. Complete model provider and channel configuration in the setup wizard.
-4. Store client-owned secrets in their password manager and rotate temporary handoff values after onboarding.
+4. Attach client-specific tools, connectors, and workflows only after the shell install is healthy.
+5. Store client-owned secrets in their password manager and rotate temporary handoff values after onboarding.
 `;
 }
 
