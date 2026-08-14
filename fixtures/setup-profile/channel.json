@@ -1,0 +1,12 @@
+{
+  "attachments": {
+    "modelProviders": [],
+    "channels": [
+      {
+        "id": "channel-example-telegram",
+        "type": "telegram",
+        "requiredSecretNames": ["EXAMPLE_TELEGRAM_BOT_TOKEN"]
+      }
+    ]
+  }
+}
