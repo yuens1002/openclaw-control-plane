@@ -24,7 +24,7 @@ jobs:
       RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
       RAILWAY_PROOF_URL: ${{ github.event.inputs.proof_url || vars.RAILWAY_PROOF_URL }}
       RAILWAY_PROOF_LIVE_REQUIRED: "true"
-      RAILWAY_EXPECTED_REPO: yuens1002/openclaw-control-plane
+      RAILWAY_EXPECTED_REPO: ${{ vars.RAILWAY_EXPECTED_REPO || github.repository }}
       RAILWAY_EXPECTED_BRANCH: main
 
     steps:

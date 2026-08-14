@@ -10,6 +10,7 @@ import {
   type ProofDeployment,
   type ProofDomain,
   type ProofEndpointStatuses,
+  type ProofServiceRuntimeSettings,
   type ProofServiceSource
 } from "./verify-proof.js";
 
@@ -17,7 +18,8 @@ const execFileAsync = promisify(execFile);
 
 async function main() {
   const sourceFiles = await readProofSourceFiles();
-  const publicRepo = process.env.RAILWAY_EXPECTED_REPO ?? "yuens1002/openclaw-control-plane";
+  const publicRepo =
+    process.env.RAILWAY_EXPECTED_REPO ?? process.env.GITHUB_REPOSITORY ?? "yuens1002/openclaw-control-plane";
   const branch = process.env.RAILWAY_EXPECTED_BRANCH ?? "main";
   const targetPort = Number(process.env.RAILWAY_EXPECTED_PORT ?? 8080);
 
@@ -44,6 +46,7 @@ async function main() {
       ...(liveEnabled
         ? {
             serviceSource: await serviceSource(),
+            serviceRuntime: await serviceRuntime(),
             latestDeployment: await latestDeployment(),
             domains: await domains(),
             endpoints: await endpointStatuses(process.env.RAILWAY_PROOF_URL as string)
@@ -123,6 +126,32 @@ async function serviceSource(): Promise<ProofServiceSource> {
       ? { templateThreadSlug: payload.data.service.templateThreadSlug }
       : {})
   };
+}
+
+async function serviceRuntime(): Promise<ProofServiceRuntimeSettings> {
+  const query = `query serviceRuntime($serviceId: String!, $environmentId: String!) {
+    serviceInstance(serviceId: $serviceId, environmentId: $environmentId) {
+      builder
+      dockerfilePath
+      railwayConfigFile
+      rootDirectory
+      startCommand
+      healthcheckPath
+    }
+  }`;
+
+  const payload = JSON.parse(
+    await railwayApi(query, {
+      serviceId: process.env.RAILWAY_SERVICE_ID as string,
+      environmentId: process.env.RAILWAY_ENVIRONMENT_ID as string
+    })
+  ) as {
+    data?: {
+      serviceInstance?: ProofServiceRuntimeSettings | null;
+    };
+  };
+
+  return payload.data?.serviceInstance ?? {};
 }
 
 async function railwayApi(query: string, variables: Record<string, string>): Promise<string> {

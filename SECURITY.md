@@ -10,9 +10,13 @@ formal releases begin.
 Please do not open a public issue for secrets, auth bypasses, data exposure,
 infrastructure access, or client-data handling bugs.
 
-For now, contact the repository owner directly through GitHub. Once the project
-is public and has a dedicated disclosure channel, this file should be updated
-with that address and expected response times.
+Use GitHub's private vulnerability reporting for this repository. Maintainers
+must enable private vulnerability reporting before making the repository public.
+
+If private vulnerability reporting is unavailable, open a minimal public issue
+asking for a private disclosure channel without including vulnerability details.
+Do not include tokens, proof-of-concept exploit steps, private URLs, or client
+data in that public issue.
 
 ## Secret Handling
 
