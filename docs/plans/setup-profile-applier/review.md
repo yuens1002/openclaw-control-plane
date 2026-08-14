@@ -107,21 +107,19 @@ column remains pending human review throughout.
 
 ## Residual Risk
 
-- **`authGroup`/`authChoice` enum not re-verified live.** Issue #7 flags
-  several provider slugs (moonshot, z.ai, minimax, qwen, copilot, synthetic,
-  opencode-zen) as unconfirmed. This applier passes these values through
-  opaquely from the profile without validating them against a live
-  `GET /setup/api/auth-groups` response, so an invalid value would only
-  surface as a live `/setup/api/run` failure, not a local validation error.
-- **`/setup/api/run` payload shape for multiple channels is not
-  independently confirmed live.** Issue #7's prose describes named
-  per-channel-type fields (`telegramToken`, `slackBotToken`,
-  `slackAppToken`, ...) on what may be a flat, single-provider payload; this
-  applier currently sends an array-shaped `channels` field instead, because
-  building and testing against an unconfirmed flat mapping under this
-  session's no-live-calls constraint risked encoding an equally-unverified
-  guess with false confidence. Confirm against a live instance before
-  relying on this in production.
+- **`authGroup`/`authChoice` enum not re-verified live**, and
+  **`/setup/api/run` payload shape for multiple channels not independently
+  confirmed live** (array-shaped `channels` sent; issue #7's prose describes
+  named per-channel-type fields like `telegramToken`/`slackBotToken`/
+  `slackAppToken`, which may describe a flat payload instead). Filed as
+  [issue #9](https://github.com/yuens1002/openclaw-control-plane/issues/9)
+  rather than resolved here — resolving properly means either a live,
+  read-only `GET /setup/api/auth-groups` call plus inspecting `/setup/app.js`,
+  or an actual live `/setup/api/run` mutation to observe the multi-channel
+  shape, and this plan's implementing sessions were deliberately run under a
+  no-live-calls constraint after the Session 1 exposure incident. Confirm
+  against a live instance before trusting this applier's provider/channel
+  handling against production client onboarding.
 - **Live-secret-exposure operational gap, still open outside this
   package.** Any developer running the raw `railway` CLI (`variable list`,
   or any other secret-bearing subcommand) unscoped on a machine linked to a
@@ -135,12 +133,12 @@ column remains pending human review throughout.
   intended does not reproduce the incident. Using the raw `railway` CLI by
   hand on a machine linked to a live project still can. Worth a follow-up
   issue if the user wants a broader guard (e.g. a wrapper that warns before
-  any unscoped secret-bearing command, or a machine-level policy).
-- `docs/architecture.md`'s package list did not previously include
-  `packages/openclaw-railway-installer` either (a pre-existing gap, not
-  introduced by this plan). Only `packages/openclaw-setup-applier` was
-  added per this plan's D19 scope; the installer omission was left alone to
-  avoid scope creep.
+  any unscoped secret-bearing command, or a machine-level policy). Filed as
+  [issue #10](https://github.com/yuens1002/openclaw-control-plane/issues/10);
+  not part of this plan's scope.
+- ~~`docs/architecture.md`'s package list did not previously include
+  `packages/openclaw-railway-installer`~~ **Fixed** (`0e3fbb3`) as a
+  drive-by, outside this plan's D19 scope but trivial and unrelated-risk.
 - No live smoke test exercises the mutating path end-to-end against a real
   OpenClaw instance, by design (this plan's Out of Scope) — all mutating-
   path confidence comes from stubbed tests plus code review.
