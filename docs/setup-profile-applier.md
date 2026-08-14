@@ -6,14 +6,20 @@ generated client profile, closing the gap between the shell Railway install
 [docs/plans/setup-profile-applier/plan.md](plans/setup-profile-applier/plan.md)
 for the full plan; this doc is the operator-facing reference.
 
-**Current status: dry-run only.** This package
-(`packages/openclaw-setup-applier`) currently implements the non-mutating
-path — parsing a profile, checking which required secrets already exist as
-Railway variables, and previewing the would-be `/setup/api/run` payload. It
-does not yet mint keys, write Railway variables, or call `/setup/api/run` /
-`/setup/api/reset` — that mutating path is a later addition to this same
-package, gated behind its own review because it touches live instance state
-and billable third-party APIs.
+This package (`packages/openclaw-setup-applier`) implements both a
+non-mutating dry-run path and the mutating apply path. **Start with
+dry-run.** It parses a profile, checks which required secrets already exist
+as Railway variables, and previews the would-be `/setup/api/run` payload
+with every secret field redacted, making no network mutation of any kind —
+that's the safe way for any agency to sanity-check a profile before running
+it for real.
+
+The apply path mints an OpenRouter key when a `keyProvisioning` attachment's
+secret doesn't already exist, writes it to Railway, and calls
+`POST /setup/api/run` against the live instance. It is idempotent: calling
+it against an already-configured instance is a no-op (no `run` call), and
+calling it when a secret was already minted on a prior run skips minting
+again (variable presence is the proxy for "already minted").
 
 ## Do not call the mutating `/setup` endpoints yourself
 
@@ -56,10 +62,10 @@ no real credentials).
 
 | Var | Purpose |
 | --- | --- |
-| `OPENROUTER_MANAGEMENT_KEY` | Agency-held OpenRouter management key, used only by the mutating path's key-minting step (not yet implemented) |
+| `OPENROUTER_MANAGEMENT_KEY` | Agency-held OpenRouter management key, used only by the apply path's key-minting step |
 
 A Railway API token with access to the target service is also required for
-the mutating path; it is supplied at run time, never committed.
+the apply path; it is supplied at run time, never committed.
 
 ## Dry-run usage
 
@@ -76,16 +82,52 @@ printDryRunResult(result);
 
 Dry-run makes no network mutation: it only reads Railway variables (to
 report which required secrets already exist) and prints a redacted preview
-of the payload the mutating path would eventually send. No secret value is
-ever included in the result or in what gets printed — only presence/absence
-per required secret name.
+of the payload the apply path would send. No secret value is ever included
+in the result or in what gets printed — only presence/absence per required
+secret name.
+
+## Apply usage
+
+```ts
+import { applyProfile } from "@openclaw-control-plane/openclaw-setup-applier/apply-profile";
+import { createSetupApiClient } from "@openclaw-control-plane/openclaw-setup-applier/setup-api-client";
+
+const setupApiClient = createSetupApiClient({ baseUrl: "https://your-instance.example.com" });
+const result = await applyProfile(
+  profileJson,
+  { service: "your-railway-service-name", instanceBaseUrl: "https://your-instance.example.com" },
+  { runner: yourRailwayRunner, setupApiClient, openRouterManagementKey: process.env.OPENROUTER_MANAGEMENT_KEY! }
+);
+console.log(result.outcome); // "already-configured" | "applied"
+```
+
+Or via the CLI:
+
+```bash
+node --experimental-strip-types packages/openclaw-setup-applier/src/cli.ts \
+  --profile ./profile.json --service your-railway-service-name \
+  --instance-url https://your-instance.example.com [--dry-run]
+```
 
 ## Secret-safety
 
 This package writes no local files. Its only outputs are stdout (with every
-secret-bearing field redacted) and, once the mutating path lands, the
-network calls each secret value serves. This is a deliberate departure from
+secret-bearing field redacted, in both dry-run and apply modes — the apply
+path prints only its outcome, `"already-configured"` or `"applied"`, never
+a resolved or minted value) and the network calls each secret value serves.
+This is a deliberate departure from
 `packages/openclaw-railway-installer`'s convention of printing generated
 values to stdout and writing them to `.env.local`/handoff files — the
 values this package handles are third-party provider/channel credentials,
 not values it minted for its own local use.
+
+Railway variable writes pipe the value via `--stdin`, never as an inline
+`KEY=VALUE` argument, so it never lands in shell history or a process
+listing.
+
+**Open, non-blocking caveat:** the exact `/setup/api/run` payload shape for
+multiple channel attachments (and the `authGroup`/`authChoice` enum) is not
+independently confirmed against a live instance — see
+`docs/plans/setup-profile-applier/plan.md`'s Dependencies section and
+`review.md`'s residual risk notes before relying on this against production
+traffic.

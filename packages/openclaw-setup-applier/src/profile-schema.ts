@@ -26,7 +26,12 @@ const ModelProviderNonSecretConfigSchema = z
     authGroup: z.string().min(1),
     authChoice: z.string().min(1),
     flow: z.enum(["quickstart", "advanced", "manual"]),
-    keyProvisioning: KeyProvisioningSchema.optional()
+    keyProvisioning: KeyProvisioningSchema.optional(),
+    // Advanced custom-provider path (issue #7): names an env var the
+    // *running OpenClaw process* must resolve itself, rather than a value
+    // sent directly in the /setup/api/run payload. Not exercised by either
+    // real profile validated so far — modeled from issue #7's prose only.
+    customProviderApiKeyEnv: z.string().min(1).optional()
   })
   .passthrough();
 

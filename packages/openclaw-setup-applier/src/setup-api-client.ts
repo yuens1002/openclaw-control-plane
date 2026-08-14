@@ -34,9 +34,32 @@ export function createSetupApiClient(options: SetupApiClientOptions) {
     return response.json();
   }
 
+  async function postJson(path: string, body: unknown): Promise<unknown> {
+    const response = await fetchImpl(`${baseUrl}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      // The body may contain a resolved secret value (authSecret, channel
+      // tokens) — never include it in a thrown error, and never log this
+      // call site's arguments anywhere in this module.
+      body: JSON.stringify(body)
+    });
+    if (!response.ok) {
+      throw new SetupApiError("POST", path, response.status);
+    }
+    return response.json();
+  }
+
   return {
     getStatus: (): Promise<unknown> => getJson("/setup/api/status"),
-    getAuthGroups: (): Promise<unknown> => getJson("/setup/api/auth-groups")
+    getAuthGroups: (): Promise<unknown> => getJson("/setup/api/auth-groups"),
+    // `run`'s response shape is not independently confirmed live either —
+    // same reasoning as the read calls. `run` accepts `unknown` rather than
+    // a typed payload because its exact field set (authGroup, authChoice,
+    // authSecret, flow, per-channel tokens, customProvider* fields) is
+    // assembled by apply-profile.ts from the parsed profile; this client
+    // stays a thin, unopinionated transport.
+    run: (payload: unknown): Promise<unknown> => postJson("/setup/api/run", payload),
+    reset: (): Promise<unknown> => postJson("/setup/api/reset", {})
   };
 }
 
