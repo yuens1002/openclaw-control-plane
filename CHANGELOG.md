@@ -7,6 +7,7 @@ and uses semantic versioning once releases begin.
 
 ## [Unreleased]
 
+- 2026-08-14 - fix(repo): harden public readiness checks
 - 2026-08-13 - fix(railway): make public repo govern OpenClaw runtime proof
 - 2026-08-13 - fix(api): add workflow-neutral operator login gate
 - 2026-08-13 - fix(api): serve a public root status response

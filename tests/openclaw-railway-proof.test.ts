@@ -53,6 +53,41 @@ describe("Railway OpenClaw proof verification", () => {
     expect(result.checks.find((check) => check.name === "live OpenClaw route exists")?.ok).toBe(false);
   });
 
+  it("rejects stale Railway runtime settings that still start the API workspace", async () => {
+    const snapshot = await desiredSnapshot();
+    snapshot.serviceRuntime = {
+      ...snapshot.serviceRuntime,
+      startCommand: "npm --workspace @openclaw-control-plane/api start"
+    };
+
+    const result = verifyOpenClawRailwayProof(snapshot, expectations);
+
+    expect(result.ok).toBe(false);
+    expect(
+      result.checks.find((check) => check.name === "Railway runtime start command does not override OpenClaw wrapper")
+        ?.ok
+    ).toBe(false);
+  });
+
+  it("rejects Railway runtime settings that bypass the source-owned config file", async () => {
+    const snapshot = await desiredSnapshot();
+    snapshot.serviceRuntime = {
+      ...snapshot.serviceRuntime,
+      railwayConfigFile: null,
+      healthcheckPath: "/health"
+    };
+
+    const result = verifyOpenClawRailwayProof(snapshot, expectations);
+
+    expect(result.ok).toBe(false);
+    expect(result.checks.find((check) => check.name === "Railway runtime config file is railway.toml")?.ok).toBe(
+      false
+    );
+    expect(
+      result.checks.find((check) => check.name === "Railway runtime healthcheck targets setup wrapper")?.ok
+    ).toBe(false);
+  });
+
   it("rejects a proof service with an active upstream template source", async () => {
     const snapshot = await desiredSnapshot();
     snapshot.serviceSource = {
@@ -121,6 +156,14 @@ async function desiredSnapshot(): Promise<ProofSnapshot> {
       repo: "yuens1002/openclaw-control-plane",
       branch: "main",
       commitHash: "main-commit"
+    },
+    serviceRuntime: {
+      builder: "DOCKERFILE",
+      dockerfilePath: "Dockerfile",
+      railwayConfigFile: "railway.toml",
+      rootDirectory: null,
+      startCommand: "node src/server.js",
+      healthcheckPath: "/setup/healthz"
     },
     domains: [
       {
