@@ -50,12 +50,13 @@ The live proof should not be a deployment of the TypeScript API shell alone, and
 it should not source `vignesh07/clawdbot-railway-template` directly except as the
 pinned dependency declared in `template-lock.json`.
 
-If the Railway dashboard still shows `vignesh07/clawdbot-railway-template` as a
-service upstream after reconnecting source, treat that as template-derived
-service metadata rather than the desired clean end state. The clean proof setup
-is a Railway service created from, or reconnected directly to,
-`yuens1002/openclaw-control-plane@main`; the `vignesh07` repo should appear only
-as the pinned wrapper dependency in this repo's Dockerfile and lock file.
+If Railway retains historical template metadata on a service that was originally
+created from `vignesh07/clawdbot-railway-template`, treat that as provenance,
+not active source ownership. The clean proof setup is a Railway service created
+from, or reconnected directly to, `yuens1002/openclaw-control-plane@main`, with
+no active upstream URL pointing at `vignesh07`. The `vignesh07` repo should
+appear only as the pinned wrapper dependency in this repo's Dockerfile and lock
+file.
 
 ## Template Pinning and Updates
 

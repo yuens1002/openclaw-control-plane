@@ -53,7 +53,7 @@ describe("Railway OpenClaw proof verification", () => {
     expect(result.checks.find((check) => check.name === "live OpenClaw route exists")?.ok).toBe(false);
   });
 
-  it("rejects a proof service with stale template-derived source metadata", async () => {
+  it("rejects a proof service with an active upstream template source", async () => {
     const snapshot = await desiredSnapshot();
     snapshot.serviceSource = {
       repo: "yuens1002/openclaw-control-plane",
@@ -71,8 +71,27 @@ describe("Railway OpenClaw proof verification", () => {
       false
     );
     expect(
-      result.checks.find((check) => check.name === "Railway service has no template-derived source metadata")?.ok
-    ).toBe(false);
+      result.checks.find((check) => check.name === "Railway service template metadata is historical only")?.ok
+    ).toBe(true);
+  });
+
+  it("accepts historical template metadata when the active source is clean", async () => {
+    const snapshot = await desiredSnapshot();
+    snapshot.serviceSource = {
+      repo: "yuens1002/openclaw-control-plane",
+      image: null,
+      upstreamUrl: null,
+      templateId: "template",
+      templateServiceId: "template-service",
+      templateThreadSlug: "clawdbot-railway-template"
+    };
+
+    const result = verifyOpenClawRailwayProof(snapshot, expectations);
+
+    expect(result.ok).toBe(true);
+    expect(
+      result.checks.find((check) => check.name === "Railway service template metadata is historical only")?.detail
+    ).toContain("historical templateId");
   });
 
   it("keeps the source-owned Railway runtime contract pinned to the template lock", async () => {
