@@ -118,8 +118,13 @@ orchestrator and CLI.
   `railway variable --help` (Railway CLI 5.40.0): read via
   `railway variable list --service <service> --json` (raw values included in
   JSON — never printed); write via
-  `railway variable set KEY=VALUE --service <service> --skip-deploys --json`.
-  `--skip-deploys` is the default for D12's writes.
+  `railway variable set KEY --service <service> --skip-deploys --stdin --json`
+  with the value piped on stdin (`echo -n "$VALUE" | railway variable set
+  KEY ... --stdin`), never as an inline `KEY=VALUE` argument — the CLI's own
+  `--help` documents `--stdin` for exactly this reason: an inline value is
+  argv, which lands in shell history and process listings, both of which
+  this plan's secret-safety design explicitly rules out. `--skip-deploys` is
+  the default for D12's writes.
 - **Ordering** (D14): `--skip-deploys` means most writes (the values that go
   directly into the `POST /setup/api/run` payload — `authSecret`, channel
   tokens) never need a restart, because the applier passes the value it just
