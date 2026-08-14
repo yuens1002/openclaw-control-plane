@@ -30,10 +30,13 @@ RUN apt-get update \
     python3 \
     make \
     g++ \
+    unzip \
   && rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL https://bun.sh/install | bash
+ARG BUN_VERSION=1.3.3
+RUN curl -fsSL https://bun.com/install | bash -s "bun-v${BUN_VERSION}"
 ENV PATH="/root/.bun/bin:${PATH}"
+RUN test "$(bun --version)" = "${BUN_VERSION}" && bun --revision
 
 RUN corepack enable
 

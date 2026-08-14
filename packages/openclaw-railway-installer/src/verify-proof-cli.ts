@@ -17,7 +17,6 @@ const execFileAsync = promisify(execFile);
 
 async function main() {
   const sourceFiles = await readProofSourceFiles();
-  const expectedCommit = process.env.RAILWAY_EXPECTED_COMMIT || (await gitHead()).trim();
   const publicRepo = process.env.RAILWAY_EXPECTED_REPO ?? "yuens1002/openclaw-control-plane";
   const branch = process.env.RAILWAY_EXPECTED_BRANCH ?? "main";
   const targetPort = Number(process.env.RAILWAY_EXPECTED_PORT ?? 8080);
@@ -29,6 +28,9 @@ async function main() {
       process.env.RAILWAY_PROOF_URL
   );
   const liveRequired = process.env.RAILWAY_PROOF_LIVE_REQUIRED === "true";
+  const expectedCommit = liveEnabled
+    ? process.env.RAILWAY_EXPECTED_COMMIT || (await gitHead()).trim()
+    : undefined;
 
   if (liveRequired && !liveEnabled) {
     throw new Error(
@@ -52,7 +54,7 @@ async function main() {
       publicRepo,
       branch,
       targetPort,
-      ...(liveEnabled ? { expectedCommit } : {})
+      ...(expectedCommit ? { expectedCommit } : {})
     }
   );
 

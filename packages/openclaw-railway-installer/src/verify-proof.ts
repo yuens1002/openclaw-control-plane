@@ -145,7 +145,7 @@ export function verifyOpenClawRailwayProof(
         "Railway source should be the public control-plane repo; upstream remains a pinned dependency."
       ),
       check(
-        "latest deployment branch is main",
+        "latest deployment branch matches expected branch",
         snapshot.latestDeployment.branch === expectations.branch,
         `Latest Railway deployment branch is ${snapshot.latestDeployment.branch ?? "unknown"}.`
       )
@@ -154,7 +154,7 @@ export function verifyOpenClawRailwayProof(
     if (expectations.expectedCommit) {
       checks.push(
         check(
-          "latest deployment matches expected main commit",
+          "latest deployment matches expected commit",
           snapshot.latestDeployment.commitHash === expectations.expectedCommit,
           `Latest Railway deployment commit is ${snapshot.latestDeployment.commitHash ?? "unknown"}.`
         )
