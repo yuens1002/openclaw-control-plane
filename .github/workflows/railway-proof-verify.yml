@@ -1,0 +1,47 @@
+name: Railway Proof Verify
+
+on:
+  schedule:
+    - cron: "41 15 * * 1"
+  workflow_dispatch:
+    inputs:
+      proof_url:
+        description: "Public Railway proof URL, for example https://example.up.railway.app"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify OpenClaw proof end state
+    runs-on: ubuntu-latest
+    env:
+      RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+      RAILWAY_ENVIRONMENT_ID: ${{ secrets.RAILWAY_ENVIRONMENT_ID }}
+      RAILWAY_SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_PROOF_URL: ${{ github.event.inputs.proof_url || vars.RAILWAY_PROOF_URL }}
+      RAILWAY_PROOF_LIVE_REQUIRED: "true"
+      RAILWAY_EXPECTED_REPO: yuens1002/openclaw-control-plane
+      RAILWAY_EXPECTED_BRANCH: main
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Verify Railway proof
+        run: npm run railway-proof:verify

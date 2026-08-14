@@ -77,6 +77,24 @@ outside the public baseline and be connected afterward.
 The installer writes local handoff values to ignored files such as `.env.local`
 and `openclaw-railway-handoff.local.md`.
 
+For the public proof instance, the Railway service source should point at this
+repo's `main` branch. The root `railway.toml` and `Dockerfile` then govern the
+runtime by pulling the pinned OpenClaw Railway wrapper from
+`deploy/openclaw-railway/template-lock.json`. In other words, the Railway
+dashboard can show this public repo as the source while `/setup` and `/openclaw`
+still come from OpenClaw.
+
+Run the source/static proof check locally with:
+
+```bash
+npm run railway-proof:verify
+```
+
+When Railway project/service/domain environment variables are present, the same
+command also checks that the live proof deployment is sourced from
+`yuens1002/openclaw-control-plane@main`, is not sourced directly from the
+upstream template repo, and serves `/setup/healthz`, `/setup`, and `/openclaw`.
+
 ## Documentation
 
 See [docs/README.md](docs/README.md) for the documentation layout and naming

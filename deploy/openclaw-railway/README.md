@@ -36,6 +36,27 @@ template can be used as a proof instance for the shell setup; client-specific
 workflows or plugins should be connected separately after the baseline is
 healthy.
 
+For the public proof instance, prefer connecting Railway to
+`yuens1002/openclaw-control-plane@main` and letting this repo's root
+`railway.toml`/`Dockerfile` pull the pinned wrapper commit. That keeps the
+public repo as the auditable Railway source while preserving the OpenClaw
+runtime routes supplied by the wrapper:
+
+- `/setup/healthz`
+- `/setup`
+- `/openclaw`
+
+The live proof should not be a deployment of the TypeScript API shell alone, and
+it should not source `vignesh07/clawdbot-railway-template` directly except as the
+pinned dependency declared in `template-lock.json`.
+
+If the Railway dashboard still shows `vignesh07/clawdbot-railway-template` as a
+service upstream after reconnecting source, treat that as template-derived
+service metadata rather than the desired clean end state. The clean proof setup
+is a Railway service created from, or reconnected directly to,
+`yuens1002/openclaw-control-plane@main`; the `vignesh07` repo should appear only
+as the pinned wrapper dependency in this repo's Dockerfile and lock file.
+
 ## Template Pinning and Updates
 
 This repo pins the verifiable upstream template ref in
@@ -44,6 +65,22 @@ This repo pins the verifiable upstream template ref in
 ```bash
 npm run railway-template:check
 ```
+
+The end-state proof verifier runs:
+
+```bash
+npm run railway-proof:verify
+```
+
+Without Railway environment variables it checks the source-owned runtime
+contract. With `RAILWAY_PROJECT_ID`, `RAILWAY_ENVIRONMENT_ID`,
+`RAILWAY_SERVICE_ID`, and `RAILWAY_PROOF_URL`, it also checks the live Railway
+deployment source, active domain, and OpenClaw wrapper endpoints.
+
+The scheduled GitHub proof workflow sets `RAILWAY_PROOF_LIVE_REQUIRED=true`, so
+missing Railway secrets/vars fail the workflow instead of silently falling back
+to source-only checks. Configure repository secrets for the Railway IDs/token
+and repository variable `RAILWAY_PROOF_URL` for autonomous weekly verification.
 
 If the upstream ref has moved, the check fails and reports the pinned commit and
 latest upstream commit. It does not update the lock automatically. Bump the lock
