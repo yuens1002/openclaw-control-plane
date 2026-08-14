@@ -69,6 +69,19 @@ describe("Railway OpenClaw proof verification", () => {
     ).toBe(false);
   });
 
+  it("accepts equivalent Railway root and Dockerfile path spellings", async () => {
+    const snapshot = await desiredSnapshot();
+    snapshot.serviceRuntime = {
+      ...snapshot.serviceRuntime,
+      rootDirectory: "./",
+      dockerfilePath: "./Dockerfile"
+    };
+
+    const result = verifyOpenClawRailwayProof(snapshot, expectations);
+
+    expect(result.ok).toBe(true);
+  });
+
   it("rejects Railway runtime settings that bypass the source-owned config file", async () => {
     const snapshot = await desiredSnapshot();
     snapshot.serviceRuntime = {

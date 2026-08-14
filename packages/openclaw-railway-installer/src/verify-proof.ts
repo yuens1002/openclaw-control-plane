@@ -293,7 +293,12 @@ function normalize(value: string | null | undefined): string {
 }
 
 function normalizePath(value: string | null | undefined): string {
-  return normalize(value).replace(/^\/+/, "").replace(/\\/g, "/");
+  let normalized = normalize(value).replace(/\\/g, "/").replace(/^\/+/, "");
+  while (normalized.startsWith("./")) {
+    normalized = normalized.slice(2);
+  }
+  normalized = normalized.replace(/\/+$/, "");
+  return normalized === "." ? "" : normalized;
 }
 
 function isAllowedStartCommand(value: string | null | undefined): boolean {
