@@ -13,6 +13,9 @@ business-specific automations from private client repos or plugin packages.
 - `packages/contracts`: Zod schemas and TypeScript types for generic events, work items, worker runs, approvals, artifacts, and audit events.
 - `packages/db`: Postgres migrations, Drizzle schema, and persistence primitives.
 - `packages/openclaw-adapter`: OpenClaw-facing wrappers around the HTTP API.
+- `packages/openclaw-railway-installer`: shell-installs the OpenClaw Railway
+  template and verifies the resulting proof instance — see
+  [deploy/openclaw-railway](../deploy/openclaw-railway/README.md).
 - `packages/openclaw-setup-applier`: reads a generated client profile and
   drives a live OpenClaw instance's `/setup` API idempotently — see
   [docs/setup-profile-applier.md](setup-profile-applier.md).
