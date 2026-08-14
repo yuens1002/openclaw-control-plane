@@ -21,6 +21,7 @@
       "@openclaw-control-plane/openclaw-railway-installer": ["packages/openclaw-railway-installer/src/index.ts"],
       "@openclaw-control-plane/openclaw-railway-installer/cli": ["packages/openclaw-railway-installer/src/cli.ts"],
       "@openclaw-control-plane/openclaw-railway-installer/template-lock": ["packages/openclaw-railway-installer/src/template-lock.ts"],
+      "@openclaw-control-plane/openclaw-railway-installer/verify-proof": ["packages/openclaw-railway-installer/src/verify-proof.ts"],
       "@openclaw-control-plane/openclaw-adapter": ["packages/openclaw-adapter/src/index.ts"],
       "@openclaw-control-plane/api": ["apps/api/src/index.ts"],
       "@openclaw-control-plane/vending-worker": ["workers/vending/src/index.ts"]

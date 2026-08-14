@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./cli": "./src/cli.ts",
-    "./template-lock": "./src/template-lock.ts"
+    "./template-lock": "./src/template-lock.ts",
+    "./verify-proof": "./src/verify-proof.ts"
   }
 }
