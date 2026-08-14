@@ -26,6 +26,15 @@ export interface ProofServiceSource {
   templateThreadSlug?: string | null;
 }
 
+export interface ProofServiceRuntimeSettings {
+  builder?: string | null;
+  dockerfilePath?: string | null;
+  railwayConfigFile?: string | null;
+  rootDirectory?: string | null;
+  startCommand?: string | null;
+  healthcheckPath?: string | null;
+}
+
 export interface ProofDomain {
   domain: string;
   type: string;
@@ -42,6 +51,7 @@ export interface ProofEndpointStatuses {
 export interface ProofSnapshot {
   sourceFiles: ProofSourceFiles;
   serviceSource?: ProofServiceSource;
+  serviceRuntime?: ProofServiceRuntimeSettings;
   latestDeployment?: ProofDeployment;
   domains?: ProofDomain[];
   endpoints?: ProofEndpointStatuses;
@@ -129,6 +139,41 @@ export function verifyOpenClawRailwayProof(
         historicalTemplateMetadata.length > 0
           ? `Railway retains historical ${historicalTemplateMetadata.join(", ")}; active source and upstream checks determine ownership.`
           : "No historical template metadata found."
+      )
+    );
+  }
+
+  if (snapshot.serviceRuntime) {
+    checks.push(
+      check(
+        "Railway runtime builder uses Dockerfile",
+        normalize(snapshot.serviceRuntime.builder) === "dockerfile",
+        `Railway runtime builder is ${snapshot.serviceRuntime.builder ?? "unknown"}.`
+      ),
+      check(
+        "Railway runtime uses repo root",
+        ["", "."].includes(normalizePath(snapshot.serviceRuntime.rootDirectory)),
+        `Railway runtime root directory is ${snapshot.serviceRuntime.rootDirectory ?? "repo root"}.`
+      ),
+      check(
+        "Railway runtime config file is railway.toml",
+        normalizePath(snapshot.serviceRuntime.railwayConfigFile) === "railway.toml",
+        `Railway runtime config file is ${snapshot.serviceRuntime.railwayConfigFile ?? "not set"}.`
+      ),
+      check(
+        "Railway runtime Dockerfile path is repo Dockerfile",
+        ["", "dockerfile"].includes(normalizePath(snapshot.serviceRuntime.dockerfilePath)),
+        `Railway runtime Dockerfile path is ${snapshot.serviceRuntime.dockerfilePath ?? "inherited from railway.toml"}.`
+      ),
+      check(
+        "Railway runtime healthcheck targets setup wrapper",
+        snapshot.serviceRuntime.healthcheckPath === "/setup/healthz",
+        `Railway runtime healthcheck path is ${snapshot.serviceRuntime.healthcheckPath ?? "unknown"}.`
+      ),
+      check(
+        "Railway runtime start command does not override OpenClaw wrapper",
+        isAllowedStartCommand(snapshot.serviceRuntime.startCommand),
+        `Railway runtime start command is ${snapshot.serviceRuntime.startCommand ?? "Dockerfile CMD"}.`
       )
     );
   }
@@ -241,4 +286,22 @@ export function formatProofVerification(result: ProofVerificationResult): string
 
 function check(name: string, ok: boolean, detail: string): ProofCheck {
   return { name, ok, detail };
+}
+
+function normalize(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function normalizePath(value: string | null | undefined): string {
+  let normalized = normalize(value).replace(/\\/g, "/").replace(/^\/+/, "");
+  while (normalized.startsWith("./")) {
+    normalized = normalized.slice(2);
+  }
+  normalized = normalized.replace(/\/+$/, "");
+  return normalized === "." ? "" : normalized;
+}
+
+function isAllowedStartCommand(value: string | null | undefined): boolean {
+  const normalized = normalize(value);
+  return normalized === "" || normalized === "node src/server.js";
 }

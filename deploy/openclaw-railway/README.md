@@ -76,7 +76,8 @@ npm run railway-proof:verify
 Without Railway environment variables it checks the source-owned runtime
 contract. With `RAILWAY_PROJECT_ID`, `RAILWAY_ENVIRONMENT_ID`,
 `RAILWAY_SERVICE_ID`, and `RAILWAY_PROOF_URL`, it also checks the live Railway
-deployment source, active domain, and OpenClaw wrapper endpoints.
+deployment source, active runtime settings, active domain, and OpenClaw wrapper
+endpoints.
 
 The scheduled GitHub proof workflow sets `RAILWAY_PROOF_LIVE_REQUIRED=true`, so
 missing Railway secrets/vars fail the workflow instead of silently falling back

@@ -9,6 +9,29 @@ installer, fake/manual examples, and tests. Client-specific workflows,
 connectors, credentials, and automations are attached after onboarding from the
 client's private source of truth.
 
+## Why This Template
+
+If you only want the fastest generic OpenClaw instance, use the recommended
+OpenClaw Railway template directly. This repo is for teams that want OpenClaw on
+Railway with source-controlled operating discipline around it.
+
+The value here is not a replacement dashboard or a prebuilt client workflow.
+OpenClaw still supplies `/setup`, login, and the `/openclaw` Control UI. This
+repo supplies the governed install path around that runtime:
+
+- pinned, auditable upstream OpenClaw Railway wrapper dependency
+- weekly update detection without automatic production upgrades
+- live Railway proof checks for source repo, runtime settings, domain port,
+  deployment source, `/setup`, `/setup/healthz`, and `/openclaw`
+- workflow-neutral starter-kit boundary with no baked-in client pipeline,
+  connector, database, or secret assumptions
+- a clean place to define setup-profile conventions that private agency/client
+  repos can use to automate provider, channel, plugin, and workflow attachment
+- handoff and verification discipline for repeatable client onboarding
+
+Install the recommended template for speed. Install this template when you want
+a reproducible, verifiable, agency-ready OpenClaw control-plane baseline.
+
 ## Status
 
 This project is in early M1 foundation work. Production connectors and
@@ -93,7 +116,8 @@ npm run railway-proof:verify
 When Railway project/service/domain environment variables are present, the same
 command also checks that the live proof deployment is sourced from
 `yuens1002/openclaw-control-plane@main`, is not sourced directly from the
-upstream template repo, and serves `/setup/healthz`, `/setup`, and `/openclaw`.
+upstream template repo, uses the expected Railway Dockerfile/runtime settings,
+and serves `/setup/healthz`, `/setup`, and `/openclaw`.
 
 ## Documentation
 
