@@ -7,6 +7,7 @@ and uses semantic versioning once releases begin.
 
 ## [Unreleased]
 
+- 2026-08-15 - fix(setup-applier): send the real flat /setup/api/run payload shape
 - 2026-08-15 - fix(setup-applier): add basic auth to setup api client
 - 2026-08-15 - fix(railway): guard unscoped variable list/set from leaking secrets
 - 2026-08-15 - feat(setup-applier): automate /setup configuration from a client profile
