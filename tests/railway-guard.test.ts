@@ -17,6 +17,13 @@ describe("railway variable guard", () => {
     expect(checkGuard(["variable", "set", "KEY=value", "-s", "api"])).toMatchObject({ ok: true });
   });
 
+  it("rejects --service/-s when the following token is itself a flag, not a value", () => {
+    expect(checkGuard(["variable", "list", "--service", "--json", "--i-know-this-prints-secrets"])).toMatchObject({
+      ok: false
+    });
+    expect(checkGuard(["variable", "set", "KEY=value", "-s", "-k"])).toMatchObject({ ok: false });
+  });
+
   it("rejects scoped variable list --json/--kv without the confirmation flag", () => {
     expect(checkGuard(["variable", "list", "--service", "api", "--json"])).toMatchObject({ ok: false });
     expect(checkGuard(["variable", "list", "--service", "api", "--kv"])).toMatchObject({ ok: false });

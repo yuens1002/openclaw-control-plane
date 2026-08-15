@@ -52,7 +52,16 @@ export function checkGuard(args: string[]): GuardResult {
 }
 
 function hasServiceFlag(args: string[]): boolean {
-  return args.some((arg, index) => (arg === "-s" || arg === "--service") && args[index + 1] !== undefined);
+  return args.some((arg, index) => {
+    if (arg !== "-s" && arg !== "--service") {
+      return false;
+    }
+    const value = args[index + 1];
+    // A following token that itself looks like a flag (e.g. `--service
+    // --json`) is not a service name -- reject it as unscoped rather than
+    // treating any non-undefined next token as a valid value.
+    return value !== undefined && !value.startsWith("-");
+  });
 }
 
 export function stripGuardFlag(args: string[]): string[] {
