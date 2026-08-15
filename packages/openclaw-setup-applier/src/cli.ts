@@ -39,12 +39,21 @@ async function main(): Promise<void> {
     return;
   }
 
-  const openRouterManagementKey = process.env.OPENROUTER_MANAGEMENT_KEY;
-  if (openRouterManagementKey === undefined) {
-    throw new Error("Missing required env var: OPENROUTER_MANAGEMENT_KEY");
-  }
+  const openRouterManagementKey = requireEnv("OPENROUTER_MANAGEMENT_KEY");
+  // OPENCLAW_INSTANCE_SETUP_PASSWORD/USERNAME are the *target OpenClaw
+  // instance's* setup credentials, deliberately not named SETUP_PASSWORD/
+  // OPENCLAW_SETUP_USERNAME -- this repo's own apps/api reads those exact
+  // names for a completely different server's auth gate (apps/api/src/
+  // index.ts), and this CLI can run in the same environment as that server
+  // when bootstrapping this repo's own agency instance from a profile of
+  // itself. See docs/plans/setup-api-basic-auth/plan.md.
+  const setupPassword = requireEnv("OPENCLAW_INSTANCE_SETUP_PASSWORD");
+  const setupUsername = process.env.OPENCLAW_INSTANCE_SETUP_USERNAME ?? "openclaw";
 
-  const setupApiClient = createSetupApiClient({ baseUrl: options.instanceUrl });
+  const setupApiClient = createSetupApiClient({
+    baseUrl: options.instanceUrl,
+    auth: { username: setupUsername, password: setupPassword }
+  });
   const result = await applyProfile(
     candidateProfile,
     { service: options.service, instanceBaseUrl: options.instanceUrl },
@@ -84,6 +93,14 @@ export function parseArgs(args: string[]): CliOptions {
 function requireValue(flag: string, value: string | undefined): string {
   if (!value || value.startsWith("--")) {
     throw new Error(`Missing value for ${flag}`);
+  }
+  return value;
+}
+
+export function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (value === undefined) {
+    throw new Error(`Missing required env var: ${name}`);
   }
   return value;
 }
