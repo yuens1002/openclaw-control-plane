@@ -109,6 +109,30 @@ Useful options:
 .\deploy\openclaw-railway\install-template.ps1 -HandoffPath "client-handoff.local.md"
 ```
 
+## Secret-Bearing CLI Commands
+
+`railway variable list --json`/`--kv` print raw secret values to stdout, with
+no `--service` requirement and no confirmation prompt -- an unscoped run on a
+machine whose Railway CLI is linked to a live project dumps that project's
+real secrets to whatever is capturing the terminal (shell history, a log
+file, a screen share). This has already caused a real secret-exposure
+incident in this repo's history.
+
+Never run `railway variable list`/`set` directly by hand. Use the guard
+wrapper instead:
+
+```bash
+npm run railway-vars:guard -- variable list --service <name> --json --i-know-this-prints-secrets
+```
+
+The guard refuses to run without an explicit `--service`, and refuses to run
+any `variable list` (in any output format, including the plain table --
+Railway's docs confirm `--json`/`--kv` print raw values but say nothing about
+whether the plain form masks them either) without
+`--i-know-this-prints-secrets`. It never spawns the real `railway` CLI when
+either check fails, so a rejected command never has a chance to print
+anything.
+
 ## Manual Install
 
 ```powershell

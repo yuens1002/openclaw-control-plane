@@ -46,3 +46,9 @@ knowledge belongs in `docs/`, not only in chat history.
 ## Security
 
 Report security issues privately. See [SECURITY.md](SECURITY.md).
+
+Never run `railway variable list`/`set` directly by hand -- on a machine
+linked to a live project, `--json`/`--kv` output prints raw secret values
+with no scoping requirement or confirmation prompt. Use
+`npm run railway-vars:guard -- variable list --service <name> ...` instead;
+see [deploy/openclaw-railway/README.md](deploy/openclaw-railway/README.md#secret-bearing-cli-commands).

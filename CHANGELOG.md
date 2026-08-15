@@ -7,6 +7,7 @@ and uses semantic versioning once releases begin.
 
 ## [Unreleased]
 
+- 2026-08-15 - fix(railway): guard unscoped variable list/set from leaking secrets
 - 2026-08-15 - feat(setup-applier): automate /setup configuration from a client profile
 - 2026-08-14 - fix(repo): harden public readiness checks
 - 2026-08-13 - fix(railway): make public repo govern OpenClaw runtime proof
