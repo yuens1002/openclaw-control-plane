@@ -8,6 +8,14 @@
 export interface SetupApiClientOptions {
   baseUrl: string;
   fetchImpl?: typeof fetch;
+  // A SETUP_PASSWORD-protected instance requires HTTP Basic auth on every
+  // /setup/api/* route (confirmed live: an unauthenticated GET returns
+  // 401). Omit when the target instance isn't password-protected -- no
+  // Authorization header is sent, matching prior behavior exactly.
+  auth?: {
+    username: string;
+    password: string;
+  };
 }
 
 export class SetupApiError extends Error {
@@ -23,9 +31,14 @@ export class SetupApiError extends Error {
 export function createSetupApiClient(options: SetupApiClientOptions) {
   const fetchImpl = options.fetchImpl ?? fetch;
   const baseUrl = options.baseUrl.replace(/\/$/, "");
+  // Never included in a thrown error or logged anywhere in this module —
+  // same discipline as the request bodies below.
+  const authHeaders: Record<string, string> = options.auth
+    ? { authorization: `Basic ${Buffer.from(`${options.auth.username}:${options.auth.password}`).toString("base64")}` }
+    : {};
 
   async function getJson(path: string): Promise<unknown> {
-    const response = await fetchImpl(`${baseUrl}${path}`);
+    const response = await fetchImpl(`${baseUrl}${path}`, { headers: authHeaders });
     if (!response.ok) {
       // Never include the response body in the thrown error — it may
       // contain instance-specific detail this applier must not log.
@@ -37,7 +50,7 @@ export function createSetupApiClient(options: SetupApiClientOptions) {
   async function postJson(path: string, body: unknown): Promise<unknown> {
     const response = await fetchImpl(`${baseUrl}${path}`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...authHeaders },
       // The body may contain a resolved secret value (authSecret, channel
       // tokens) — never include it in a thrown error, and never log this
       // call site's arguments anywhere in this module.
