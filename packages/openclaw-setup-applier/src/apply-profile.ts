@@ -103,11 +103,16 @@ function buildRedactedPayloadPreview(profile: ClientProfile): DryRunPayloadPrevi
   };
 }
 
-const CHANNEL_SECRET_COUNTS: Record<string, number> = {
-  telegram: 1,
-  discord: 1,
-  slack: 2
-};
+// A Map, not a plain object: channel.type is an untrusted string from the
+// parsed profile, and a plain-object lookup (CHANNEL_SECRET_COUNTS[type])
+// would return an inherited Object.prototype method (e.g. `type ===
+// "toString"`) instead of undefined for an unsupported type, silently
+// bypassing the check below. Map.get() has no prototype to collide with.
+const CHANNEL_SECRET_COUNTS = new Map<string, number>([
+  ["telegram", 1],
+  ["discord", 1],
+  ["slack", 2]
+]);
 
 interface ChannelFieldMapping {
   field: ChannelPayloadField;
@@ -129,7 +134,7 @@ function mapChannelsToPayloadFields(channels: ClientProfile["attachments"]["chan
   const mappings: ChannelFieldMapping[] = [];
 
   for (const channel of channels) {
-    const expectedCount = CHANNEL_SECRET_COUNTS[channel.type];
+    const expectedCount = CHANNEL_SECRET_COUNTS.get(channel.type);
     if (expectedCount === undefined) {
       throw new Error(
         `Unsupported channel type '${channel.type}'; /setup/api/run only accepts telegram, discord, and slack.`

@@ -449,6 +449,32 @@ describe("apply-profile apply mode", () => {
     expect(callOrder).not.toContain("run");
   });
 
+  it("treats an Object.prototype-named channel type as unsupported, not as a bypass", async () => {
+    // channel.type is an untrusted string from the parsed profile; a plain
+    // object lookup would return an inherited method (e.g. `toString`)
+    // instead of undefined for this "type", silently skipping the
+    // unsupported-type check. Regression for that specific bypass class.
+    const callOrder: string[] = [];
+    const runner = new FakeRailwayRunner({});
+    const fetchImpl = buildFetchStub({ instanceUrl, configured: false, callOrder });
+    const setupApiClient = createSetupApiClient({ baseUrl: instanceUrl, fetchImpl });
+    const profile = {
+      attachments: {
+        modelProviders: [],
+        channels: [{ id: "channel-example-prototype", type: "toString", requiredSecretNames: ["EXAMPLE_TOKEN"] }]
+      }
+    };
+
+    await expect(
+      applyProfile(
+        profile,
+        { service: "svc", instanceBaseUrl: instanceUrl },
+        { runner, setupApiClient, openRouterManagementKey: "sk-test-DO-NOT-LOG-mgmt", fetchImpl }
+      )
+    ).rejects.toThrow("Unsupported channel type 'toString'");
+    expect(callOrder).not.toContain("run");
+  });
+
   it("throws on a duplicate channel type before any network call", async () => {
     const callOrder: string[] = [];
     const runner = new FakeRailwayRunner({
