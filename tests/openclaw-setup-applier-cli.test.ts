@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseArgs } from "@openclaw-control-plane/openclaw-setup-applier/cli";
+import { parseArgs, requireEnv } from "@openclaw-control-plane/openclaw-setup-applier/cli";
 
 describe("setup-profile-applier CLI argument parsing", () => {
   it("parses required flags", () => {
@@ -43,3 +43,38 @@ describe("setup-profile-applier CLI argument parsing", () => {
     expect(() => parseArgs(["--profile"])).toThrow("Missing value for --profile");
   });
 });
+
+describe("requireEnv", () => {
+  const testVar = "OPENCLAW_SETUP_APPLIER_TEST_VAR_DOES_NOT_EXIST_ELSEWHERE";
+
+  it("returns the value when the env var is set", () => {
+    const previous = process.env[testVar];
+    process.env[testVar] = "example-value";
+
+    try {
+      expect(requireEnv(testVar)).toBe("example-value");
+    } finally {
+      restoreEnv(testVar, previous);
+    }
+  });
+
+  it("throws Missing required env var: <name> when unset", () => {
+    const previous = process.env[testVar];
+    delete process.env[testVar];
+
+    try {
+      expect(() => requireEnv(testVar)).toThrow(`Missing required env var: ${testVar}`);
+    } finally {
+      restoreEnv(testVar, previous);
+    }
+  });
+});
+
+function restoreEnv(key: string, value: string | undefined) {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+
+  process.env[key] = value;
+}

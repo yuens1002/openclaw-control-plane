@@ -57,9 +57,16 @@ every client onboarding will later follow).
   on an operational convention to keep the two environments apart.
 - Confirmed live (per issue #12): an unauthenticated `GET /setup/api/status`
   against a real `SETUP_PASSWORD`-protected instance returns `401`.
-- `apply-profile.ts` never constructs its own HTTP requests — every call
-  goes through the injected `setupApiClient` (`apply-profile.ts:146,227,229`).
-  So D1 + D2 below are sufficient; `apply-profile.ts` needs no change,
+- `apply-profile.ts`'s three `/setup/api/*` calls all go through the
+  injected `setupApiClient` (`apply-profile.ts:146,227,229`) — those are
+  covered by D1+D2. It has one *other* direct HTTP call, `waitForHealthy`
+  polling `/setup/healthz` via its own injected `fetchImpl`
+  (`apply-profile.ts:308-321`), which stays unauthenticated by design, not
+  by oversight: `verify-proof.ts` already encodes the same distinction,
+  requiring `setupHealth` to be strictly `200` while `/setup`/`/openclaw`
+  tolerate `[200, 301, 302, 401]` — Railway's own `healthcheckPath`
+  (`railway.toml`) couldn't function if that route required Basic auth.
+  So D1 + D2 are still sufficient; `apply-profile.ts` needs no change,
   matching issue #12's stated out-of-scope.
 
 ## Approach
@@ -102,7 +109,7 @@ has no test double) and it removes the now-duplicated inline pattern.
 - **Header construction** (D1): `Buffer.from(\`${username}:${password}\`).toString("base64")` — Node's standard primitive, no new dependency. No existing client-side Basic-auth-header code exists in this repo to reuse (the only precedent, `apps/api`'s `basicAuth` middleware, is server-side/receiving, not client-side/sending).
 - **`requireEnv` scope** (D2): only replaces the two call sites that already exist or are being added in `cli.ts`'s `main()` (`OPENROUTER_MANAGEMENT_KEY`, `OPENCLAW_INSTANCE_SETUP_PASSWORD`) — not a generic env-loading framework.
 - **Dry-run stays untouched** (D2): the `OPENCLAW_INSTANCE_SETUP_PASSWORD` check goes in the same place as the existing `OPENROUTER_MANAGEMENT_KEY` check, strictly after the `if (options.dryRun) { ...; return; }` branch.
-- **No `apply-profile.ts` change**: confirmed by reading its only three `setupApiClient.*` call sites (`apply-profile.ts:146,227,229`) — all go through the injected client, so auth is fully encapsulated by D1+D2.
+- **No `apply-profile.ts` change**: confirmed by reading its only three `setupApiClient.*` call sites (`apply-profile.ts:146,227,229`) — all go through the injected client. Its one other direct HTTP call (`waitForHealthy` → `/setup/healthz`, `apply-profile.ts:308-321`) stays intentionally unauthenticated — see Current State.
 
 ### Files to Create
 

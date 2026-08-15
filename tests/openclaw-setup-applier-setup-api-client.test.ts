@@ -96,3 +96,66 @@ describe("setup API client (mutating calls)", () => {
     expect((error as Error).message).not.toContain("sk-test-DO-NOT-LOG-leak");
   });
 });
+
+describe("setup API client (Basic auth)", () => {
+  it("sends a Basic auth header, decoding back to username:password, on every call when auth is given", async () => {
+    const headersSeen: Array<Record<string, string> | undefined> = [];
+    const client = createSetupApiClient({
+      baseUrl: "https://example-openclaw.example.com",
+      auth: { username: "openclaw", password: "sk-test-DO-NOT-LOG-pw" },
+      fetchImpl: async (_input, init) => {
+        headersSeen.push(init?.headers as Record<string, string> | undefined);
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+    });
+
+    await client.getStatus();
+    await client.getAuthGroups();
+    await client.run({});
+    await client.reset();
+
+    expect(headersSeen).toHaveLength(4);
+    for (const headers of headersSeen) {
+      const authorization = headers?.authorization;
+      expect(authorization).toMatch(/^Basic .+/);
+      const decoded = Buffer.from(authorization!.slice("Basic ".length), "base64").toString("utf8");
+      expect(decoded).toBe("openclaw:sk-test-DO-NOT-LOG-pw");
+    }
+  });
+
+  it("sends no Authorization header when auth is omitted (regression)", async () => {
+    const headersSeen: Array<Record<string, string> | undefined> = [];
+    const client = createSetupApiClient({
+      baseUrl: "https://example-openclaw.example.com",
+      fetchImpl: async (_input, init) => {
+        headersSeen.push(init?.headers as Record<string, string> | undefined);
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+    });
+
+    await client.getStatus();
+    await client.getAuthGroups();
+    await client.run({});
+    await client.reset();
+
+    expect(headersSeen).toHaveLength(4);
+    for (const headers of headersSeen) {
+      expect(headers?.authorization).toBeUndefined();
+    }
+  });
+
+  it("never leaks the password or the encoded credential in a thrown error", async () => {
+    const client = createSetupApiClient({
+      baseUrl: "https://example-openclaw.example.com",
+      auth: { username: "openclaw", password: "sk-test-DO-NOT-LOG-pw" },
+      fetchImpl: async () => new Response(JSON.stringify({ secretDetail: "irrelevant" }), { status: 401 })
+    });
+
+    const error = await client.getStatus().catch((caught: unknown) => caught);
+    const encodedCredential = Buffer.from("openclaw:sk-test-DO-NOT-LOG-pw").toString("base64");
+
+    expect(error).toBeInstanceOf(SetupApiError);
+    expect((error as Error).message).not.toContain("sk-test-DO-NOT-LOG-pw");
+    expect((error as Error).message).not.toContain(encodedCredential);
+  });
+});

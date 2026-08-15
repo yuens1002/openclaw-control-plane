@@ -63,6 +63,15 @@ no real credentials).
 | Var | Purpose |
 | --- | --- |
 | `OPENROUTER_MANAGEMENT_KEY` | Agency-held OpenRouter management key, used only by the apply path's key-minting step |
+| `OPENCLAW_INSTANCE_SETUP_PASSWORD` | The *target OpenClaw instance's* setup password, used for HTTP Basic auth on every `/setup/api/*` call. Required by the apply path only — dry-run never calls the instance's HTTP API. |
+| `OPENCLAW_INSTANCE_SETUP_USERNAME` | Basic auth username for the target instance. Optional, defaults to `openclaw`. |
+
+These are deliberately **not** named `SETUP_PASSWORD`/`OPENCLAW_SETUP_USERNAME`:
+this control-plane repo's own `apps/api` reads those exact names to gate its
+own, completely different, API server. Reusing the names would collide when
+this CLI runs in the same environment as that server — including the normal
+case of using this repo to bootstrap its own agency instance from a profile
+of itself.
 
 A Railway API token with access to the target service is also required for
 the apply path; it is supplied at run time, never committed.
@@ -92,7 +101,16 @@ secret name.
 import { applyProfile } from "@openclaw-control-plane/openclaw-setup-applier/apply-profile";
 import { createSetupApiClient } from "@openclaw-control-plane/openclaw-setup-applier/setup-api-client";
 
-const setupApiClient = createSetupApiClient({ baseUrl: "https://your-instance.example.com" });
+const setupApiClient = createSetupApiClient({
+  baseUrl: "https://your-instance.example.com",
+  // Required whenever the target instance has SETUP_PASSWORD set (the
+  // normal/recommended setup) — omit `auth` entirely only against an
+  // unprotected instance.
+  auth: {
+    username: process.env.OPENCLAW_INSTANCE_SETUP_USERNAME ?? "openclaw",
+    password: process.env.OPENCLAW_INSTANCE_SETUP_PASSWORD!
+  }
+});
 const result = await applyProfile(
   profileJson,
   { service: "your-railway-service-name", instanceBaseUrl: "https://your-instance.example.com" },
