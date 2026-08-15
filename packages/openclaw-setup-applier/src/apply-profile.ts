@@ -21,17 +21,19 @@ export interface DryRunSecretStatus {
   present: boolean;
 }
 
+export type ChannelPayloadField = "telegramToken" | "discordToken" | "slackBotToken" | "slackAppToken";
+
 export interface DryRunPayloadPreview {
   providers: Array<{
-    authGroup: string;
     authChoice: string;
     flow: string;
     authSecret: "<redacted>";
   }>;
-  channels: Array<{
-    channelType: string;
-    tokens: Array<"<redacted>">;
-  }>;
+  // Mirrors exactly the channel-field shape the real /setup/api/run payload
+  // carries (see mapChannelsToPayloadFields) -- not one entry per channel
+  // attachment, since the real payload has no per-attachment structure at
+  // all, just a fixed set of optional top-level fields.
+  channels: Partial<Record<ChannelPayloadField, "<redacted>">>;
 }
 
 export interface DryRunResult {
@@ -86,23 +88,97 @@ function collectRequiredSecretNames(profile: ClientProfile): string[] {
 }
 
 function buildRedactedPayloadPreview(profile: ClientProfile): DryRunPayloadPreview {
+  const channels: DryRunPayloadPreview["channels"] = {};
+  for (const mapping of mapChannelsToPayloadFields(profile.attachments.channels)) {
+    channels[mapping.field] = "<redacted>";
+  }
+
   return {
     providers: profile.attachments.modelProviders.map((provider) => ({
-      authGroup: provider.nonSecretConfig.authGroup,
       authChoice: provider.nonSecretConfig.authChoice,
       flow: provider.nonSecretConfig.flow,
       authSecret: "<redacted>" as const
     })),
-    // One redacted placeholder per declared secret, not one per channel —
-    // a channel like Slack declares two (bot token + app token), and a
-    // preview that showed only one would misrepresent what apply mode
-    // actually requires. Mirrors the real apply path's `secrets` array
-    // below (resolvedChannels), which already handles this correctly.
-    channels: profile.attachments.channels.map((channel) => ({
-      channelType: channel.type,
-      tokens: channel.requiredSecretNames.map(() => "<redacted>" as const)
-    }))
+    channels
   };
+}
+
+// A Map, not a plain object: channel.type is an untrusted string from the
+// parsed profile, and a plain-object lookup (CHANNEL_SECRET_COUNTS[type])
+// would return an inherited Object.prototype method (e.g. `type ===
+// "toString"`) instead of undefined for an unsupported type, silently
+// bypassing the check below. Map.get() has no prototype to collide with.
+const CHANNEL_SECRET_COUNTS = new Map<string, number>([
+  ["telegram", 1],
+  ["discord", 1],
+  ["slack", 2]
+]);
+
+interface ChannelFieldMapping {
+  field: ChannelPayloadField;
+  secretName: string;
+}
+
+/**
+ * Maps each channel attachment to the flat /setup/api/run field(s) it
+ * fills, per the confirmed live contract (see
+ * docs/plans/setup-run-payload-contract/plan.md's Live Confirmation --
+ * read directly from the real wizard's own request-building source,
+ * app.js, not guessed). Fails loud on any shape the flat payload cannot
+ * represent: an unsupported channel type, a duplicate type (two
+ * attachments can't both fill one field), or a requiredSecretNames count
+ * that doesn't match the type's fixed field count.
+ */
+function mapChannelsToPayloadFields(channels: ClientProfile["attachments"]["channels"]): ChannelFieldMapping[] {
+  const seenTypes = new Set<string>();
+  const mappings: ChannelFieldMapping[] = [];
+
+  for (const channel of channels) {
+    const expectedCount = CHANNEL_SECRET_COUNTS.get(channel.type);
+    if (expectedCount === undefined) {
+      throw new Error(
+        `Unsupported channel type '${channel.type}'; /setup/api/run only accepts telegram, discord, and slack.`
+      );
+    }
+    if (seenTypes.has(channel.type)) {
+      throw new Error(
+        `Profile has more than one '${channel.type}' channel attachment; ` +
+          "/setup/api/run has only one field per channel type."
+      );
+    }
+    seenTypes.add(channel.type);
+
+    if (channel.requiredSecretNames.length !== expectedCount) {
+      throw new Error(
+        `'${channel.type}' channel attachment must declare exactly ${expectedCount} requiredSecretNames; ` +
+          `found ${channel.requiredSecretNames.length}.`
+      );
+    }
+
+    if (channel.type === "slack") {
+      const botToken = channel.requiredSecretNames[0];
+      const appToken = channel.requiredSecretNames[1];
+      if (botToken === undefined || appToken === undefined) {
+        throw new Error("'slack' channel attachment has malformed requiredSecretNames.");
+      }
+      // Positional convention (bot token first, app token second) -- not
+      // independently confirmed live; matches issue #7's own example
+      // ordering (ACME_SLACK_BOT_TOKEN, ACME_SLACK_APP_TOKEN). See plan.md.
+      mappings.push({ field: "slackBotToken", secretName: botToken });
+      mappings.push({ field: "slackAppToken", secretName: appToken });
+    } else {
+      const secretName = channel.requiredSecretNames[0];
+      if (secretName === undefined) {
+        throw new Error(`'${channel.type}' channel attachment has no requiredSecretNames.`);
+      }
+      mappings.push({
+        field: channel.type === "telegram" ? "telegramToken" : "discordToken",
+        secretName
+      });
+    }
+  }
+
+  return mappings;
 }
 
 export interface ApplyOptions {
@@ -163,9 +239,11 @@ export async function applyProfile(
     );
   }
   const provider = profile.attachments.modelProviders[0];
+  // authGroup is never sent to /setup/api/run (confirmed live -- it's UI
+  // grouping-only in the real wizard, see plan.md's Live Confirmation) --
+  // only authChoice is part of the outgoing payload.
   let resolvedProvider:
     | {
-        authGroup: string;
         authChoice: string;
         flow: string;
         authSecret: string;
@@ -177,7 +255,6 @@ export async function applyProfile(
     const resolution = await resolveProviderSecret(provider, existingVars, options.service, dependencies);
     redeployTriggered = redeployTriggered || resolution.triggeredRedeploy;
     resolvedProvider = {
-      authGroup: provider.nonSecretConfig.authGroup,
       authChoice: provider.nonSecretConfig.authChoice,
       flow: provider.nonSecretConfig.flow,
       authSecret: resolution.value,
@@ -187,18 +264,16 @@ export async function applyProfile(
     };
   }
 
-  const resolvedChannels = profile.attachments.channels.map((channel) => ({
-    channelType: channel.type,
-    secrets: channel.requiredSecretNames.map((name) => {
-      const value = existingVars[name];
-      if (value === undefined) {
-        throw new Error(
-          `Required secret '${name}' not found in Railway variables for service '${options.service}'.`
-        );
-      }
-      return value;
-    })
-  }));
+  const resolvedChannelFields: Partial<Record<ChannelPayloadField, string>> = {};
+  for (const mapping of mapChannelsToPayloadFields(profile.attachments.channels)) {
+    const value = existingVars[mapping.secretName];
+    if (value === undefined) {
+      throw new Error(
+        `Required secret '${mapping.secretName}' not found in Railway variables for service '${options.service}'.`
+      );
+    }
+    resolvedChannelFields[mapping.field] = value;
+  }
 
   if (redeployTriggered) {
     await waitForHealthy(options.instanceBaseUrl, dependencies.fetchImpl ?? fetch, {
@@ -212,16 +287,12 @@ export async function applyProfile(
     });
   }
 
-  // The exact /setup/api/run payload shape for multiple channels is not
-  // independently confirmed against a live instance. Issue #7's prose
-  // describes named per-channel-type fields (telegramToken, slackBotToken,
-  // slackAppToken, ...) on what may be a flat, single-provider payload,
-  // which may not match the array shape built here. Confirm against a live
-  // instance before relying on this in production — see plan.md's open
-  // "Before D2/D13" dependency (also flags the authGroup/authChoice enum).
+  // Flat payload -- confirmed live against the real wizard's own
+  // request-building source (app.js), not guessed. See
+  // docs/plans/setup-run-payload-contract/plan.md's Live Confirmation.
   const payload = {
     ...(resolvedProvider ?? {}),
-    channels: resolvedChannels
+    ...resolvedChannelFields
   };
 
   await dependencies.setupApiClient.run(payload);
@@ -237,9 +308,9 @@ export async function applyProfile(
 }
 
 function isConfigured(status: unknown): boolean {
-  // `configured: boolean` on the /setup/api/status response is not
-  // independently confirmed against a live instance — same caveat as the
-  // rest of setup-api-client.ts's unconfirmed response shapes.
+  // `configured: boolean` on the /setup/api/status response is confirmed
+  // against a live instance -- see
+  // docs/plans/setup-run-payload-contract/plan.md's Live Confirmation.
   return (
     typeof status === "object" &&
     status !== null &&

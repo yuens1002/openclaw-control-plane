@@ -226,10 +226,15 @@ table.
   `clientConnectors`, `workflows`, `verification`, `handoff`, `security`,
   `agency`, `client`, `repository`, `controlPlane`) than issue #7 described,
   and none of them broke parsing.
-- Before D2/D13 are implemented: re-verify the `authGroup`/`authChoice`
+- ~~Before D2/D13 are implemented: re-verify the `authGroup`/`authChoice`
   enum via a live, read-only `GET /setup/api/auth-groups` call against the
   existing Railway proof instance (issue #7 flags the moonshot/z.ai/minimax/
-  qwen/copilot/synthetic/opencode-zen slugs as unconfirmed).
+  qwen/copilot/synthetic/opencode-zen slugs as unconfirmed).~~ **Resolved**
+  in [issue #9](https://github.com/yuens1002/openclaw-control-plane/issues/9) /
+  `docs/plans/setup-run-payload-contract/plan.md`. Every guessed slug was
+  correct except `z.ai`, actually `zai` (no dot). Also found and fixed:
+  the `/setup/api/run` payload itself didn't match the real (flat, not
+  array-shaped) contract — see that plan for the full finding.
 - An agency-held OpenRouter management key and Railway API token with access
   to the target service, supplied via env var at run time — never committed.
 - Human approval of this plan before implementation continues.
@@ -239,8 +244,9 @@ table.
 - A public-facing web form or landing page that triggers the applier (issue
   #7: needs its own trust/auth model, separate future work).
 - Client-owned Railway accounts or billing.
-- Treating the `authGroup` enum list in this plan as final without the
-  live re-verification named under Dependencies.
+- ~~Treating the `authGroup` enum list in this plan as final without the
+  live re-verification named under Dependencies.~~ **Resolved** — see the
+  Dependencies section above.
 - An automated CI workflow that calls the mutating `/setup/api/run` or
   `/setup/api/reset` endpoints, or the real OpenRouter Provisioning API,
   against a live instance. Tests use fakes/stubs only; a live smoke test

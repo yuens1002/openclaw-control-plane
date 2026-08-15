@@ -1,9 +1,11 @@
-// GET /setup/api/status and GET /setup/api/auth-groups response shapes are
-// not independently confirmed against a live instance (see the "Before
-// D2/D13" entry in docs/plans/setup-profile-applier/plan.md's Dependencies
-// section, which flags the authGroup/authChoice enum in particular).
-// Both calls therefore return `unknown` — callers must narrow only the
-// fields they actually need rather than trusting an assumed shape.
+// GET /setup/api/status and GET /setup/api/auth-groups response shapes ARE
+// now confirmed against a live instance -- see
+// docs/plans/setup-run-payload-contract/plan.md's Live Confirmation. Both
+// calls still return `unknown` by design, not because the shape is
+// unknown: this client stays a thin, unopinionated transport, and callers
+// narrow only the fields they actually consume (see apply-profile.ts's
+// `isConfigured` and its `mapChannelsToPayloadFields`-driven payload
+// construction) rather than this module asserting a full response type.
 
 export interface SetupApiClientOptions {
   baseUrl: string;
@@ -65,12 +67,15 @@ export function createSetupApiClient(options: SetupApiClientOptions) {
   return {
     getStatus: (): Promise<unknown> => getJson("/setup/api/status"),
     getAuthGroups: (): Promise<unknown> => getJson("/setup/api/auth-groups"),
-    // `run`'s response shape is not independently confirmed live either —
-    // same reasoning as the read calls. `run` accepts `unknown` rather than
-    // a typed payload because its exact field set (authGroup, authChoice,
-    // authSecret, flow, per-channel tokens, customProvider* fields) is
-    // assembled by apply-profile.ts from the parsed profile; this client
-    // stays a thin, unopinionated transport.
+    // `run`'s response shape is not independently confirmed live. `run`
+    // accepts `unknown` rather than a typed payload because its exact
+    // field set -- confirmed live: authChoice, authSecret, flow,
+    // telegramToken/discordToken/slackBotToken/slackAppToken,
+    // customProvider* fields; NOT authGroup, which is UI-grouping-only in
+    // the real wizard and deliberately never sent (see
+    // docs/plans/setup-run-payload-contract/plan.md) -- is assembled by
+    // apply-profile.ts from the parsed profile; this client stays a thin,
+    // unopinionated transport.
     run: (payload: unknown): Promise<unknown> => postJson("/setup/api/run", payload),
     reset: (): Promise<unknown> => postJson("/setup/api/reset", {})
   };

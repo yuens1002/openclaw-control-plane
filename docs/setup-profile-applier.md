@@ -49,6 +49,16 @@ fields this applier reads:
   names holding the secrets this profile needs. The profile never contains
   a secret *value*, only the *name* of the Railway variable that holds it.
 
+`/setup/api/run` only accepts three channel `type`s, confirmed live against
+the real wizard's own request-building source: `"telegram"` and
+`"discord"` (1 required secret name each) and `"slack"` (exactly 2 —
+`requiredSecretNames[0]` is the bot token, `[1]` is the app token, an
+ordering convention, not independently confirmed live). Any other `type`,
+or more than one attachment of the same `type`, fails loudly before any
+network call — the underlying OpenClaw CLI supports many more channel
+types (see `channels add --help`), but only these three are settable
+through this specific endpoint.
+
 A real profile also carries a top-level `environments[].requiredSecretNames`
 list — this is a broader rollup (infra secrets like `RAILWAY_TOKEN` plus
 every attachment's secrets combined) and is **not** what this applier reads;
@@ -94,6 +104,13 @@ report which required secrets already exist) and prints a redacted preview
 of the payload the apply path would send. No secret value is ever included
 in the result or in what gets printed — only presence/absence per required
 secret name.
+
+Dry-run **throws**, rather than printing a misleading preview, if the
+profile's channel attachments couldn't actually be applied (an unsupported
+channel `type`, more than one attachment of the same `type`, or a `slack`
+attachment without exactly 2 `requiredSecretNames`) — the same validation
+the apply path runs, run early on purpose, since dry-run exists to catch
+exactly this kind of problem before a live call.
 
 ## Apply usage
 
@@ -150,9 +167,11 @@ Railway variable writes pipe the value via `--stdin`, never as an inline
 `KEY=VALUE` argument, so it never lands in shell history or a process
 listing.
 
-**Open, non-blocking caveat:** the exact `/setup/api/run` payload shape for
-multiple channel attachments (and the `authGroup`/`authChoice` enum) is not
-independently confirmed against a live instance — see
-`docs/plans/setup-profile-applier/plan.md`'s Dependencies section and
-`review.md`'s residual risk notes before relying on this against production
-traffic.
+The `/setup/api/run` payload is **flat**, not an array of attachments: one
+optional field per supported channel `type`
+(`telegramToken`/`discordToken`/`slackBotToken`/`slackAppToken`), plus
+`authChoice` (not `authGroup` — that's UI-grouping-only in the real
+wizard), `flow`, `authSecret`, and the `customProvider*` fields. Multiple
+channels are set by filling multiple fields in one call, not multiple
+calls. Confirmed live — see
+`docs/plans/setup-run-payload-contract/plan.md`'s Live Confirmation.
