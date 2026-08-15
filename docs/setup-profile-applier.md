@@ -63,7 +63,7 @@ no real credentials).
 | Var | Purpose |
 | --- | --- |
 | `OPENROUTER_MANAGEMENT_KEY` | Agency-held OpenRouter management key, used only by the apply path's key-minting step |
-| `OPENCLAW_INSTANCE_SETUP_PASSWORD` | The *target OpenClaw instance's* setup password, used for HTTP Basic auth on every `/setup/api/*` call. Required by the apply path only — dry-run never calls the instance's HTTP API. |
+| `OPENCLAW_INSTANCE_SETUP_PASSWORD` | The *target OpenClaw instance's* setup password, used for HTTP Basic auth on every `/setup/api/*` call. Required by the CLI's apply path. Programmatic use of `applyProfile()`/`createSetupApiClient()` only needs it when the target instance is Basic-auth protected — `auth` on `SetupApiClientOptions` is optional, and dry-run never calls the instance's HTTP API at all. |
 | `OPENCLAW_INSTANCE_SETUP_USERNAME` | Basic auth username for the target instance. Optional, defaults to `openclaw`. |
 
 These are deliberately **not** named `SETUP_PASSWORD`/`OPENCLAW_SETUP_USERNAME`:
@@ -100,21 +100,24 @@ secret name.
 ```ts
 import { applyProfile } from "@openclaw-control-plane/openclaw-setup-applier/apply-profile";
 import { createSetupApiClient } from "@openclaw-control-plane/openclaw-setup-applier/setup-api-client";
+import { requireEnv } from "@openclaw-control-plane/openclaw-setup-applier/cli";
 
 const setupApiClient = createSetupApiClient({
   baseUrl: "https://your-instance.example.com",
   // Required whenever the target instance has SETUP_PASSWORD set (the
   // normal/recommended setup) — omit `auth` entirely only against an
-  // unprotected instance.
+  // unprotected instance. requireEnv() throws a clear
+  // "Missing required env var: ..." message instead of a confusing
+  // runtime failure if the var isn't set, unlike a `!` non-null assertion.
   auth: {
     username: process.env.OPENCLAW_INSTANCE_SETUP_USERNAME ?? "openclaw",
-    password: process.env.OPENCLAW_INSTANCE_SETUP_PASSWORD!
+    password: requireEnv("OPENCLAW_INSTANCE_SETUP_PASSWORD")
   }
 });
 const result = await applyProfile(
   profileJson,
   { service: "your-railway-service-name", instanceBaseUrl: "https://your-instance.example.com" },
-  { runner: yourRailwayRunner, setupApiClient, openRouterManagementKey: process.env.OPENROUTER_MANAGEMENT_KEY! }
+  { runner: yourRailwayRunner, setupApiClient, openRouterManagementKey: requireEnv("OPENROUTER_MANAGEMENT_KEY") }
 );
 console.log(result.outcome); // "already-configured" | "applied"
 ```
