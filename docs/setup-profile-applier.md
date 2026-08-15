@@ -104,10 +104,14 @@ console.log(result.outcome); // "already-configured" | "applied"
 Or via the CLI:
 
 ```bash
-node --experimental-strip-types packages/openclaw-setup-applier/src/cli.ts \
+npm exec -- tsx packages/openclaw-setup-applier/src/cli.ts \
   --profile ./profile.json --service your-railway-service-name \
   --instance-url https://your-instance.example.com [--dry-run]
 ```
+
+(Matches the `tsx`-based invocation convention `deploy/openclaw-railway/install-template.ps1` already uses for
+`packages/openclaw-railway-installer/src/cli.ts` — `tsx` is an existing devDependency, unlike Node's
+`--experimental-strip-types` flag, which isn't available on every Node version this repo supports.)
 
 ## Secret-safety
 
