@@ -1,0 +1,18 @@
+{
+  "name": "@openclaw-control-plane/openclaw-setup-applier",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./profile-schema": "./src/profile-schema.ts",
+    "./setup-api-client": "./src/setup-api-client.ts",
+    "./railway-variables": "./src/railway-variables.ts",
+    "./apply-profile": "./src/apply-profile.ts",
+    "./openrouter-provisioning": "./src/openrouter-provisioning.ts",
+    "./cli": "./src/cli.ts"
+  },
+  "dependencies": {
+    "zod": "^3.24.1",
+    "@openclaw-control-plane/openclaw-railway-installer": "file:../openclaw-railway-installer"
+  }
+}

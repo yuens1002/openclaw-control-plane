@@ -9,7 +9,7 @@ async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   const railway = await resolveRailwayExecutable();
   const runner: RailwayRunner = {
-    run: (args) => runCommand(railway, args)
+    run: (args, stdin) => runCommand(railway, args, stdin)
   };
 
   const result = await installOpenClawOnRailway(options, { runner });
@@ -111,24 +111,27 @@ async function resolveRailwayExecutable(): Promise<string> {
   return "railway";
 }
 
-function runCommand(command: string, args: string[]): Promise<{ stdout: string }> {
+function runCommand(command: string, args: string[], stdin?: string): Promise<{ stdout: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
       shell: false
     });
     let stdout = "";
     let stderr = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
+    child.stdout!.setEncoding("utf8");
+    child.stderr!.setEncoding("utf8");
+    child.stdout!.on("data", (chunk: string) => {
       stdout += chunk;
       process.stdout.write(chunk);
     });
-    child.stderr.on("data", (chunk: string) => {
+    child.stderr!.on("data", (chunk: string) => {
       stderr += chunk;
       process.stderr.write(chunk);
     });
+    if (stdin !== undefined) {
+      child.stdin!.end(stdin);
+    }
     child.on("error", reject);
     child.on("close", (code) => {
       if (code === 0) {

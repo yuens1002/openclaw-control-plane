@@ -25,8 +25,11 @@ repo supplies the governed install path around that runtime:
   deployment source, `/setup`, `/setup/healthz`, and `/openclaw`
 - workflow-neutral starter-kit boundary with no baked-in client pipeline,
   connector, database, or secret assumptions
-- a clean place to define setup-profile conventions that private agency/client
-  repos can use to automate provider, channel, plugin, and workflow attachment
+- a [setup profile applier](docs/setup-profile-applier.md) that private
+  agency/client profile repos can target: it reads a generated profile,
+  resolves or mints the secrets it declares, and drives OpenClaw's `/setup`
+  API idempotently, so provider, channel, and plugin attachment is
+  automated rather than a human filling in the wizard by hand
 - handoff and verification discipline for repeatable client onboarding
 
 Install the recommended template for speed. Install this template when you want

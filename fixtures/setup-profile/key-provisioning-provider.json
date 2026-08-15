@@ -1,0 +1,22 @@
+{
+  "attachments": {
+    "modelProviders": [
+      {
+        "id": "provider-example-openrouter-managed",
+        "type": "modelProvider",
+        "nonSecretConfig": {
+          "authGroup": "openrouter",
+          "authChoice": "openrouter",
+          "flow": "quickstart",
+          "keyProvisioning": {
+            "method": "openrouter-provisioning-api",
+            "spendLimitUsd": 25,
+            "limitReset": "monthly"
+          }
+        },
+        "requiredSecretNames": ["EXAMPLE_OPENROUTER_MANAGED_API_KEY"]
+      }
+    ],
+    "channels": []
+  }
+}
