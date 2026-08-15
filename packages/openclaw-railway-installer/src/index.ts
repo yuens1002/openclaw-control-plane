@@ -33,7 +33,7 @@ export interface CommandResult {
 }
 
 export interface RailwayRunner {
-  run(args: string[]): Promise<CommandResult>;
+  run(args: string[], stdin?: string): Promise<CommandResult>;
 }
 
 export interface InstallerService {
