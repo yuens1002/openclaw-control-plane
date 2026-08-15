@@ -30,7 +30,7 @@ export interface DryRunPayloadPreview {
   }>;
   channels: Array<{
     channelType: string;
-    token: "<redacted>";
+    tokens: Array<"<redacted>">;
   }>;
 }
 
@@ -93,9 +93,14 @@ function buildRedactedPayloadPreview(profile: ClientProfile): DryRunPayloadPrevi
       flow: provider.nonSecretConfig.flow,
       authSecret: "<redacted>" as const
     })),
+    // One redacted placeholder per declared secret, not one per channel —
+    // a channel like Slack declares two (bot token + app token), and a
+    // preview that showed only one would misrepresent what apply mode
+    // actually requires. Mirrors the real apply path's `secrets` array
+    // below (resolvedChannels), which already handles this correctly.
     channels: profile.attachments.channels.map((channel) => ({
       channelType: channel.type,
-      token: "<redacted>" as const
+      tokens: channel.requiredSecretNames.map(() => "<redacted>" as const)
     }))
   };
 }
@@ -103,6 +108,10 @@ function buildRedactedPayloadPreview(profile: ClientProfile): DryRunPayloadPrevi
 export interface ApplyOptions {
   service: string;
   instanceBaseUrl: string;
+  /** Healthcheck poll interval after a redeploy-triggering write. Default 2s. */
+  healthcheckPollSeconds?: number;
+  /** Healthcheck poll deadline after a redeploy-triggering write. Default 60s. */
+  healthcheckTimeoutSeconds?: number;
 }
 
 export interface ApplyProfileDependencies extends RailwayVariableReaderDependencies {
@@ -110,6 +119,8 @@ export interface ApplyProfileDependencies extends RailwayVariableReaderDependenc
   openRouterManagementKey: string;
   /** Used for OpenRouter minting and the post-write healthcheck. */
   fetchImpl?: typeof fetch;
+  /** Injectable for tests; defaults to a real `setTimeout`-based sleep. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export type ApplyOutcome = "already-configured" | "applied";
@@ -190,7 +201,15 @@ export async function applyProfile(
   }));
 
   if (redeployTriggered) {
-    await waitForHealthy(options.instanceBaseUrl, dependencies.fetchImpl ?? fetch);
+    await waitForHealthy(options.instanceBaseUrl, dependencies.fetchImpl ?? fetch, {
+      ...(dependencies.sleep !== undefined ? { sleep: dependencies.sleep } : {}),
+      ...(options.healthcheckPollSeconds !== undefined
+        ? { pollSeconds: options.healthcheckPollSeconds }
+        : {}),
+      ...(options.healthcheckTimeoutSeconds !== undefined
+        ? { timeoutSeconds: options.healthcheckTimeoutSeconds }
+        : {})
+    });
   }
 
   // The exact /setup/api/run payload shape for multiple channels is not
@@ -206,6 +225,14 @@ export async function applyProfile(
   };
 
   await dependencies.setupApiClient.run(payload);
+
+  const postRunStatus = await dependencies.setupApiClient.getStatus();
+  if (!isConfigured(postRunStatus)) {
+    throw new Error(
+      "POST /setup/api/run completed but GET /setup/api/status still does not report configured."
+    );
+  }
+
   return { outcome: "applied" };
 }
 
@@ -265,11 +292,49 @@ async function resolveProviderSecret(
   return { value: minted, triggeredRedeploy: requiresRedeploy };
 }
 
-async function waitForHealthy(instanceBaseUrl: string, fetchImpl: typeof fetch): Promise<void> {
-  const response = await fetchImpl(`${instanceBaseUrl.replace(/\/$/, "")}/setup/healthz`);
-  if (!response.ok) {
-    throw new Error(
-      `Instance healthcheck failed with status ${response.status} before calling /setup/api/run.`
-    );
+interface WaitForHealthyOptions {
+  sleep?: (ms: number) => Promise<void>;
+  pollSeconds?: number;
+  timeoutSeconds?: number;
+}
+
+/**
+ * Polls `/setup/healthz` until it responds ok or the deadline passes. A
+ * single check is both flaky (the instance can be briefly unreachable
+ * mid-redeploy) and insufficient (an old instance can still answer 200
+ * while the new one hasn't taken over yet) — polling with a deadline is
+ * the minimum needed to actually wait out a redeploy rather than race it.
+ */
+async function waitForHealthy(
+  instanceBaseUrl: string,
+  fetchImpl: typeof fetch,
+  options: WaitForHealthyOptions = {}
+): Promise<void> {
+  const sleep = options.sleep ?? defaultSleep;
+  const pollMs = (options.pollSeconds ?? 2) * 1000;
+  const timeoutSeconds = options.timeoutSeconds ?? 60;
+  const deadline = Date.now() + timeoutSeconds * 1000;
+  const url = `${instanceBaseUrl.replace(/\/$/, "")}/setup/healthz`;
+
+  let lastStatus: number | undefined;
+  for (;;) {
+    const response = await fetchImpl(url);
+    if (response.ok) {
+      return;
+    }
+    lastStatus = response.status;
+    if (Date.now() >= deadline) {
+      break;
+    }
+    await sleep(pollMs);
   }
+
+  throw new Error(
+    `Instance healthcheck at '${url}' did not become healthy within ${timeoutSeconds}s ` +
+      `(last status: ${lastStatus}) before calling /setup/api/run.`
+  );
+}
+
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 }
