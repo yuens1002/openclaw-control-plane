@@ -1,0 +1,12 @@
+{
+  "attachments": {
+    "modelProviders": [],
+    "channels": [
+      {
+        "id": "channel-example-slack",
+        "type": "slack",
+        "requiredSecretNames": ["EXAMPLE_SLACK_BOT_TOKEN", "EXAMPLE_SLACK_APP_TOKEN"]
+      }
+    ]
+  }
+}

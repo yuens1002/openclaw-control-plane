@@ -98,30 +98,31 @@ describe("apply-profile dry-run mode", () => {
     const result = await dryRunApplyProfile(readFixture("plain-secret-provider.json"), { service: "svc" }, { runner });
 
     expect(result.payloadPreview.providers).toEqual([
-      { authGroup: "openrouter", authChoice: "openrouter", flow: "quickstart", authSecret: "<redacted>" }
+      { authChoice: "openrouter", flow: "quickstart", authSecret: "<redacted>" }
     ]);
   });
 
-  it("previews one redacted token per declared secret on a channel, not one per channel", async () => {
+  it("previews the flat channel-field shape, redacted -- one field per declared secret, not one per channel", async () => {
     const runner = new FakeRailwayRunner({});
-    const twoSecretChannelProfile = {
-      attachments: {
-        modelProviders: [],
-        channels: [
-          {
-            id: "channel-example-slack",
-            type: "slack",
-            requiredSecretNames: ["EXAMPLE_SLACK_BOT_TOKEN", "EXAMPLE_SLACK_APP_TOKEN"]
-          }
-        ]
-      }
-    };
 
-    const result = await dryRunApplyProfile(twoSecretChannelProfile, { service: "svc" }, { runner });
+    const result = await dryRunApplyProfile(readFixture("slack-channel.json"), { service: "svc" }, { runner });
 
-    expect(result.payloadPreview.channels).toEqual([
-      { channelType: "slack", tokens: ["<redacted>", "<redacted>"] }
-    ]);
+    expect(result.payloadPreview.channels).toEqual({
+      slackBotToken: "<redacted>",
+      slackAppToken: "<redacted>"
+    });
+  });
+
+  it("previews multiple channels in one call as separate top-level fields", async () => {
+    const runner = new FakeRailwayRunner({});
+
+    const result = await dryRunApplyProfile(readFixture("multi-channel.json"), { service: "svc" }, { runner });
+
+    expect(result.payloadPreview.channels).toEqual({
+      telegramToken: "<redacted>",
+      slackBotToken: "<redacted>",
+      slackAppToken: "<redacted>"
+    });
   });
 
   it("never prints a real secret value when the result is printed", async () => {
@@ -140,6 +141,20 @@ describe("apply-profile dry-run mode", () => {
     }
 
     expect(logged.some((line) => line.includes(SENTINEL_SECRET))).toBe(false);
+  });
+
+  it("also fails loud on a structurally invalid channel, same as apply mode -- dry-run must not preview a profile that would fail live", async () => {
+    const runner = new FakeRailwayRunner({});
+    const profile = {
+      attachments: {
+        modelProviders: [],
+        channels: [{ id: "channel-example-irc", type: "irc", requiredSecretNames: ["EXAMPLE_IRC_TOKEN"] }]
+      }
+    };
+
+    await expect(dryRunApplyProfile(profile, { service: "svc" }, { runner })).rejects.toThrow(
+      "Unsupported channel type 'irc'"
+    );
   });
 });
 
@@ -313,6 +328,51 @@ describe("apply-profile apply mode", () => {
     expect(callOrder).toEqual(["status", "run", "status"]);
   });
 
+  it("sends a flat payload for a single channel: no channels key, no authGroup key", async () => {
+    const callOrder: string[] = [];
+    const runner = new FakeRailwayRunner({ EXAMPLE_OPENROUTER_API_KEY: SENTINEL_SECRET, EXAMPLE_TELEGRAM_BOT_TOKEN: "sk-test-DO-NOT-LOG-tg" });
+    const fetchImpl = buildFetchStub({ instanceUrl, configured: false, callOrder });
+    const requests: Array<{ url: string; body: string }> = [];
+    const capturingFetch: typeof fetch = async (input, init) => {
+      requests.push({ url: String(input), body: String(init?.body ?? "") });
+      return fetchImpl(input, init);
+    };
+    const profile = {
+      attachments: {
+        modelProviders: [
+          {
+            id: "provider-example-openrouter",
+            nonSecretConfig: { authGroup: "openrouter", authChoice: "openrouter", flow: "quickstart" },
+            requiredSecretNames: ["EXAMPLE_OPENROUTER_API_KEY"]
+          }
+        ],
+        channels: [{ id: "channel-example-telegram", type: "telegram", requiredSecretNames: ["EXAMPLE_TELEGRAM_BOT_TOKEN"] }]
+      }
+    };
+
+    await applyProfile(
+      profile,
+      { service: "svc", instanceBaseUrl: instanceUrl },
+      {
+        runner,
+        setupApiClient: createSetupApiClient({ baseUrl: instanceUrl, fetchImpl: capturingFetch }),
+        openRouterManagementKey: "sk-test-DO-NOT-LOG-mgmt",
+        fetchImpl: capturingFetch
+      }
+    );
+
+    const runRequest = requests.find((request) => request.url === `${instanceUrl}/setup/api/run`);
+    const body = JSON.parse(runRequest?.body ?? "{}") as Record<string, unknown>;
+    expect(body).toEqual({
+      authChoice: "openrouter",
+      flow: "quickstart",
+      authSecret: SENTINEL_SECRET,
+      telegramToken: "sk-test-DO-NOT-LOG-tg"
+    });
+    expect(body).not.toHaveProperty("authGroup");
+    expect(body).not.toHaveProperty("channels");
+  });
+
   it("resolves every declared secret for a multi-secret channel, not just the first", async () => {
     const callOrder: string[] = [];
     const runner = new FakeRailwayRunner({
@@ -320,34 +380,123 @@ describe("apply-profile apply mode", () => {
       EXAMPLE_SLACK_APP_TOKEN: "sk-test-DO-NOT-LOG-app"
     });
     const fetchImpl = buildFetchStub({ instanceUrl, configured: false, callOrder });
-    const setupApiClient = createSetupApiClient({ baseUrl: instanceUrl, fetchImpl });
     const requests: Array<{ url: string; body: string }> = [];
     const capturingFetch: typeof fetch = async (input, init) => {
       requests.push({ url: String(input), body: String(init?.body ?? "") });
       return fetchImpl(input, init);
     };
-    const twoSecretChannelProfile = {
-      attachments: {
-        modelProviders: [],
-        channels: [
-          {
-            id: "channel-example-slack",
-            type: "slack",
-            requiredSecretNames: ["EXAMPLE_SLACK_BOT_TOKEN", "EXAMPLE_SLACK_APP_TOKEN"]
-          }
-        ]
-      }
-    };
 
     await applyProfile(
-      twoSecretChannelProfile,
+      readFixture("slack-channel.json"),
       { service: "svc", instanceBaseUrl: instanceUrl },
       { runner, setupApiClient: createSetupApiClient({ baseUrl: instanceUrl, fetchImpl: capturingFetch }), openRouterManagementKey: "sk-test-DO-NOT-LOG-mgmt", fetchImpl: capturingFetch }
     );
 
     const runRequest = requests.find((request) => request.url === `${instanceUrl}/setup/api/run`);
-    expect(runRequest?.body).toContain("sk-test-DO-NOT-LOG-bot");
-    expect(runRequest?.body).toContain("sk-test-DO-NOT-LOG-app");
+    const body = JSON.parse(runRequest?.body ?? "{}") as Record<string, unknown>;
+    expect(body).toEqual({ slackBotToken: "sk-test-DO-NOT-LOG-bot", slackAppToken: "sk-test-DO-NOT-LOG-app" });
+  });
+
+  it("sets multiple channels' fields in a single /setup/api/run call, not multiple calls", async () => {
+    const callOrder: string[] = [];
+    const runner = new FakeRailwayRunner({
+      EXAMPLE_TELEGRAM_BOT_TOKEN: "sk-test-DO-NOT-LOG-tg",
+      EXAMPLE_SLACK_BOT_TOKEN: "sk-test-DO-NOT-LOG-bot",
+      EXAMPLE_SLACK_APP_TOKEN: "sk-test-DO-NOT-LOG-app"
+    });
+    const fetchImpl = buildFetchStub({ instanceUrl, configured: false, callOrder });
+    const requests: Array<{ url: string; body: string }> = [];
+    const capturingFetch: typeof fetch = async (input, init) => {
+      requests.push({ url: String(input), body: String(init?.body ?? "") });
+      return fetchImpl(input, init);
+    };
+
+    await applyProfile(
+      readFixture("multi-channel.json"),
+      { service: "svc", instanceBaseUrl: instanceUrl },
+      { runner, setupApiClient: createSetupApiClient({ baseUrl: instanceUrl, fetchImpl: capturingFetch }), openRouterManagementKey: "sk-test-DO-NOT-LOG-mgmt", fetchImpl: capturingFetch }
+    );
+
+    const runRequests = requests.filter((request) => request.url === `${instanceUrl}/setup/api/run`);
+    expect(runRequests).toHaveLength(1);
+    const body = JSON.parse(runRequests[0]?.body ?? "{}") as Record<string, unknown>;
+    expect(body).toEqual({
+      telegramToken: "sk-test-DO-NOT-LOG-tg",
+      slackBotToken: "sk-test-DO-NOT-LOG-bot",
+      slackAppToken: "sk-test-DO-NOT-LOG-app"
+    });
+  });
+
+  it("throws on an unsupported channel type before any network call", async () => {
+    const callOrder: string[] = [];
+    const runner = new FakeRailwayRunner({});
+    const fetchImpl = buildFetchStub({ instanceUrl, configured: false, callOrder });
+    const setupApiClient = createSetupApiClient({ baseUrl: instanceUrl, fetchImpl });
+    const profile = {
+      attachments: {
+        modelProviders: [],
+        channels: [{ id: "channel-example-irc", type: "irc", requiredSecretNames: ["EXAMPLE_IRC_TOKEN"] }]
+      }
+    };
+
+    await expect(
+      applyProfile(
+        profile,
+        { service: "svc", instanceBaseUrl: instanceUrl },
+        { runner, setupApiClient, openRouterManagementKey: "sk-test-DO-NOT-LOG-mgmt", fetchImpl }
+      )
+    ).rejects.toThrow("Unsupported channel type 'irc'");
+    expect(callOrder).not.toContain("run");
+  });
+
+  it("throws on a duplicate channel type before any network call", async () => {
+    const callOrder: string[] = [];
+    const runner = new FakeRailwayRunner({
+      EXAMPLE_TELEGRAM_BOT_TOKEN_1: "sk-test-DO-NOT-LOG-tg1",
+      EXAMPLE_TELEGRAM_BOT_TOKEN_2: "sk-test-DO-NOT-LOG-tg2"
+    });
+    const fetchImpl = buildFetchStub({ instanceUrl, configured: false, callOrder });
+    const setupApiClient = createSetupApiClient({ baseUrl: instanceUrl, fetchImpl });
+    const profile = {
+      attachments: {
+        modelProviders: [],
+        channels: [
+          { id: "channel-example-telegram-1", type: "telegram", requiredSecretNames: ["EXAMPLE_TELEGRAM_BOT_TOKEN_1"] },
+          { id: "channel-example-telegram-2", type: "telegram", requiredSecretNames: ["EXAMPLE_TELEGRAM_BOT_TOKEN_2"] }
+        ]
+      }
+    };
+
+    await expect(
+      applyProfile(
+        profile,
+        { service: "svc", instanceBaseUrl: instanceUrl },
+        { runner, setupApiClient, openRouterManagementKey: "sk-test-DO-NOT-LOG-mgmt", fetchImpl }
+      )
+    ).rejects.toThrow("more than one 'telegram' channel attachment");
+    expect(callOrder).not.toContain("run");
+  });
+
+  it("throws on a slack channel attachment without exactly 2 requiredSecretNames", async () => {
+    const callOrder: string[] = [];
+    const runner = new FakeRailwayRunner({ EXAMPLE_SLACK_BOT_TOKEN: "sk-test-DO-NOT-LOG-bot" });
+    const fetchImpl = buildFetchStub({ instanceUrl, configured: false, callOrder });
+    const setupApiClient = createSetupApiClient({ baseUrl: instanceUrl, fetchImpl });
+    const profile = {
+      attachments: {
+        modelProviders: [],
+        channels: [{ id: "channel-example-slack", type: "slack", requiredSecretNames: ["EXAMPLE_SLACK_BOT_TOKEN"] }]
+      }
+    };
+
+    await expect(
+      applyProfile(
+        profile,
+        { service: "svc", instanceBaseUrl: instanceUrl },
+        { runner, setupApiClient, openRouterManagementKey: "sk-test-DO-NOT-LOG-mgmt", fetchImpl }
+      )
+    ).rejects.toThrow("'slack' channel attachment must declare exactly 2 requiredSecretNames");
+    expect(callOrder).not.toContain("run");
   });
 
   it("retries the post-redeploy healthcheck instead of failing on the first attempt", async () => {

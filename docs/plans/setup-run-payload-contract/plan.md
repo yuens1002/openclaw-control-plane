@@ -64,7 +64,7 @@ reach regardless (not a gap this plan needs to close).
 
 ## Approach
 
-`apply-profile.ts` gets one new function, `buildChannelPayloadFields`, used
+`apply-profile.ts` gets one new function, `mapChannelsToPayloadFields`, used
 by **both** the real apply path and the dry-run preview (single source of
 truth — the dry-run preview currently duplicates the array-shape logic
 independently, which is exactly how the bug this plan fixes went
@@ -97,7 +97,7 @@ profile; it's just never included in the HTTP body anymore.
 
 | ID | Deliverable | Kind | Owning role | Session |
 | --- | --- | --- | --- | --- |
-| D1 | `packages/openclaw-setup-applier/src/apply-profile.ts` — `buildChannelPayloadFields` helper; real apply path and dry-run preview both use it; `authGroup` dropped from outgoing payload; fail-loud on unsupported type, duplicate type, wrong slack secret count | client | `/backend-architect` | 1 |
+| D1 | `packages/openclaw-setup-applier/src/apply-profile.ts` — `mapChannelsToPayloadFields` helper; real apply path and dry-run preview both use it; `authGroup` dropped from outgoing payload; fail-loud on unsupported type, duplicate type, wrong slack secret count | client | `/backend-architect` | 1 |
 | D2 | `fixtures/setup-profile/` — new `slack-channel.json` (2 secrets) and `multi-channel.json` (telegram + slack together), per issue #9's "profile with 2+ channel attachments" scope | fixture | `/test-engineer` | 1 |
 | D3 | `tests/openclaw-setup-applier-apply-profile.test.ts` — flat payload shape (apply path), flat preview shape (dry-run), multi-channel single-call, `authGroup` absent from outgoing payload (regression), unsupported/duplicate/wrong-count failures | test | `/test-engineer` | 1 |
 | D4 | Doc/comment updates reflecting the now-confirmed contract: `apply-profile.ts`'s own "not independently confirmed" comments, `docs/setup-profile-applier.md`'s "Open, non-blocking caveat" paragraph, `docs/plans/setup-profile-applier/plan.md`'s Dependencies/Out-of-Scope bullets (marked resolved, pointing here) | doc | `/backend-architect` | 1 |
@@ -109,7 +109,7 @@ profile; it's just never included in the HTTP body anymore.
 
 - **Single mapping function, two callers** (D1): the bug this plan fixes
   existed in *two* places (real payload + dry-run preview) because they
-  duplicated the same array-shape logic independently. `buildChannelPayloadFields`
+  duplicated the same array-shape logic independently. `mapChannelsToPayloadFields`
   is called from both, so there's exactly one place left to get wrong.
 - **Positional Slack ordering** (D1): `requiredSecretNames[0]` = bot token,
   `[1]` = app token. This is an assumption, not a live-confirmed fact (no
@@ -120,6 +120,13 @@ profile; it's just never included in the HTTP body anymore.
   matching the existing `modelProviders.length > 1` precedent — a profile
   the flat payload can't represent should never reach `/setup/api/run` and
   fail there with a confusing 400/500.
+- **This applies to dry-run too, deliberately** (D1, AC-FN-007): because
+  `mapChannelsToPayloadFields` is shared, `dryRunApplyProfile` now throws
+  on the same structurally-invalid profiles instead of silently previewing
+  one that would fail live — a real behavior change from pre-fix, called
+  out explicitly (not shipped as an unstated side effect) because it's the
+  correct behavior for what dry-run exists to do: catch exactly this kind
+  of problem before a live call, not after.
 - **`setup-api-client.ts` needs no change**: `run(payload: unknown)` stays
   an unopinionated transport; the shape is entirely `apply-profile.ts`'s
   responsibility. Confirmed by re-reading `setup-api-client.ts` — no
