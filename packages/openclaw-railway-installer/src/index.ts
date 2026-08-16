@@ -359,7 +359,7 @@ async function writeEnvLocal(
   await writeLocalText(path, merged, dependencies);
 }
 
-async function writeLocalText(
+export async function writeLocalText(
   path: string,
   contents: string,
   dependencies: InstallerDependencies

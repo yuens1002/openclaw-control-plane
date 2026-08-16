@@ -20,6 +20,7 @@
       "@openclaw-control-plane/db": ["packages/db/src/index.ts"],
       "@openclaw-control-plane/openclaw-railway-installer": ["packages/openclaw-railway-installer/src/index.ts"],
       "@openclaw-control-plane/openclaw-railway-installer/cli": ["packages/openclaw-railway-installer/src/cli.ts"],
+      "@openclaw-control-plane/openclaw-railway-installer/provision-client": ["packages/openclaw-railway-installer/src/provision-client.ts"],
       "@openclaw-control-plane/openclaw-railway-installer/railway-variables": ["packages/openclaw-railway-installer/src/railway-variables.ts"],
       "@openclaw-control-plane/openclaw-railway-installer/template-lock": ["packages/openclaw-railway-installer/src/template-lock.ts"],
       "@openclaw-control-plane/openclaw-railway-installer/verify-proof": ["packages/openclaw-railway-installer/src/verify-proof.ts"],
