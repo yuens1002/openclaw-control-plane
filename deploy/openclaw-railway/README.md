@@ -44,6 +44,27 @@ identity/soul from a client profile (Part 2 of #18) is tracked separately in
 issue #20, since its transport mechanism isn't live-tested yet and its
 content half lives in the private client-profile repo.
 
+### Workspace identity file transport (not yet wired in)
+
+[Issue #20](https://github.com/yuens1002/openclaw-control-plane/issues/20)
+splits ownership between the private `openClaw-CoT-agency-profile` repo
+(the *content* — intake fields and templating the actual
+`IDENTITY.md`/`USER.md`/`SOUL.md` markdown, tracked as that repo's own #3,
+not yet done) and this repo (the *transport*).
+`packages/openclaw-railway-installer/src/import-workspace-files.ts` ships
+that transport half: `importWorkspaceFiles(baseUrl, auth, files)` packs a
+workspace-relative file map into a `tar.gz` and `POST`s it to the wrapper's
+`/setup/import` (the documented inverse of `GET /setup/export`), so a
+client's `IDENTITY.md`/`USER.md`/`SOUL.md` can be seeded at apply time
+instead of through the dashboard's interactive first-run Q&A. It is not
+yet called from either provisioning path (`installOpenClawOnRailway` or
+`provisionClientInstance`) — there's no real content to pass until
+profile-repo #3 lands, and whether pre-seeding `IDENTITY.md` alone actually
+updates the dashboard's displayed identity (versus needing
+`openclaw agents set-identity --from-identity`, which isn't in the
+wrapper's `ALLOWED_CONSOLE_COMMANDS` allowlist today) is still an open
+question that needs a live test against real content.
+
 This install path is intentionally a shell Chief of Staff install. It brings up
 OpenClaw, setup auth, public routing, and persistent state, but it does not
 install, enable, or assume any client-specific pipeline, connector, service, or
