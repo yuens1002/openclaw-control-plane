@@ -74,12 +74,20 @@ Variables must land **before** the first build that is allowed to succeed,
 because `OPENCLAW_TEMPLATE_REF` is consumed as a build arg and the missing
 volume hard-fails any deploy via `requiredMountPath`:
 
-1. `railway up --new --name <client> --detach --json` — creates the
-   project + service and queues a build. This first deploy is **expected
-   to fail** (no volume yet) and that's fine: `--detach` returns once the
-   build is queued, so the CLI call itself still exits 0. Its only job is
-   to make the service object exist so later commands have something to
-   target.
+1. Get a project linked: `railway link --project <projectId> --json` if
+   the caller already has one, else `railway init --name <client> --json`
+   (creates + links a new one). Then `railway up --detach --json` — no
+   `--new` — to create the service and queue the first build. **This
+   first deploy is expected to fail** (no volume yet) and that's fine:
+   `--detach` returns once the build is queued, so the CLI call itself
+   still exits 0. Its only job is to make the service object exist so
+   later commands have something to target. (Implementation note: an
+   earlier draft of this plan called for `railway up --new --name
+   <client>` to do project-creation and service-creation in one call, but
+   `--new` gives no way to know or control the resulting service's name in
+   advance — the code instead separates "get a project" from "create the
+   service", then discovers the created service's actual name via
+   `service list --json` immediately after `up`.)
 2. `railway service <name>` — link the created service (ambient state for
    the next two steps; also works around the volume-add panic).
 3. `railway volume add --mount-path /data` — no `-s/--service` flag (the
