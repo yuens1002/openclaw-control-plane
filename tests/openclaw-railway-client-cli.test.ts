@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   parseProvisionArgs,
-  parseUpdateRefArgs
+  parseUpdateRefArgs,
+  runCommand
 } from "@openclaw-control-plane/openclaw-railway-installer/client-cli";
 
 describe("client-cli provision arg parsing", () => {
@@ -36,6 +37,27 @@ describe("client-cli provision arg parsing", () => {
 
   it("rejects unknown flags", () => {
     expect(() => parseProvisionArgs(["--client-name", "acme", "--bogus"])).toThrow("Unknown argument: --bogus");
+  });
+});
+
+describe("client-cli runCommand — real subprocess, no fake runner", () => {
+  // This CLI's command set includes `railway variable list`, which Railway's
+  // own docs confirm prints raw secret values with --json/--kv. A prior
+  // incident in this repo (see openclaw-setup-applier/src/cli.ts's runCommand
+  // comment) happened because a sibling wrapper's stdout-echo was copied
+  // verbatim into a new call site without re-checking the new command set —
+  // and no test caught it, because every test used a fake runner that never
+  // exercised the real spawn path. This test exercises the real spawn path
+  // directly, with no fake runner in between.
+  it("never writes the spawned process's stdout to this process's own stdout, even though it's still captured for parsing", async () => {
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      const result = await runCommand(process.execPath, ["-e", "process.stdout.write('leaked-secret-value')"]);
+      expect(result.stdout).toBe("leaked-secret-value");
+      expect(writeSpy).not.toHaveBeenCalled();
+    } finally {
+      writeSpy.mockRestore();
+    }
   });
 });
 

@@ -186,7 +186,7 @@ async function resolveRailwayExecutable(): Promise<string> {
   return "railway";
 }
 
-function runCommand(command: string, args: string[], stdin?: string): Promise<{ stdout: string }> {
+export function runCommand(command: string, args: string[], stdin?: string): Promise<{ stdout: string }> {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(command, args, {
       stdio: [stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
@@ -196,9 +196,16 @@ function runCommand(command: string, args: string[], stdin?: string): Promise<{ 
     let stderr = "";
     child.stdout!.setEncoding("utf8");
     child.stderr!.setEncoding("utf8");
+    // Deliberately NOT echoed to process.stdout, unlike the marketplace
+    // installer CLI's runCommand: this CLI's command set includes `railway
+    // variable list` (via readRailwayVariable, on the idempotent-rerun
+    // path), and Railway's own --help text confirms --json/--kv output on
+    // that subcommand includes raw variable values. Streaming that straight
+    // to the terminal would print SETUP_PASSWORD/OPENCLAW_GATEWAY_TOKEN on
+    // every rerun against an existing service. Captured here for parsing
+    // only, same pattern as openclaw-setup-applier/src/cli.ts's runCommand.
     child.stdout!.on("data", (chunk: string) => {
       stdout += chunk;
-      process.stdout.write(chunk);
     });
     child.stderr!.on("data", (chunk: string) => {
       stderr += chunk;
