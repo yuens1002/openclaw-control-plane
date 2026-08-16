@@ -20,9 +20,29 @@ The script:
 - reuses an existing healthy template service on rerun
 - waits for the newest deployment to reach `SUCCESS`
 - updates the generated Railway domain to target port `8080`
-- verifies `/setup/healthz`
+- polls the auth-gated `/setup/api/status` (with the newly generated setup
+  credentials) as the readiness signal, not the unauthenticated
+  `/setup/healthz` — a container mid-transition can return `200` on
+  `/setup/healthz` before the new credentials are actually live
+- patches `gateway.controlUi.allowedOrigins` to include the instance's own
+  Railway domain, since it has no environment-variable override and isn't
+  auto-seeded for a Railway-style reverse-proxied deployment (this is the
+  confirmed cause of the dashboard's "origin not allowed" error, not `PORT`)
+- approves the installer's own device pairing request if exactly one is
+  pending (first-time browser/device connections require pairing approval
+  even with a correct `OPENCLAW_GATEWAY_TOKEN`); a client's own first real
+  browser login still triggers its own separate, per-device pairing request
 - writes `.env.local` and `openclaw-railway-handoff.local.md`
 - prints the setup URL and setup password for the current run
+
+These three post-deploy steps close out [issue #18](https://github.com/yuens1002/openclaw-control-plane/issues/18)
+items 3, 4, and 5. Two related items from the same issue live elsewhere:
+credential-write BOM safety, pre-deploy variable ordering, and the `railway
+volume add` CLI panic workaround (items 1, 2, 7) are owned by the
+agency-controlled client provisioning path (issue #16); seeding the agent's
+identity/soul from a client profile (Part 2 of #18) is tracked separately in
+issue #20, since its transport mechanism isn't live-tested yet and its
+content half lives in the private client-profile repo.
 
 This install path is intentionally a shell Chief of Staff install. It brings up
 OpenClaw, setup auth, public routing, and persistent state, but it does not
