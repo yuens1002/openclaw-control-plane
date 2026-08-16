@@ -53,6 +53,10 @@ export async function importWorkspaceFiles(
  * extract, for format compatibility.
  */
 export async function buildWorkspaceArchive(files: Record<string, string>): Promise<Buffer> {
+  for (const name of Object.keys(files)) {
+    assertSafeWorkspaceFilename(name);
+  }
+
   const stagingDir = await mkdtemp(join(tmpdir(), "openclaw-workspace-import-"));
   try {
     const workspaceDir = join(stagingDir, "workspace");
@@ -69,6 +73,19 @@ export async function buildWorkspaceArchive(files: Record<string, string>): Prom
     return Buffer.concat(chunks);
   } finally {
     await rm(stagingDir, { recursive: true, force: true });
+  }
+}
+
+// Validated locally, before any write: `buildWorkspaceArchive` stages files
+// on this machine's real filesystem ahead of tarring them (`writeFile(join(
+// workspaceDir, name), ...)`), so a traversal/absolute `name` could write
+// outside the staging dir here -- a distinct risk from the wrapper's own
+// server-side `looksSafeTarPath`, which only guards its `/data` extraction,
+// not this local staging step. This module has only flat-filename callers
+// today (IDENTITY.md/USER.md/SOUL.md); subdirectories aren't supported.
+function assertSafeWorkspaceFilename(name: string): void {
+  if (!name || name === "." || name === ".." || name.includes("/") || name.includes("\\") || /^[A-Za-z]:/.test(name)) {
+    throw new Error(`Unsafe workspace filename: ${JSON.stringify(name)}`);
   }
 }
 

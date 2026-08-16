@@ -54,6 +54,13 @@ describe("buildWorkspaceArchive", () => {
       await rm(scratchDir, { recursive: true, force: true });
     }
   });
+
+  it.each(["../escape.md", "..\\escape.md", "/etc/passwd", "C:\\Windows\\win.ini", "..", "sub/dir.md"])(
+    "rejects an unsafe filename (%s) before writing anything to disk",
+    async (unsafeName) => {
+      await expect(buildWorkspaceArchive({ [unsafeName]: "content" })).rejects.toThrow(/Unsafe workspace filename/);
+    }
+  );
 });
 
 describe("importWorkspaceFiles", () => {
