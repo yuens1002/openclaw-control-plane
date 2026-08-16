@@ -1,55 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  installOpenClawOnRailway,
-  mergeEnv,
-  type CommandResult,
-  type RailwayRunner
-} from "@openclaw-control-plane/openclaw-railway-installer";
-
-interface RecordedCommand {
-  args: string[];
-}
-
-class FakeRailwayRunner implements RailwayRunner {
-  readonly calls: RecordedCommand[] = [];
-  private serviceListResponses: unknown[] = [];
-  private domainListResponse: unknown = domainList(3000);
-  private domainUpdateResponse: unknown = { domain: serviceDomain(8080) };
-
-  constructor(serviceListResponses: unknown[]) {
-    this.serviceListResponses = [...serviceListResponses];
-  }
-
-  setDomainList(response: unknown): void {
-    this.domainListResponse = response;
-  }
-
-  setDomainUpdate(response: unknown): void {
-    this.domainUpdateResponse = response;
-  }
-
-  async run(args: string[]): Promise<CommandResult> {
-    this.calls.push({ args });
-    const key = args.slice(0, 2).join(" ");
-
-    if (args[0] === "deploy") {
-      return { stdout: "Creating clawdbot-railway-template...\n" };
-    }
-    if (key === "service list") {
-      const next = this.serviceListResponses.shift() ?? [];
-      return { stdout: JSON.stringify(next) };
-    }
-    if (key === "domain list") {
-      return { stdout: JSON.stringify(this.domainListResponse) };
-    }
-    if (key === "domain update") {
-      return { stdout: JSON.stringify(this.domainUpdateResponse) };
-    }
-
-    throw new Error(`Unexpected command: ${args.join(" ")}`);
-  }
-}
+import { installOpenClawOnRailway, mergeEnv } from "@openclaw-control-plane/openclaw-railway-installer";
+import { FakeRailwayRunner } from "./fixtures/fake-railway-runner.js";
 
 describe("OpenClaw Railway installer", () => {
   it("deploys a fresh template, fixes the domain port, verifies health, and writes local outputs", async () => {
@@ -58,6 +10,11 @@ describe("OpenClaw Railway installer", () => {
       [service("BUILDING")],
       [service("SUCCESS")]
     ]);
+    // This test's expected URLs use this file's own "example-openclaw..."
+    // domain fixture, distinct from the shared fixture's generic default —
+    // pin it explicitly rather than relying on an implicit default.
+    runner.setDomainList(domainList(3000));
+    runner.setDomainUpdate({ domain: serviceDomain(8080) });
     const writes = new Map<string, string>();
 
     const result = await installOpenClawOnRailway(
