@@ -203,6 +203,33 @@ describe("provisionClientInstance — fresh provision", () => {
   });
 });
 
+describe("provisionClientInstance — forceNew against a project with an existing service", () => {
+  it("identifies the newly created service by ID diff, not list position (PR #21 review comment)", async () => {
+    const oldService = serviceFixture({ id: "svc_old", name: "acme-openclaw-old", status: "SUCCESS" });
+    const newService = serviceFixture({ id: "svc_new", name: "acme-openclaw-new", status: "SUCCESS" });
+    // Deliberately listed with the pre-existing service AFTER the new one,
+    // so a naive `[0]` pick after `up` would grab the wrong service.
+    const runner = new FakeRailwayRunner([
+      [oldService],
+      [newService, oldService],
+      [newService, oldService]
+    ]);
+    runner.setDomainList(domainList(8080));
+
+    await provisionClientInstance(
+      { clientName: "acme", projectId: "proj_123", forceNew: true, pollSeconds: 0, writeLocalFiles: false },
+      baseDependencies(runner)
+    );
+
+    expect(runner.calls.some((call) => call.args[0] === "service" && call.args[1] === "acme-openclaw-new")).toBe(
+      true
+    );
+    expect(runner.calls.some((call) => call.args[0] === "service" && call.args[1] === "acme-openclaw-old")).toBe(
+      false
+    );
+  });
+});
+
 describe("provisionClientInstance — idempotent rerun", () => {
   it("skips up/service-link/volume/variable-set/redeploy when a service already exists for the linked project", async () => {
     const runner = new FakeRailwayRunner([[freshService("SUCCESS")]]);
@@ -234,15 +261,62 @@ describe("provisionClientInstance — idempotent rerun", () => {
 
     expect(result.setupPassword).toBe("already-handed-off-secret");
   });
+
+  it("refuses to reuse an existing unhealthy service without forceNew (PR #21 review comment)", async () => {
+    const runner = new FakeRailwayRunner([[freshService("CRASHED")]]);
+
+    await expect(
+      provisionClientInstance(
+        { clientName: "acme", projectId: "proj_123", pollSeconds: 0, writeLocalFiles: false },
+        baseDependencies(runner)
+      )
+    ).rejects.toThrow("already exists in this project with status 'CRASHED'");
+  });
+
+  it("throws instead of silently generating a fresh password when the existing service has no SETUP_PASSWORD set (PR #21 review comment)", async () => {
+    const runner = new FakeRailwayRunner([[freshService("SUCCESS")]]);
+    runner.setVariableListResponse({});
+
+    await expect(
+      provisionClientInstance(
+        { clientName: "acme", projectId: "proj_123", pollSeconds: 0, writeLocalFiles: false },
+        baseDependencies(runner)
+      )
+    ).rejects.toThrow("exists but has no SETUP_PASSWORD variable set");
+  });
+
+  it("refuses to guess when the linked project already has more than one service (PR #21 review comment)", async () => {
+    const runner = new FakeRailwayRunner([
+      [
+        serviceFixture({ id: "svc_a", name: "acme-openclaw", status: "SUCCESS" }),
+        serviceFixture({ id: "svc_b", name: "acme-openclaw-old", status: "SUCCESS" })
+      ]
+    ]);
+
+    await expect(
+      provisionClientInstance(
+        { clientName: "acme", projectId: "proj_123", pollSeconds: 0, writeLocalFiles: false },
+        baseDependencies(runner)
+      )
+    ).rejects.toThrow("found 2: acme-openclaw, acme-openclaw-old");
+  });
 });
 
-function freshService(status: "BUILDING" | "FAILED" | "SUCCESS") {
+function freshService(status: "BUILDING" | "CRASHED" | "FAILED" | "SUCCESS") {
+  return serviceFixture({ status });
+}
+
+function serviceFixture(overrides: {
+  id?: string;
+  name?: string;
+  status: "BUILDING" | "CRASHED" | "FAILED" | "SUCCESS";
+}) {
   return {
-    id: "svc_acme",
-    name: "acme-openclaw",
+    id: overrides.id ?? "svc_acme",
+    name: overrides.name ?? "acme-openclaw",
     latestDeployment: {
       id: "dep_acme",
-      status
+      status: overrides.status
     },
     url: "https://acme-openclaw.example.com"
   };

@@ -103,19 +103,35 @@ export async function provisionClientInstance(
     await dependencies.runner.run(initArgs);
   }
 
-  const existing = (await listServices(dependencies.runner))[0];
+  const servicesBefore = await listServices(dependencies.runner);
+  const existing = selectSoleService(servicesBefore, resolved.clientName, "linked project");
   let reusedExistingService = false;
   let service: InstallerService;
 
   if (existing && !resolved.forceNew) {
+    const status = existing.latestDeployment?.status;
+    if (status !== "SUCCESS") {
+      throw new Error(
+        `Service '${existing.name}' already exists in this project with status '${status ?? "unknown"}'. ` +
+          `Inspect logs with: railway logs --service ${existing.name} --lines 200`
+      );
+    }
     reusedExistingService = true;
     service = existing;
   } else {
     await dependencies.runner.run(["up", "--detach", "--json"]);
 
-    const created = (await listServices(dependencies.runner))[0];
+    // Diff service IDs before/after `up`, rather than indexing into
+    // `service list` output, so the newly created service is identified
+    // correctly even if the project already had other services (ordering
+    // isn't guaranteed) or `forceNew` re-ran bootstrap against a project
+    // that already had one.
+    const beforeIds = new Set(servicesBefore.map((s) => s.id));
+    const servicesAfter = await listServices(dependencies.runner);
+    const createdCandidates = servicesAfter.filter((s) => !beforeIds.has(s.id));
+    const created = selectSoleService(createdCandidates, resolved.clientName, "services created by 'railway up'");
     if (!created) {
-      throw new Error(`No Railway service was found after 'railway up' for client '${resolved.clientName}'.`);
+      throw new Error(`No new Railway service was found after 'railway up' for client '${resolved.clientName}'.`);
     }
 
     // Link the newly created service, then attach the volume with no
@@ -141,10 +157,22 @@ export async function provisionClientInstance(
   }
 
   // Never regenerate a credential that may already have been handed off to
-  // a client — read back what's actually on the service instead.
-  const setupPassword = reusedExistingService
-    ? ((await readRailwayVariable("SETUP_PASSWORD", service.name, dependencies)) ?? resolved.setupPassword)
-    : resolved.setupPassword;
+  // a client — read back what's actually on the service instead. A missing
+  // value here is a real inconsistency (the service exists but was never
+  // fully provisioned), not something to paper over with a freshly
+  // generated password that wouldn't match the service's actual auth
+  // configuration — fail loudly so the operator investigates or reprovisions.
+  let setupPassword = resolved.setupPassword;
+  if (reusedExistingService) {
+    const existingPassword = await readRailwayVariable("SETUP_PASSWORD", service.name, dependencies);
+    if (!existingPassword) {
+      throw new Error(
+        `Service '${service.name}' exists but has no SETUP_PASSWORD variable set. ` +
+          `Re-run with --force-new to reprovision, or set SETUP_PASSWORD manually before retrying.`
+      );
+    }
+    setupPassword = existingPassword;
+  }
 
   const domain = await ensureDomainPort(service.name, resolved.targetPort, dependencies.runner);
   const baseUrl = `https://${domain.domain}`;
@@ -236,6 +264,28 @@ async function resolveProvisionOptions(
     handoffPath: options.handoffPath ?? "openclaw-railway-client-handoff.local.md",
     writeLocalFiles: options.writeLocalFiles ?? true
   };
+}
+
+/**
+ * Returns the sole service in `candidates`, or `undefined` if there are
+ * none. Throws if there is more than one: this feature's design assumes
+ * one client == one project == one service, and `service list` ordering
+ * is not guaranteed, so silently indexing into `[0]` when that assumption
+ * is violated risks reusing or mutating the wrong service.
+ */
+function selectSoleService(
+  candidates: InstallerService[],
+  clientName: string,
+  context: string
+): InstallerService | undefined {
+  if (candidates.length > 1) {
+    const names = candidates.map((s) => s.name).join(", ");
+    throw new Error(
+      `Expected at most one service among ${context} for client '${clientName}', found ${candidates.length}: ${names}. ` +
+        `This provisioner assumes one client == one project == one service; resolve the extra service(s) manually before retrying.`
+    );
+  }
+  return candidates[0];
 }
 
 async function resolveDefaultTemplateRef(dependencies: ProvisionClientDependencies): Promise<string> {
