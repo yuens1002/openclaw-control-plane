@@ -331,16 +331,36 @@ export async function listServices(runner: RailwayRunner): Promise<InstallerServ
   return JSON.parse(result.stdout) as InstallerService[];
 }
 
+async function listDomains(serviceName: string, runner: RailwayRunner): Promise<{ domains: RailwayDomain[] }> {
+  const result = await runner.run(["domain", "list", "--service", serviceName, "--json"]);
+  return JSON.parse(result.stdout) as { domains: RailwayDomain[] };
+}
+
 export async function ensureDomainPort(
   serviceName: string,
   targetPort: number,
   runner: RailwayRunner
 ): Promise<RailwayDomain> {
-  const result = await runner.run(["domain", "list", "--service", serviceName, "--json"]);
-  const parsed = JSON.parse(result.stdout) as { domains: RailwayDomain[] };
-  const domain = parsed.domains.find((candidate) => candidate.type === "service") ?? parsed.domains[0];
+  let parsed = await listDomains(serviceName, runner);
+  let domain = parsed.domains.find((candidate) => candidate.type === "service") ?? parsed.domains[0];
+
   if (!domain) {
-    throw new Error(`No Railway domain found for service '${serviceName}'.`);
+    // A raw Dockerfile deploy (`railway up`, the provisionClientInstance
+    // path) never gets an automatic domain the way a marketplace-template
+    // install does -- confirmed live (first-ever smoke of
+    // provisionClientInstance, 2026-08-16): `domain list` came back empty
+    // for a freshly-deployed, already-`SUCCESS` service. `railway domain
+    // --service <name> --port <port> --json` generates one, but its
+    // response shape (`{domain: "<full-url>"}`, a string) is confirmed live
+    // to be different from `domain list`/`domain update`'s `{domain, type,
+    // targetPort}` object shape -- re-list rather than parse it directly,
+    // so this function returns one consistent shape either way.
+    await runner.run(["domain", "--service", serviceName, "--port", String(targetPort), "--json"]);
+    parsed = await listDomains(serviceName, runner);
+    domain = parsed.domains.find((candidate) => candidate.type === "service") ?? parsed.domains[0];
+    if (!domain) {
+      throw new Error(`Generated a Railway domain for '${serviceName}' but it did not appear in 'domain list'.`);
+    }
   }
 
   if (domain.targetPort !== targetPort) {

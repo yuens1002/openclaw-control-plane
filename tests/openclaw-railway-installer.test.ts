@@ -16,6 +16,8 @@ class FakeRailwayRunner implements RailwayRunner {
   private serviceListResponses: unknown[] = [];
   private domainListResponse: unknown = domainList(3000);
   private domainUpdateResponse: unknown = { domain: serviceDomain(8080) };
+  /** When set, simulates a service with no domain yet until `domain --service` (generate) is called. */
+  private domainGeneratesTo: unknown | undefined;
 
   constructor(serviceListResponses: unknown[]) {
     this.serviceListResponses = [...serviceListResponses];
@@ -27,6 +29,12 @@ class FakeRailwayRunner implements RailwayRunner {
 
   setDomainUpdate(response: unknown): void {
     this.domainUpdateResponse = response;
+  }
+
+  /** Simulates a freshly-deployed service with no domain until the generate call lands. */
+  setNoDomainUntilGenerated(generatedTargetPort: number): void {
+    this.domainListResponse = { domains: [] };
+    this.domainGeneratesTo = domainList(generatedTargetPort);
   }
 
   async run(args: string[]): Promise<CommandResult> {
@@ -45,6 +53,18 @@ class FakeRailwayRunner implements RailwayRunner {
     }
     if (key === "domain update") {
       return { stdout: JSON.stringify(this.domainUpdateResponse) };
+    }
+    if (args[0] === "domain" && args[1] === "--service") {
+      // The generate form (`railway domain --service <name> --port <n> --json`)
+      // -- confirmed live to return `{domain: "<full-url>"}`, a different
+      // shape than `domain list`/`update`. This fake doesn't need to
+      // reproduce that shape exactly since the real code re-lists rather
+      // than parsing it; it only needs to make the *next* `domain list`
+      // call reflect that a domain now exists.
+      if (this.domainGeneratesTo !== undefined) {
+        this.domainListResponse = this.domainGeneratesTo;
+      }
+      return { stdout: JSON.stringify({ domain: "https://generated-example.up.railway.app" }) };
     }
 
     throw new Error(`Unexpected command: ${args.join(" ")}`);
@@ -95,6 +115,40 @@ describe("OpenClaw Railway installer", () => {
     expect(writes.get("handoff.local.md")).toContain(
       "Attach client-specific tools, connectors, and workflows only after the shell install is healthy."
     );
+  });
+
+  it("generates a domain when the service has none yet, then proceeds normally", async () => {
+    // Confirmed live (first-ever smoke of provisionClientInstance,
+    // 2026-08-16): a freshly-deployed service can have zero domains --
+    // `domain list` returning empty isn't a Railway-side propagation delay,
+    // it means no domain was ever created and one must be generated
+    // explicitly.
+    const runner = new FakeRailwayRunner([[], [service("BUILDING")], [service("SUCCESS")]]);
+    runner.setNoDomainUntilGenerated(8080);
+
+    const result = await installOpenClawOnRailway(
+      {
+        setupPassword: "setup-secret",
+        gatewayToken: "gateway-secret",
+        pollSeconds: 0,
+        writeLocalFiles: false
+      },
+      {
+        runner,
+        sleep: async () => {},
+        checkSetupStatus: async (url) => (url.endsWith("/setup/api/status") ? 200 : 500),
+        getConfigRaw: async () => ({ ok: true, content: "{}" }),
+        postConfigRaw: async () => ({ ok: true }),
+        getPendingDevices: async () => ({ ok: true, requestIds: [] }),
+        approveDevice: async () => ({ ok: true })
+      }
+    );
+
+    expect(result.setupUrl).toBe("https://example-openclaw.example.com/setup");
+    expect(runner.calls.some((call) => call.args[0] === "domain" && call.args[1] === "--service")).toBe(true);
+    // Already generated at the requested port -- no separate `domain
+    // update` call needed on top of the generate call.
+    expect(runner.calls.some((call) => call.args[0] === "domain" && call.args[1] === "update")).toBe(false);
   });
 
   it("reuses an existing successful service without deploying a duplicate", async () => {
