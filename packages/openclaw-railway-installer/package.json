@@ -5,8 +5,11 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./approve-own-device": "./src/approve-own-device.ts",
     "./cli": "./src/cli.ts",
     "./guard-cli": "./src/guard-cli.ts",
+    "./patch-allowed-origins": "./src/patch-allowed-origins.ts",
+    "./setup-auth": "./src/setup-auth.ts",
     "./template-lock": "./src/template-lock.ts",
     "./verify-proof": "./src/verify-proof.ts"
   }

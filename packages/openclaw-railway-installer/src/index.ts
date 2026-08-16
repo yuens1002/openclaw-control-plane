@@ -2,6 +2,12 @@ import { randomBytes } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
+import { approveOwnDevicePairing, type ApproveOwnDeviceDependencies } from "./approve-own-device.js";
+import { patchAllowedOrigins, type PatchAllowedOriginsDependencies } from "./patch-allowed-origins.js";
+import { basicAuthHeader, type SetupAuth } from "./setup-auth.js";
+
+export type { SetupAuth };
+
 export type DeploymentStatus =
   | "BUILDING"
   | "CRASHED"
@@ -75,6 +81,11 @@ export interface InstallerDependencies {
   runner: RailwayRunner;
   sleep?: (ms: number) => Promise<void>;
   healthCheck?: (url: string) => Promise<number>;
+  checkSetupStatus?: (url: string, auth: SetupAuth) => Promise<number>;
+  getConfigRaw?: PatchAllowedOriginsDependencies["getConfigRaw"];
+  postConfigRaw?: PatchAllowedOriginsDependencies["postConfigRaw"];
+  getPendingDevices?: ApproveOwnDeviceDependencies["getPendingDevices"];
+  approveDevice?: ApproveOwnDeviceDependencies["approveDevice"];
   readText?: (path: string) => Promise<string>;
   writeText?: (path: string, contents: string) => Promise<void>;
 }
@@ -92,6 +103,8 @@ export interface InstallResult {
   reusedExistingService: boolean;
   wroteEnvLocal: boolean;
   wroteHandoff: boolean;
+  patchedAllowedOrigins: boolean;
+  approvedDeviceRequestId?: string;
 }
 
 interface RequiredOptions {
@@ -150,6 +163,11 @@ This file is local-only and should not be committed.
 - Username: ${result.setupUsername}
 - Password: ${result.setupPassword}
 
+## Post-Deploy Automation
+
+- Patched allowedOrigins: ${result.patchedAllowedOrigins ? "yes" : "no (already present)"}
+- Approved device pairing request: ${result.approvedDeviceRequestId ?? "none pending"}
+
 ## Next Steps
 
 1. Open the setup URL.
@@ -201,10 +219,26 @@ export async function installOpenClawOnRailway(
   const domain = await ensureDomainPort(service.name, resolved.targetPort, dependencies.runner);
   const baseUrl = `https://${domain.domain}`;
   const healthUrl = `${baseUrl}/setup/healthz`;
-  const status = await healthCheck(healthUrl, dependencies);
-  if (status !== 200) {
-    throw new Error(`Healthcheck '${healthUrl}' returned ${status}.`);
+  const setupAuth: SetupAuth = { username: resolved.setupUsername, password: resolved.setupPassword };
+
+  // Auth-gated readiness signal, not `/setup/healthz`: an unauthenticated
+  // healthcheck can return 200 from a container mid-transition, before the
+  // *new*, just-rotated setup credentials are actually live (issue #18
+  // item 3). `/setup/api/status` only succeeds once those credentials work.
+  const setupStatusUrl = `${baseUrl}/setup/api/status`;
+  const setupStatus = await checkSetupStatus(setupStatusUrl, setupAuth, dependencies);
+  if (setupStatus !== 200) {
+    throw new Error(`Setup readiness check '${setupStatusUrl}' returned ${setupStatus}.`);
   }
+
+  const { patched: patchedAllowedOrigins } = await patchAllowedOrigins(baseUrl, setupAuth, domain.domain, {
+    getConfigRaw: dependencies.getConfigRaw,
+    postConfigRaw: dependencies.postConfigRaw
+  });
+  const approvedDeviceRequestId = await approveOwnDevicePairing(baseUrl, setupAuth, {
+    getPendingDevices: dependencies.getPendingDevices,
+    approveDevice: dependencies.approveDevice
+  });
 
   const resultBase = {
     serviceId: service.id,
@@ -216,6 +250,8 @@ export async function installOpenClawOnRailway(
     setupUsername: resolved.setupUsername,
     setupPassword: resolved.setupPassword,
     reusedExistingService,
+    patchedAllowedOrigins,
+    ...(approvedDeviceRequestId ? { approvedDeviceRequestId } : {}),
     ...(service.latestDeployment?.id ? { deploymentId: service.latestDeployment.id } : {})
   } satisfies Omit<InstallResult, "wroteEnvLocal" | "wroteHandoff">;
 
@@ -323,6 +359,18 @@ async function healthCheck(url: string, dependencies: InstallerDependencies): Pr
     return dependencies.healthCheck(url);
   }
   const response = await fetch(url);
+  return response.status;
+}
+
+async function checkSetupStatus(
+  url: string,
+  auth: SetupAuth,
+  dependencies: InstallerDependencies
+): Promise<number> {
+  if (dependencies.checkSetupStatus) {
+    return dependencies.checkSetupStatus(url, auth);
+  }
+  const response = await fetch(url, { headers: { authorization: basicAuthHeader(auth) } });
   return response.status;
 }
 
