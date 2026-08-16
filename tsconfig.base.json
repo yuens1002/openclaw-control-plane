@@ -22,6 +22,8 @@
       "@openclaw-control-plane/openclaw-railway-installer/approve-own-device": ["packages/openclaw-railway-installer/src/approve-own-device.ts"],
       "@openclaw-control-plane/openclaw-railway-installer/cli": ["packages/openclaw-railway-installer/src/cli.ts"],
       "@openclaw-control-plane/openclaw-railway-installer/patch-allowed-origins": ["packages/openclaw-railway-installer/src/patch-allowed-origins.ts"],
+      "@openclaw-control-plane/openclaw-railway-installer/provision-client": ["packages/openclaw-railway-installer/src/provision-client.ts"],
+      "@openclaw-control-plane/openclaw-railway-installer/railway-variables": ["packages/openclaw-railway-installer/src/railway-variables.ts"],
       "@openclaw-control-plane/openclaw-railway-installer/setup-auth": ["packages/openclaw-railway-installer/src/setup-auth.ts"],
       "@openclaw-control-plane/openclaw-railway-installer/template-lock": ["packages/openclaw-railway-installer/src/template-lock.ts"],
       "@openclaw-control-plane/openclaw-railway-installer/verify-proof": ["packages/openclaw-railway-installer/src/verify-proof.ts"],

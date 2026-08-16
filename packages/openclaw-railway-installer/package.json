@@ -7,8 +7,11 @@
     ".": "./src/index.ts",
     "./approve-own-device": "./src/approve-own-device.ts",
     "./cli": "./src/cli.ts",
+    "./client-cli": "./src/client-cli.ts",
     "./guard-cli": "./src/guard-cli.ts",
     "./patch-allowed-origins": "./src/patch-allowed-origins.ts",
+    "./provision-client": "./src/provision-client.ts",
+    "./railway-variables": "./src/railway-variables.ts",
     "./setup-auth": "./src/setup-auth.ts",
     "./template-lock": "./src/template-lock.ts",
     "./verify-proof": "./src/verify-proof.ts"
