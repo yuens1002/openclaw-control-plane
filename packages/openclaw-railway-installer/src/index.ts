@@ -80,7 +80,6 @@ export interface InstallerOptions {
 export interface InstallerDependencies {
   runner: RailwayRunner;
   sleep?: (ms: number) => Promise<void>;
-  healthCheck?: (url: string) => Promise<number>;
   checkSetupStatus?: (url: string, auth: SetupAuth) => Promise<number>;
   getConfigRaw?: PatchAllowedOriginsDependencies["getConfigRaw"];
   postConfigRaw?: PatchAllowedOriginsDependencies["postConfigRaw"];
@@ -352,14 +351,6 @@ async function ensureDomainPort(
   }
 
   return domain;
-}
-
-async function healthCheck(url: string, dependencies: InstallerDependencies): Promise<number> {
-  if (dependencies.healthCheck) {
-    return dependencies.healthCheck(url);
-  }
-  const response = await fetch(url);
-  return response.status;
 }
 
 async function checkSetupStatus(

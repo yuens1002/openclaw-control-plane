@@ -71,7 +71,6 @@ describe("OpenClaw Railway installer", () => {
       {
         runner,
         sleep: async () => {},
-        healthCheck: async (url) => (url.endsWith("/setup/healthz") ? 200 : 500),
         checkSetupStatus: async (url) => (url.endsWith("/setup/api/status") ? 200 : 500),
         getConfigRaw: async () => ({ ok: true, content: "{}" }),
         postConfigRaw: async () => ({ ok: true }),
@@ -110,7 +109,6 @@ describe("OpenClaw Railway installer", () => {
       },
       {
         runner,
-        healthCheck: async () => 200,
         checkSetupStatus: async () => 200,
         getConfigRaw: async () => ({ ok: true, content: "{}" }),
         postConfigRaw: async () => ({ ok: true }),
@@ -138,8 +136,7 @@ describe("OpenClaw Railway installer", () => {
         },
         {
           runner,
-          sleep: async () => {},
-          healthCheck: async () => 200
+          sleep: async () => {}
         }
       )
     ).rejects.toThrow("railway logs --service clawdbot-railway-template --lines 200");
@@ -156,8 +153,7 @@ describe("OpenClaw Railway installer", () => {
           writeLocalFiles: false
         },
         {
-          runner,
-          healthCheck: async () => 200
+          runner
         }
       )
     ).rejects.toThrow("already exists with status 'CRASHED'");

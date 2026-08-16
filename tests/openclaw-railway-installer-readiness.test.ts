@@ -44,7 +44,6 @@ describe("installOpenClawOnRailway readiness check", () => {
   it("polls the authenticated /setup/api/status endpoint with the resolved credentials, not /setup/healthz", async () => {
     const runner = new FakeRailwayRunner([[], [service("BUILDING")], [service("SUCCESS")]]);
     const readinessCalls: { url: string; auth: { username: string; password: string } }[] = [];
-    let unauthenticatedHealthzCalled = false;
 
     await installOpenClawOnRailway(
       {
@@ -57,10 +56,6 @@ describe("installOpenClawOnRailway readiness check", () => {
       {
         runner,
         sleep: async () => {},
-        healthCheck: async () => {
-          unauthenticatedHealthzCalled = true;
-          return 200;
-        },
         checkSetupStatus: async (url, auth) => {
           readinessCalls.push({ url, auth });
           return 200;
@@ -72,7 +67,9 @@ describe("installOpenClawOnRailway readiness check", () => {
       }
     );
 
-    expect(unauthenticatedHealthzCalled).toBe(false);
+    // `InstallerDependencies` has no `healthCheck` field to spy on any more --
+    // its removal is itself the guarantee that /setup/healthz can't gate
+    // readiness. This test only has to confirm the real gate's shape.
     expect(readinessCalls).toHaveLength(1);
     expect(readinessCalls[0]?.url).toBe("https://example-openclaw.example.com/setup/api/status");
     expect(readinessCalls[0]?.auth).toEqual({ username: "openclaw-admin", password: "setup-secret-123" });
@@ -92,10 +89,85 @@ describe("installOpenClawOnRailway readiness check", () => {
         {
           runner,
           sleep: async () => {},
-          healthCheck: async () => 200,
           checkSetupStatus: async () => 401
         }
       )
     ).rejects.toThrow("Setup readiness check");
+  });
+});
+
+describe("installOpenClawOnRailway post-deploy step order and result reporting", () => {
+  it("runs readiness -> allowedOrigins patch -> device approve in order and reports what happened", async () => {
+    const runner = new FakeRailwayRunner([[], [service("SUCCESS")]]);
+    const order: string[] = [];
+
+    const result = await installOpenClawOnRailway(
+      {
+        setupPassword: "setup-secret",
+        gatewayToken: "gateway-secret",
+        pollSeconds: 0,
+        writeLocalFiles: false
+      },
+      {
+        runner,
+        sleep: async () => {},
+        checkSetupStatus: async () => {
+          order.push("readiness");
+          return 200;
+        },
+        getConfigRaw: async () => {
+          order.push("getConfigRaw");
+          return { ok: true, content: "{}" };
+        },
+        postConfigRaw: async () => {
+          order.push("postConfigRaw");
+          return { ok: true };
+        },
+        getPendingDevices: async () => {
+          order.push("getPendingDevices");
+          return { ok: true, requestIds: ["req_xyz789"] };
+        },
+        approveDevice: async () => {
+          order.push("approveDevice");
+          return { ok: true };
+        }
+      }
+    );
+
+    expect(order).toEqual(["readiness", "getConfigRaw", "postConfigRaw", "getPendingDevices", "approveDevice"]);
+    expect(result.patchedAllowedOrigins).toBe(true);
+    expect(result.approvedDeviceRequestId).toBe("req_xyz789");
+  });
+
+  it("reports no patch and no approval when there's nothing to do", async () => {
+    const runner = new FakeRailwayRunner([[], [service("SUCCESS")]]);
+
+    const result = await installOpenClawOnRailway(
+      {
+        setupPassword: "setup-secret",
+        gatewayToken: "gateway-secret",
+        pollSeconds: 0,
+        writeLocalFiles: false
+      },
+      {
+        runner,
+        sleep: async () => {},
+        checkSetupStatus: async () => 200,
+        getConfigRaw: async () => ({
+          ok: true,
+          content: JSON.stringify({ gateway: { controlUi: { allowedOrigins: ["https://example-openclaw.example.com"] } } })
+        }),
+        postConfigRaw: async () => {
+          throw new Error("should not be called when the origin is already present");
+        },
+        getPendingDevices: async () => ({ ok: true, requestIds: [] }),
+        approveDevice: async () => {
+          throw new Error("should not be called when nothing is pending");
+        }
+      }
+    );
+
+    expect(result.patchedAllowedOrigins).toBe(false);
+    expect(result.approvedDeviceRequestId).toBeUndefined();
   });
 });
