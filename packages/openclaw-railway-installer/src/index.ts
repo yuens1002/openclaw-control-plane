@@ -2,6 +2,12 @@ import { randomBytes } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
+import { approveOwnDevicePairing, type ApproveOwnDeviceDependencies } from "./approve-own-device.js";
+import { patchAllowedOrigins, type PatchAllowedOriginsDependencies } from "./patch-allowed-origins.js";
+import { basicAuthHeader, type SetupAuth } from "./setup-auth.js";
+
+export type { SetupAuth };
+
 export type DeploymentStatus =
   | "BUILDING"
   | "CRASHED"
@@ -74,7 +80,11 @@ export interface InstallerOptions {
 export interface InstallerDependencies {
   runner: RailwayRunner;
   sleep?: (ms: number) => Promise<void>;
-  healthCheck?: (url: string) => Promise<number>;
+  checkSetupStatus?: (url: string, auth: SetupAuth) => Promise<number>;
+  getConfigRaw?: PatchAllowedOriginsDependencies["getConfigRaw"];
+  postConfigRaw?: PatchAllowedOriginsDependencies["postConfigRaw"];
+  getPendingDevices?: ApproveOwnDeviceDependencies["getPendingDevices"];
+  approveDevice?: ApproveOwnDeviceDependencies["approveDevice"];
   readText?: (path: string) => Promise<string>;
   writeText?: (path: string, contents: string) => Promise<void>;
 }
@@ -92,6 +102,8 @@ export interface InstallResult {
   reusedExistingService: boolean;
   wroteEnvLocal: boolean;
   wroteHandoff: boolean;
+  patchedAllowedOrigins: boolean;
+  approvedDeviceRequestId?: string;
 }
 
 interface RequiredOptions {
@@ -150,6 +162,11 @@ This file is local-only and should not be committed.
 - Username: ${result.setupUsername}
 - Password: ${result.setupPassword}
 
+## Post-Deploy Automation
+
+- Patched allowedOrigins: ${result.patchedAllowedOrigins ? "yes" : "no (already present)"}
+- Approved device pairing request: ${result.approvedDeviceRequestId ?? "none pending"}
+
 ## Next Steps
 
 1. Open the setup URL.
@@ -201,10 +218,25 @@ export async function installOpenClawOnRailway(
   const domain = await ensureDomainPort(service.name, resolved.targetPort, dependencies.runner);
   const baseUrl = `https://${domain.domain}`;
   const healthUrl = `${baseUrl}/setup/healthz`;
-  const status = await healthCheck(healthUrl, dependencies);
-  if (status !== 200) {
-    throw new Error(`Healthcheck '${healthUrl}' returned ${status}.`);
-  }
+  const setupAuth: SetupAuth = { username: resolved.setupUsername, password: resolved.setupPassword };
+
+  // Auth-gated readiness signal, not `/setup/healthz`: an unauthenticated
+  // healthcheck can return 200 from a container mid-transition, before the
+  // *new*, just-rotated setup credentials are actually live (issue #18
+  // item 3). `/setup/api/status` only succeeds once those credentials work
+  // -- poll it rather than checking once, since that propagation can take
+  // a few seconds after the deployment itself reaches SUCCESS.
+  const setupStatusUrl = `${baseUrl}/setup/api/status`;
+  await waitForSetupReady(setupStatusUrl, setupAuth, resolved.pollSeconds, resolved.timeoutMinutes, dependencies);
+
+  const { patched: patchedAllowedOrigins } = await patchAllowedOrigins(baseUrl, setupAuth, domain.domain, {
+    getConfigRaw: dependencies.getConfigRaw,
+    postConfigRaw: dependencies.postConfigRaw
+  });
+  const approvedDeviceRequestId = await approveOwnDevicePairing(baseUrl, setupAuth, {
+    getPendingDevices: dependencies.getPendingDevices,
+    approveDevice: dependencies.approveDevice
+  });
 
   const resultBase = {
     serviceId: service.id,
@@ -216,6 +248,8 @@ export async function installOpenClawOnRailway(
     setupUsername: resolved.setupUsername,
     setupPassword: resolved.setupPassword,
     reusedExistingService,
+    patchedAllowedOrigins,
+    ...(approvedDeviceRequestId ? { approvedDeviceRequestId } : {}),
     ...(service.latestDeployment?.id ? { deploymentId: service.latestDeployment.id } : {})
   } satisfies Omit<InstallResult, "wroteEnvLocal" | "wroteHandoff">;
 
@@ -327,12 +361,48 @@ export async function ensureDomainPort(
   return domain;
 }
 
-export async function healthCheck(url: string, dependencies: InstallerDependencies): Promise<number> {
-  if (dependencies.healthCheck) {
-    return dependencies.healthCheck(url);
+async function checkSetupStatus(
+  url: string,
+  auth: SetupAuth,
+  dependencies: InstallerDependencies
+): Promise<number> {
+  if (dependencies.checkSetupStatus) {
+    return dependencies.checkSetupStatus(url, auth);
   }
-  const response = await fetch(url);
+  const response = await fetch(url, { headers: { authorization: basicAuthHeader(auth) } });
   return response.status;
+}
+
+/**
+ * Polls `checkSetupStatus` until it returns 200 or the timeout elapses.
+ * Newly-rotated setup credentials can take a few seconds to propagate after
+ * the deployment itself reaches SUCCESS, so a single check is not enough --
+ * mirrors `waitForSuccessfulService`'s poll/timeout shape. Exported for
+ * reuse by `provision-client.ts`, which had its own separate unauthenticated
+ * `/setup/healthz` single-shot check (from #16, merged as PR #21) before
+ * this feature's fix (issue #18 item 3) was ported over to it too.
+ */
+export async function waitForSetupReady(
+  url: string,
+  auth: SetupAuth,
+  pollSeconds: number,
+  timeoutMinutes: number,
+  dependencies: InstallerDependencies
+): Promise<void> {
+  const deadline = Date.now() + timeoutMinutes * 60_000;
+  let lastStatus: number | undefined;
+  do {
+    lastStatus = await checkSetupStatus(url, auth, dependencies);
+    if (lastStatus === 200) {
+      return;
+    }
+    await (dependencies.sleep ?? defaultSleep)(pollSeconds * 1000);
+  } while (Date.now() < deadline);
+
+  throw new Error(
+    `Setup readiness check '${url}' did not return 200 within ${timeoutMinutes} minute(s) ` +
+      `(last status: ${lastStatus ?? "none"}).`
+  );
 }
 
 async function writeEnvLocal(

@@ -82,7 +82,7 @@ function baseDependencies(runner: RailwayRunner, overrides: Partial<ProvisionCli
   return {
     runner,
     sleep: async () => {},
-    healthCheck: async (url: string) => (url.endsWith("/setup/healthz") ? 200 : 500),
+    checkSetupStatus: async (url: string) => (url.endsWith("/setup/api/status") ? 200 : 500),
     readText: async () => "",
     writeText: async () => {},
     readTemplateLock: async () => ({ pinnedCommit: FIXTURE_PINNED_COMMIT }),
