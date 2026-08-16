@@ -63,16 +63,25 @@ export async function mintOpenRouterKey(
     throw new OpenRouterProvisioningError(response.status);
   }
 
-  const data = (await response.json()) as { key?: unknown; hash?: unknown };
-  if (typeof data.key !== "string" || data.key.length === 0) {
+  // Confirmed live (2026-08-16, diagnostic probe key immediately deleted
+  // after inspection): the create response is `{ key: "<secret>", data: {
+  // hash, name, ... } }` -- the secret is top-level, but `hash` is nested
+  // under `data`, NOT top-level. This differs from an earlier guess (both
+  // top-level) that shipped without live confirmation and orphaned a real,
+  // untracked key on first live use (mint succeeded, hash-read failed, so
+  // the key was never written anywhere and never deleted) -- see
+  // docs/plans/onboarding-regression-pipeline/plan.md.
+  const body = (await response.json()) as { key?: unknown; data?: { hash?: unknown } };
+  if (typeof body.key !== "string" || body.key.length === 0) {
     throw new Error("OpenRouter provisioning API response did not include a key.");
   }
-  if (typeof data.hash !== "string" || data.hash.length === 0) {
+  const hash = body.data?.hash;
+  if (typeof hash !== "string" || hash.length === 0) {
     throw new Error(
-      "OpenRouter provisioning API response did not include a hash — cannot manage/delete this key later."
+      "OpenRouter provisioning API response did not include a data.hash — cannot manage/delete this key later."
     );
   }
-  return { key: data.key, hash: data.hash };
+  return { key: body.key, hash };
 }
 
 /**

@@ -70,7 +70,7 @@ function buildFetchStub(options: {
     }
     if (url === "https://openrouter.ai/api/v1/keys") {
       options.callOrder.push("mint");
-      return new Response(JSON.stringify({ key: SENTINEL_MINTED, hash: SENTINEL_MINTED_HASH }), { status: 200 });
+      return new Response(JSON.stringify({ key: SENTINEL_MINTED, data: { hash: SENTINEL_MINTED_HASH } }), { status: 200 });
     }
     throw new Error(`Unexpected fetch: ${url}`);
   }) as typeof fetch;
@@ -564,7 +564,7 @@ describe("apply-profile apply mode", () => {
       }
       if (url === "https://openrouter.ai/api/v1/keys") {
         callOrder.push("mint");
-        return new Response(JSON.stringify({ key: SENTINEL_MINTED, hash: SENTINEL_MINTED_HASH }), { status: 200 });
+        return new Response(JSON.stringify({ key: SENTINEL_MINTED, data: { hash: SENTINEL_MINTED_HASH } }), { status: 200 });
       }
       throw new Error(`Unexpected fetch: ${url}`);
     };

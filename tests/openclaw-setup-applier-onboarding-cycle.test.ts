@@ -80,7 +80,7 @@ describe("runRegressionCheck", () => {
       const url = String(input);
       if (url === "https://openrouter.ai/api/v1/keys") {
         options.calls.push("mint");
-        return new Response(JSON.stringify({ key: SENTINEL_MINTED, hash: SENTINEL_MINTED_HASH }), { status: 200 });
+        return new Response(JSON.stringify({ key: SENTINEL_MINTED, data: { hash: SENTINEL_MINTED_HASH } }), { status: 200 });
       }
       if (url === `https://openrouter.ai/api/v1/keys/${SENTINEL_MINTED_HASH}`) {
         options.calls.push("delete");
@@ -185,7 +185,7 @@ describe("runRegressionCheck", () => {
     const fetchImpl = (async (input: string | URL | Request) => {
       const url = String(input);
       if (url === "https://openrouter.ai/api/v1/keys") {
-        return new Response(JSON.stringify({ key: SENTINEL_MINTED, hash: SENTINEL_MINTED_HASH }), { status: 200 });
+        return new Response(JSON.stringify({ key: SENTINEL_MINTED, data: { hash: SENTINEL_MINTED_HASH } }), { status: 200 });
       }
       if (url === `https://openrouter.ai/api/v1/keys/${SENTINEL_MINTED_HASH}`) {
         calls.push("delete");
@@ -242,7 +242,7 @@ describe("bootstrapOnboardingCycle", () => {
       const url = String(input);
       if (url === "https://openrouter.ai/api/v1/keys") {
         calls.push("mint");
-        return new Response(JSON.stringify({ key: SENTINEL_MINTED, hash: SENTINEL_MINTED_HASH }), { status: 200 });
+        return new Response(JSON.stringify({ key: SENTINEL_MINTED, data: { hash: SENTINEL_MINTED_HASH } }), { status: 200 });
       }
       if (url.endsWith("/setup/api/status")) {
         calls.push("status");

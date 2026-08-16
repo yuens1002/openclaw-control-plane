@@ -23,8 +23,9 @@ describe("OpenRouter key minting", () => {
             body: String(init?.body),
             auth: (init?.headers as Record<string, string> | undefined)?.["authorization"] ?? null
           });
+          // Real shape, confirmed live: `data.hash` is nested, not top-level.
           return new Response(
-            JSON.stringify({ key: "sk-test-DO-NOT-LOG-minted", hash: "hash-test-abc123" }),
+            JSON.stringify({ key: "sk-test-DO-NOT-LOG-minted", data: { hash: "hash-test-abc123" } }),
             { status: 200 }
           );
         }
@@ -66,12 +67,28 @@ describe("OpenRouter key minting", () => {
     expect(error).toBeInstanceOf(Error);
   });
 
-  it("throws if the response has a key but no hash", async () => {
+  it("throws if the response has a key but no data.hash", async () => {
     const error = await mintOpenRouterKey(
       { name: "EXAMPLE_KEY", spendLimitUsd: 10, limitReset: "monthly" },
       {
         managementKey: "sk-test-DO-NOT-LOG-mgmt",
         fetchImpl: async () => new Response(JSON.stringify({ key: "sk-test-DO-NOT-LOG-minted" }), { status: 200 })
+      }
+    ).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("hash");
+  });
+
+  it("throws if data is present but data.hash is missing", async () => {
+    const error = await mintOpenRouterKey(
+      { name: "EXAMPLE_KEY", spendLimitUsd: 10, limitReset: "monthly" },
+      {
+        managementKey: "sk-test-DO-NOT-LOG-mgmt",
+        fetchImpl: async () =>
+          new Response(JSON.stringify({ key: "sk-test-DO-NOT-LOG-minted", data: { name: "EXAMPLE_KEY" } }), {
+            status: 200
+          })
       }
     ).catch((caught: unknown) => caught);
 
