@@ -4,13 +4,14 @@ import { resolve } from "node:path";
 import {
   createSecret,
   ensureDomainPort,
-  healthCheck,
   listServices,
   mergeEnv,
   pollServiceUntilSuccess,
+  waitForSetupReady,
   writeLocalText,
   type InstallerDependencies,
-  type InstallerService
+  type InstallerService,
+  type SetupAuth
 } from "./index.js";
 import { readRailwayVariable, writeRailwayVariable } from "./railway-variables.js";
 import { readTemplateLock } from "./template-lock.js";
@@ -177,10 +178,15 @@ export async function provisionClientInstance(
   const domain = await ensureDomainPort(service.name, resolved.targetPort, dependencies.runner);
   const baseUrl = `https://${domain.domain}`;
   const healthUrl = `${baseUrl}/setup/healthz`;
-  const status = await healthCheck(healthUrl, dependencies);
-  if (status !== 200) {
-    throw new Error(`Healthcheck '${healthUrl}' returned ${status}.`);
-  }
+
+  // Auth-gated readiness signal, not `/setup/healthz`: an unauthenticated
+  // healthcheck can return 200 from a container mid-transition, before the
+  // *new*/reused setup credentials are actually live (issue #18 item 3,
+  // ported here from the marketplace install path after #16 and #18
+  // landed in parallel and both touched this readiness check).
+  const setupAuth: SetupAuth = { username: resolved.setupUsername, password: setupPassword };
+  const setupStatusUrl = `${baseUrl}/setup/api/status`;
+  await waitForSetupReady(setupStatusUrl, setupAuth, resolved.pollSeconds, resolved.timeoutMinutes, dependencies);
 
   const resultBase = {
     serviceId: service.id,
