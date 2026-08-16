@@ -137,6 +137,50 @@ No live Railway smoke test has been run against this path yet; it is
 verified against a mocked Railway CLI (see `tests/openclaw-railway-provision-client.test.ts`
 and `tests/openclaw-railway-update-client-ref.test.ts`).
 
+## Onboarding Regression Pipeline
+
+`onboarding-cycle` (see [issue #16](https://github.com/yuens1002/openclaw-control-plane/issues/16)
+and [#18](https://github.com/yuens1002/openclaw-control-plane/issues/18)'s
+follow-up dogfood work) turns the provisioning + apply chain above into a
+reusable, schedulable regression check against a dedicated fixture instance
+— proving the client-onboarding automation keeps working over time, without
+leaving a live OpenRouter key standing between runs.
+
+```bash
+# One-time: provision the fixture (or reuse it if it already exists) and
+# apply a profile to it. Leaves the minted OpenRouter key alive — a
+# human-supervised verification step (e.g. a dashboard login) needs a
+# working key. Delete it explicitly once that's done.
+OPENROUTER_MANAGEMENT_KEY=<mgmt-key> \
+  npm run onboarding-cycle -- bootstrap --client-name <fixture-name> --profile <path/to/profile.json>
+
+npm run onboarding-cycle -- delete-key --hash <hash-printed-by-bootstrap>
+
+# Recurring: mints a fresh key, verifies the fixture is still configured and
+# healthy, and deletes the key again in a `finally` block — regardless of
+# whether the check passed or failed. No browser step; safe to schedule
+# unattended.
+OPENROUTER_MANAGEMENT_KEY=<mgmt-key> \
+OPENCLAW_INSTANCE_SETUP_PASSWORD=<fixture-setup-password> \
+  npm run onboarding-cycle -- regression-check --service <fixture-name> --instance-url <https://fixture-domain> --profile <path/to/profile.json>
+```
+
+What `regression-check` proves: the OpenRouter mint/delete API still works,
+and the fixture Railway service is still reachable and reports configured.
+It does **not** prove a live chat response through the running gateway —
+`/setup/api/run` is only ever called once, by `bootstrap`; a real dashboard
+chat proof stays a human-supervised step, not something this unattended
+check does.
+
+**Accepted tradeoff, not a bug:** between scheduled runs, the fixture's
+model-provider Railway variable holds the *previous* run's now-deleted key
+value. That's fine — the fixture doesn't serve real traffic between runs,
+and the value is overwritten (with a fresh, immediately-deleted key) on the
+next run. No Railway project-delete capability exists in this toolchain
+(neither in this package nor in Railway's own CLI/API surface used here),
+so the fixture project itself is a standing target, reused indefinitely —
+only the OpenRouter key has a per-run lifecycle.
+
 ## Template Pinning and Updates
 
 This repo pins the verifiable upstream template ref in
