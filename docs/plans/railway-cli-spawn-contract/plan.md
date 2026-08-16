@@ -165,6 +165,10 @@ Two independent tracks, both test-only:
 - `tests/openclaw-railway-installer.test.ts`
 - `tests/openclaw-railway-provision-client.test.ts`
 - `tests/openclaw-railway-update-client-ref.test.ts`
+- `tests/tsconfig.json` — add `fixtures/**/*.ts` to `include` (discovered
+  during Implement: the `tests` TS project only included `**/*.test.ts` and
+  `fixtures/**/*.json`; D4's new `.ts` fixture file needs its own include
+  pattern to compile under Gate — TS6307)
 
 ## Sessions
 
