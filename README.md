@@ -51,7 +51,8 @@ OpenClaw manages the system; it does not become the system.
 - `packages/db`: migrations and typed persistence primitives
 - `packages/openclaw-adapter`: OpenClaw-facing API wrappers
 - `workers/vending`: fake/manual example worker package
-- `deploy/openclaw-railway`: OpenClaw Railway template installer
+- `deploy/openclaw-railway`: OpenClaw Railway template installer and
+  agency-controlled per-client provisioning
 - `docs`: architecture, feature, and operations documentation
 
 ## Local Setup

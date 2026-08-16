@@ -6,7 +6,10 @@
   "exports": {
     ".": "./src/index.ts",
     "./cli": "./src/cli.ts",
+    "./client-cli": "./src/client-cli.ts",
     "./guard-cli": "./src/guard-cli.ts",
+    "./provision-client": "./src/provision-client.ts",
+    "./railway-variables": "./src/railway-variables.ts",
     "./template-lock": "./src/template-lock.ts",
     "./verify-proof": "./src/verify-proof.ts"
   }

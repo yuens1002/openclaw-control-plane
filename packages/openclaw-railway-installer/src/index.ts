@@ -192,7 +192,7 @@ export async function installOpenClawOnRailway(
 
   const service = reusedExistingService
     ? existing
-    : await waitForSuccessfulService(resolved, dependencies);
+    : await pollServiceUntilSuccess(resolved.service, resolved.pollSeconds, resolved.timeoutMinutes, dependencies);
 
   if (!service) {
     throw new Error(`Service '${resolved.service}' was not found after deployment.`);
@@ -256,14 +256,23 @@ function findTemplateService(services: InstallerService[], serviceName: string):
   return services.find((service) => service.name === serviceName);
 }
 
-async function waitForSuccessfulService(
-  options: RequiredOptions,
+/**
+ * Polls `service list` until the named service's latest deployment reaches
+ * `SUCCESS`, or throws on a terminal failure status / timeout. Generic over
+ * which command put the service into a pending state (a fresh `deploy`, a
+ * `redeploy`, etc.) — shared by the marketplace-template install path and
+ * the Dockerfile-based client provisioner.
+ */
+export async function pollServiceUntilSuccess(
+  serviceName: string,
+  pollSeconds: number,
+  timeoutMinutes: number,
   dependencies: InstallerDependencies
-): Promise<InstallerService | undefined> {
-  const deadline = Date.now() + options.timeoutMinutes * 60_000;
+): Promise<InstallerService> {
+  const deadline = Date.now() + timeoutMinutes * 60_000;
   do {
-    await (dependencies.sleep ?? defaultSleep)(options.pollSeconds * 1000);
-    const service = findTemplateService(await listServices(dependencies.runner), options.service);
+    await (dependencies.sleep ?? defaultSleep)(pollSeconds * 1000);
+    const service = findTemplateService(await listServices(dependencies.runner), serviceName);
     if (!service) {
       continue;
     }
@@ -275,20 +284,20 @@ async function waitForSuccessfulService(
     if (status && terminalFailureStatuses.has(status)) {
       throw new Error(
         `Deployment ended in terminal state '${status}'. ` +
-          `Check logs with: railway logs --service ${options.service} --lines 200`
+          `Check logs with: railway logs --service ${serviceName} --lines 200`
       );
     }
   } while (Date.now() < deadline);
 
-  throw new Error(`Timed out waiting for '${options.service}' to deploy.`);
+  throw new Error(`Timed out waiting for '${serviceName}' to deploy.`);
 }
 
-async function listServices(runner: RailwayRunner): Promise<InstallerService[]> {
+export async function listServices(runner: RailwayRunner): Promise<InstallerService[]> {
   const result = await runner.run(["service", "list", "--json"]);
   return JSON.parse(result.stdout) as InstallerService[];
 }
 
-async function ensureDomainPort(
+export async function ensureDomainPort(
   serviceName: string,
   targetPort: number,
   runner: RailwayRunner
@@ -318,7 +327,7 @@ async function ensureDomainPort(
   return domain;
 }
 
-async function healthCheck(url: string, dependencies: InstallerDependencies): Promise<number> {
+export async function healthCheck(url: string, dependencies: InstallerDependencies): Promise<number> {
   if (dependencies.healthCheck) {
     return dependencies.healthCheck(url);
   }
@@ -350,7 +359,7 @@ async function writeEnvLocal(
   await writeLocalText(path, merged, dependencies);
 }
 
-async function writeLocalText(
+export async function writeLocalText(
   path: string,
   contents: string,
   dependencies: InstallerDependencies

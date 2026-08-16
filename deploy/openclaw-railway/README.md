@@ -58,6 +58,65 @@ no active upstream URL pointing at `vignesh07`. The `vignesh07` repo should
 appear only as the pinned wrapper dependency in this repo's Dockerfile and lock
 file.
 
+## Agency-Controlled Client Provisioning (per-client version pinning)
+
+`install-template.ps1` (above) and the public-proof `main`-tracked pattern
+are each right for their own purpose, but neither gives the agency
+independent control over *when* a specific client's wrapper version
+updates:
+
+- `install-template.ps1` deploys `vignesh07/clawdbot-railway-template`
+  directly — the marketplace template's own update cadence, not the
+  agency's.
+- Pointing a client's Railway service at
+  `yuens1002/openclaw-control-plane@main` (the public-proof pattern) would
+  couple that one client's redeploy timing to control-plane's own unrelated
+  day-to-day commits.
+
+`provision-client.ps1` and `update-client-template-ref.ps1` close that gap
+(see issue [#16](https://github.com/yuens1002/openclaw-control-plane/issues/16))
+by deploying **this repo's own Dockerfile** per client via `railway up` —
+a one-shot snapshot build, not
+continuously tracked — with a per-client `OPENCLAW_TEMPLATE_REF` Railway
+service variable overriding the Dockerfile's `ARG` default. Updating one
+client's wrapper version is setting a new ref on that client's service and
+redeploying; it never touches any other client's service, the marketplace
+template, or control-plane's own `main`.
+
+```powershell
+.\deploy\openclaw-railway\provision-client.ps1 -ClientName acme
+.\deploy\openclaw-railway\provision-client.ps1 -ClientName acme -ProjectId <existing-project-id>
+.\deploy\openclaw-railway\provision-client.ps1 -ClientName acme -TemplateRef <commit-sha>
+
+.\deploy\openclaw-railway\update-client-template-ref.ps1 -Service acme-openclaw -TemplateRef <new-commit-sha>
+```
+
+`OPENCLAW_TEMPLATE_REF` defaults to this repo's own
+`template-lock.json` → `pinnedCommit` when not passed explicitly.
+
+Provisioning sets `PORT=8080`, `OPENCLAW_STATE_DIR=/data/.openclaw`, and
+`OPENCLAW_WORKSPACE_DIR=/data/workspace` as explicit Railway service
+variables even though the root `railway.toml` already declares an
+equivalent `[variables]` block — `railway up` (a local snapshot build)
+does **not** apply that block, so leaving these to it silently writes the
+running instance's config to non-persistent container storage. Passing
+`-ProjectId` on a rerun against an already-provisioned client is what
+makes provisioning idempotent: it detects the existing service and skips
+re-bootstrapping, and reuses the service's actual `SETUP_PASSWORD` rather
+than generating (and overwriting) a new one.
+
+Issue [#18](https://github.com/yuens1002/openclaw-control-plane/issues/18)
+later corrected an earlier misattribution in #16: a BOM-corrupted `SETUP_PASSWORD` observed during
+manual testing was caused by PowerShell's own `|` pipe operator injecting
+a UTF-8 BOM into piped stdin, not Railway's dashboard "reveal variable"
+UI. This provisioning path is unaffected — it writes secrets via Node's
+`child_process.spawn` + `stdin.end()` from inside the installer process
+itself, never through a PowerShell pipe.
+
+No live Railway smoke test has been run against this path yet; it is
+verified against a mocked Railway CLI (see `tests/openclaw-railway-provision-client.test.ts`
+and `tests/openclaw-railway-update-client-ref.test.ts`).
+
 ## Template Pinning and Updates
 
 This repo pins the verifiable upstream template ref in
