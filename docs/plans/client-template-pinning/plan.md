@@ -52,6 +52,20 @@ own `main`. Resolves GitHub issue #16.
   MSYS path layer. The existing `writeRailwayVariable` helper (see D3)
   already sidesteps this by piping values via `--stdin` instead of putting
   them in argv, so this plan reuses it rather than re-deriving the fix.
+- **Correction from issue #18** (raised after this plan was first drafted):
+  issue #16's own comment misattributed a BOM-corrupted
+  `SETUP_PASSWORD`/`OPENCLAW_GATEWAY_TOKEN` to Railway's dashboard "reveal
+  variable" UI. #18 found the real, byte-level-confirmed cause: **PowerShell's
+  own `|` pipe operator** injects a UTF-8 BOM + trailing CRLF when piping a
+  string to a native executable's stdin (`"abc" | node ...` → `ef bb bf 61
+  62 63 0d 0a`). This plan's provisioner never does that: `writeRailwayVariable`
+  (D3) writes secrets via Node's `child_process.spawn(..., {shell: false})`
+  + `child.stdin.end(value)`, called from inside the `tsx`/Node process
+  itself — the `.ps1` wrappers (D7) only pass plain CLI flags as an
+  argument array to `npm exec`, never a secret through a PowerShell `|`
+  pipe. Confirmed locally, byte-level, as part of this session: the same
+  `spawn` + `.end(string)` pattern this code already uses produces the raw
+  bytes with no BOM and no CRLF. See AC-PROV-008.
 
 ## Command sequence (the actual design)
 
