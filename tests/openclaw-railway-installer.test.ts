@@ -72,6 +72,11 @@ describe("OpenClaw Railway installer", () => {
         runner,
         sleep: async () => {},
         healthCheck: async (url) => (url.endsWith("/setup/healthz") ? 200 : 500),
+        checkSetupStatus: async (url) => (url.endsWith("/setup/api/status") ? 200 : 500),
+        getConfigRaw: async () => ({ ok: true, content: "{}" }),
+        postConfigRaw: async () => ({ ok: true }),
+        getPendingDevices: async () => ({ ok: true, requestIds: [] }),
+        approveDevice: async () => ({ ok: true }),
         readText: async () => "",
         writeText: async (path, contents) => {
           writes.set(path, contents);
@@ -105,7 +110,12 @@ describe("OpenClaw Railway installer", () => {
       },
       {
         runner,
-        healthCheck: async () => 200
+        healthCheck: async () => 200,
+        checkSetupStatus: async () => 200,
+        getConfigRaw: async () => ({ ok: true, content: "{}" }),
+        postConfigRaw: async () => ({ ok: true }),
+        getPendingDevices: async () => ({ ok: true, requestIds: [] }),
+        approveDevice: async () => ({ ok: true })
       }
     );
 
