@@ -51,4 +51,22 @@ describe("approveOwnDevicePairing", () => {
 
     expect(approveCalls).toBe(0);
   });
+
+  it("throws when the wrapper responds ok:false on the pending-devices listing", async () => {
+    await expect(
+      approveOwnDevicePairing(BASE_URL, AUTH, {
+        getPendingDevices: async () => ({ ok: false, requestIds: [] }),
+        approveDevice: async () => ({ ok: true })
+      })
+    ).rejects.toThrow("ok:false");
+  });
+
+  it("throws when the wrapper responds ok:false on approve, and does not return a requestId", async () => {
+    await expect(
+      approveOwnDevicePairing(BASE_URL, AUTH, {
+        getPendingDevices: async () => ({ ok: true, requestIds: ["req_abc123"] }),
+        approveDevice: async () => ({ ok: false })
+      })
+    ).rejects.toThrow("ok:false");
+  });
 });

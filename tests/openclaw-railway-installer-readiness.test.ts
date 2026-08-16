@@ -84,6 +84,11 @@ describe("installOpenClawOnRailway readiness check", () => {
           setupPassword: "setup-secret",
           gatewayToken: "gateway-secret",
           pollSeconds: 0,
+          // A do-while poll always attempts at least once regardless of
+          // timeout, so timeoutMinutes: 0 exercises exactly one attempt
+          // (matching this test's intent) without spinning against real
+          // wall-clock time for the production default (25 minutes).
+          timeoutMinutes: 0,
           writeLocalFiles: false
         },
         {
@@ -93,6 +98,35 @@ describe("installOpenClawOnRailway readiness check", () => {
         }
       )
     ).rejects.toThrow("Setup readiness check");
+  });
+
+  it("retries the readiness check on transient non-200 responses until it succeeds", async () => {
+    const runner = new FakeRailwayRunner([[], [service("SUCCESS")]]);
+    let attempts = 0;
+
+    const result = await installOpenClawOnRailway(
+      {
+        setupPassword: "setup-secret",
+        gatewayToken: "gateway-secret",
+        pollSeconds: 0,
+        writeLocalFiles: false
+      },
+      {
+        runner,
+        sleep: async () => {},
+        checkSetupStatus: async () => {
+          attempts += 1;
+          return attempts < 3 ? 401 : 200;
+        },
+        getConfigRaw: async () => ({ ok: true, content: "{}" }),
+        postConfigRaw: async () => ({ ok: true }),
+        getPendingDevices: async () => ({ ok: true, requestIds: [] }),
+        approveDevice: async () => ({ ok: true })
+      }
+    );
+
+    expect(attempts).toBe(3);
+    expect(result.reusedExistingService).toBe(false);
   });
 });
 

@@ -25,7 +25,11 @@ export async function patchAllowedOrigins(
   const getConfigRaw = dependencies.getConfigRaw ?? defaultGetConfigRaw;
   const postConfigRaw = dependencies.postConfigRaw ?? defaultPostConfigRaw;
 
-  const { content } = await getConfigRaw(baseUrl, auth);
+  const getResult = await getConfigRaw(baseUrl, auth);
+  if (!getResult.ok) {
+    throw new Error("GET /setup/api/config/raw responded ok:false");
+  }
+  const { content } = getResult;
   // The wrapper's own config is documented as "JSON/JSON5-ish", but a
   // freshly machine-written config from the setup wizard is plain JSON;
   // a hand-edited JSON5 config (comments, trailing commas) will fail this
@@ -42,7 +46,10 @@ export async function patchAllowedOrigins(
   }
 
   controlUi.allowedOrigins = [...existingOrigins, origin];
-  await postConfigRaw(baseUrl, auth, JSON.stringify(config, null, 2));
+  const postResult = await postConfigRaw(baseUrl, auth, JSON.stringify(config, null, 2));
+  if (!postResult.ok) {
+    throw new Error("POST /setup/api/config/raw responded ok:false");
+  }
   return { patched: true };
 }
 

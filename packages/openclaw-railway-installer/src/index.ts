@@ -223,12 +223,11 @@ export async function installOpenClawOnRailway(
   // Auth-gated readiness signal, not `/setup/healthz`: an unauthenticated
   // healthcheck can return 200 from a container mid-transition, before the
   // *new*, just-rotated setup credentials are actually live (issue #18
-  // item 3). `/setup/api/status` only succeeds once those credentials work.
+  // item 3). `/setup/api/status` only succeeds once those credentials work
+  // -- poll it rather than checking once, since that propagation can take
+  // a few seconds after the deployment itself reaches SUCCESS.
   const setupStatusUrl = `${baseUrl}/setup/api/status`;
-  const setupStatus = await checkSetupStatus(setupStatusUrl, setupAuth, dependencies);
-  if (setupStatus !== 200) {
-    throw new Error(`Setup readiness check '${setupStatusUrl}' returned ${setupStatus}.`);
-  }
+  await waitForSetupReady(setupStatusUrl, setupAuth, resolved.pollSeconds, resolved.timeoutMinutes, dependencies);
 
   const { patched: patchedAllowedOrigins } = await patchAllowedOrigins(baseUrl, setupAuth, domain.domain, {
     getConfigRaw: dependencies.getConfigRaw,
@@ -363,6 +362,35 @@ async function checkSetupStatus(
   }
   const response = await fetch(url, { headers: { authorization: basicAuthHeader(auth) } });
   return response.status;
+}
+
+/**
+ * Polls `checkSetupStatus` until it returns 200 or the timeout elapses.
+ * Newly-rotated setup credentials can take a few seconds to propagate after
+ * the deployment itself reaches SUCCESS, so a single check is not enough --
+ * mirrors `waitForSuccessfulService`'s poll/timeout shape.
+ */
+async function waitForSetupReady(
+  url: string,
+  auth: SetupAuth,
+  pollSeconds: number,
+  timeoutMinutes: number,
+  dependencies: InstallerDependencies
+): Promise<void> {
+  const deadline = Date.now() + timeoutMinutes * 60_000;
+  let lastStatus: number | undefined;
+  do {
+    lastStatus = await checkSetupStatus(url, auth, dependencies);
+    if (lastStatus === 200) {
+      return;
+    }
+    await (dependencies.sleep ?? defaultSleep)(pollSeconds * 1000);
+  } while (Date.now() < deadline);
+
+  throw new Error(
+    `Setup readiness check '${url}' did not return 200 within ${timeoutMinutes} minute(s) ` +
+      `(last status: ${lastStatus ?? "none"}).`
+  );
 }
 
 async function writeEnvLocal(

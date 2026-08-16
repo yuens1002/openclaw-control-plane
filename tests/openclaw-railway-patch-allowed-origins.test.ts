@@ -70,4 +70,22 @@ describe("patchAllowedOrigins", () => {
     const written = JSON.parse(posted[0] ?? "{}");
     expect(written.gateway.controlUi.allowedOrigins).toEqual(["https://example-openclaw.example.com"]);
   });
+
+  it("throws when the wrapper responds ok:false on GET, even with a 2xx-shaped body", async () => {
+    await expect(
+      patchAllowedOrigins(BASE_URL, AUTH, DOMAIN, {
+        getConfigRaw: async () => ({ ok: false, content: "" }),
+        postConfigRaw: async () => ({ ok: true })
+      })
+    ).rejects.toThrow("ok:false");
+  });
+
+  it("throws when the wrapper responds ok:false on POST, and does not report patched: true", async () => {
+    await expect(
+      patchAllowedOrigins(BASE_URL, AUTH, DOMAIN, {
+        getConfigRaw: async () => ({ ok: true, content: "{}" }),
+        postConfigRaw: async () => ({ ok: false })
+      })
+    ).rejects.toThrow("ok:false");
+  });
 });

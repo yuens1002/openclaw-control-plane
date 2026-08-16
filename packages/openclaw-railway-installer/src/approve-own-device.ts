@@ -21,7 +21,11 @@ export async function approveOwnDevicePairing(
   const getPendingDevices = dependencies.getPendingDevices ?? defaultGetPendingDevices;
   const approveDevice = dependencies.approveDevice ?? defaultApproveDevice;
 
-  const { requestIds } = await getPendingDevices(baseUrl, auth);
+  const pending = await getPendingDevices(baseUrl, auth);
+  if (!pending.ok) {
+    throw new Error("GET /setup/api/devices/pending responded ok:false");
+  }
+  const { requestIds } = pending;
 
   if (requestIds.length === 0) {
     return undefined;
@@ -40,7 +44,10 @@ export async function approveOwnDevicePairing(
   if (!requestId) {
     return undefined;
   }
-  await approveDevice(baseUrl, auth, requestId);
+  const approved = await approveDevice(baseUrl, auth, requestId);
+  if (!approved.ok) {
+    throw new Error("POST /setup/api/devices/approve responded ok:false");
+  }
   return requestId;
 }
 
