@@ -36,6 +36,28 @@ RUN sed -i \
   src/server.js
 RUN grep -q 'browsers never attach cached Basic-Auth credentials' src/server.js
 
+# attachGatewayAuthHeader only injects the gateway's Bearer token when no
+# Authorization header is already present. Once a browser has cached
+# dashboard Basic-Auth credentials for this origin (guaranteed -- /setup and
+# other still-gated routes require it), Chrome auto-attaches that cached
+# `Authorization: Basic ...` header to every same-origin request, including
+# the app's own fetch() calls. That header satisfies requireDashboardAuth's
+# own gate, but then gets forwarded as-is to the real OpenClaw gateway, which
+# only understands `Bearer <token>`. The gateway correctly rejects Basic
+# auth, and the app's frontend surfaces that as its own "sign in" prompt --
+# confirmed live: /control-ui-config.json returns a gateway-level
+# {"error":{"message":"Unauthorized"}} even with valid dashboard Basic-Auth
+# credentials. Not scoped to one route -- can hit any proxied request once
+# the browser starts attaching cached credentials. Fix: always overwrite the
+# Authorization header with the gateway's own Bearer token before proxying;
+# the client's Basic-Auth header has already served its purpose satisfying
+# requireDashboardAuth by this point and must never reach the gateway as-is.
+RUN sed -i \
+  's#if (!req?.headers?.authorization \&\& OPENCLAW_GATEWAY_TOKEN) {#if (OPENCLAW_GATEWAY_TOKEN) {#' \
+  src/server.js
+RUN grep -q '  if (OPENCLAW_GATEWAY_TOKEN) {' src/server.js
+RUN ! grep -q '!req?.headers?.authorization' src/server.js
+
 FROM node:22-bookworm AS openclaw-build
 
 RUN apt-get update \

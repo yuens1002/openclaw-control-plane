@@ -254,21 +254,34 @@ PR after the smoke test passes.
 The setup password is needed for HTTP Basic auth on `/setup` and `/openclaw`.
 Use any username.
 
-**Recurring browser sign-in prompt on `/manifest.webmanifest`, favicons, or
-`sw.js`**: the wrapper's `requireDashboardAuth` gates every route with Basic
-Auth by design, but browsers never attach cached Basic-Auth credentials to
-`<link rel="manifest">` or favicon fetches (a browser security rule, not a
-credential problem) -- so those specific paths 401 forever and the sign-in
-dialog re-fires every time the browser retries them, no matter what password
-is entered. This repo's `Dockerfile` patches the wrapper's `src/server.js`
-(via `sed`, in the `template-source` build stage) to exempt those known
-browser-managed static paths from the auth gate, so the fix applies
-automatically on every future `OPENCLAW_GIT_REF` bump rather than needing to
-be rediscovered per client. `/avatar/main` and `/control-ui-config.json` can
-show the same symptom for a different, unconfirmed reason (likely the
-OpenClaw app's own `fetch()` omitting credentials) and are intentionally
-**not** exempted here, since unlike the manifest/icon paths they may carry
-real data worth protecting -- flagged as a follow-up, not patched blind.
+**Recurring browser sign-in prompt, even after entering the correct
+password**: two independent wrapper bugs cause this, both patched in this
+repo's `Dockerfile` (via `sed` against the wrapper's `src/server.js` in the
+`template-source` build stage) so the fix applies automatically on every
+future `OPENCLAW_GIT_REF` bump rather than needing to be rediscovered per
+client:
+
+1. `requireDashboardAuth` gates every route with Basic Auth by design, but
+   browsers never attach cached Basic-Auth credentials to
+   `<link rel="manifest">` or favicon fetches (a browser security rule, not a
+   credential problem) -- so `/manifest.webmanifest`, favicons, and `sw.js`
+   401 forever and the sign-in dialog re-fires every time the browser retries
+   them, no matter what password is entered. Patched by exempting those known
+   browser-managed static paths from the auth gate.
+2. The bigger one: `attachGatewayAuthHeader` only injects the real OpenClaw
+   gateway's Bearer token when no `Authorization` header is already present.
+   Once a browser has cached dashboard Basic-Auth credentials for the origin
+   (guaranteed -- `/setup` requires it), Chrome auto-attaches that cached
+   header to *every* same-origin request, including the app's own `fetch()`
+   calls -- satisfying `requireDashboardAuth`'s gate, then getting forwarded
+   as-is to the gateway, which only understands `Bearer <token>` and rejects
+   it. The app's frontend then shows its own sign-in prompt. Not scoped to
+   one route -- confirmed live on `/control-ui-config.json`
+   (`{"error":{"message":"Unauthorized"}}` even with valid dashboard
+   credentials), and can hit any proxied request once the browser starts
+   attaching cached credentials. Patched by always overwriting the
+   `Authorization` header with the gateway's Bearer token before proxying,
+   regardless of what the client sent to satisfy the wrapper's own gate.
 
 Both local output files are ignored by git. They are handoff conveniences, not
 source artifacts.
