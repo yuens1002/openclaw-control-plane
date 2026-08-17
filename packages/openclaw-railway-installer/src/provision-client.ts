@@ -295,6 +295,41 @@ export async function updateClientTemplateRef(
   return { serviceName: options.service, templateRef: options.templateRef };
 }
 
+export interface UpdateClientOpenClawRefOptions {
+  service: string;
+  openclawRef: string;
+  pollSeconds?: number;
+  timeoutMinutes?: number;
+}
+
+export interface UpdateClientOpenClawRefResult {
+  serviceName: string;
+  openclawRef: string;
+}
+
+/**
+ * Updates one already-provisioned client service to a new OPENCLAW_GIT_REF
+ * (the pinned openclaw/openclaw application version, not the
+ * OPENCLAW_TEMPLATE_REF wrapper pin) and redeploys it. Never touches any
+ * other service, control-plane's own main, or railway.toml.
+ */
+export async function updateClientOpenClawRef(
+  options: UpdateClientOpenClawRefOptions,
+  dependencies: InstallerDependencies
+): Promise<UpdateClientOpenClawRefResult> {
+  const pollSeconds = options.pollSeconds ?? 15;
+  const timeoutMinutes = options.timeoutMinutes ?? 25;
+
+  await writeRailwayVariable(
+    { name: "OPENCLAW_GIT_REF", value: options.openclawRef, service: options.service, skipDeploys: true },
+    dependencies
+  );
+  await dependencies.runner.run(["redeploy", "--service", options.service, "--yes", "--json"]);
+  await pollServiceUntilSuccess(options.service, pollSeconds, timeoutMinutes, dependencies);
+
+  return { serviceName: options.service, openclawRef: options.openclawRef };
+}
+
 async function resolveProvisionOptions(
   options: ProvisionClientOptions,
   dependencies: ProvisionClientDependencies

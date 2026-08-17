@@ -135,6 +135,19 @@ template, or control-plane's own `main`.
 `OPENCLAW_TEMPLATE_REF` defaults to this repo's own
 `template-lock.json` → `pinnedCommit` when not passed explicitly.
 
+`OPENCLAW_TEMPLATE_REF` is a **different** pin from `OPENCLAW_GIT_REF`: the
+template ref is the Railway wrapper/scaffold (`vignesh07/clawdbot-railway-template`)
+that serves `/setup` and proxies to OpenClaw; `OPENCLAW_GIT_REF` is the
+`openclaw/openclaw` application version actually running inside it, which
+is what a connecting OpenClaw client (e.g. the mobile app) needs to match
+for protocol compatibility. It defaults to the `ARG OPENCLAW_GIT_REF` value
+baked into this repo's `Dockerfile` and, like the template ref, can be
+overridden per client without touching any other service:
+
+```powershell
+.\deploy\openclaw-railway\update-client-openclaw-ref.ps1 -Service acme-openclaw -OpenClawRef v2026.7.1-2
+```
+
 Provisioning sets `PORT=8080`, `OPENCLAW_STATE_DIR=/data/.openclaw`, and
 `OPENCLAW_WORKSPACE_DIR=/data/workspace` as explicit Railway service
 variables even though the root `railway.toml` already declares an

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   parseProvisionArgs,
+  parseUpdateOpenClawRefArgs,
   parseUpdateRefArgs,
   runCommand
 } from "@openclaw-control-plane/openclaw-railway-installer/client-cli";
@@ -101,6 +102,28 @@ describe("client-cli update-ref arg parsing", () => {
   it("rejects unknown flags", () => {
     expect(() =>
       parseUpdateRefArgs(["--service", "acme-openclaw", "--template-ref", "def456", "--bogus"])
+    ).toThrow("Unknown argument: --bogus");
+  });
+});
+
+describe("client-cli update-openclaw-ref arg parsing", () => {
+  it("parses documented flags", () => {
+    expect(parseUpdateOpenClawRefArgs(["--service", "acme-openclaw", "--openclaw-ref", "v2026.7.1-2"])).toEqual({
+      service: "acme-openclaw",
+      openclawRef: "v2026.7.1-2"
+    });
+  });
+
+  it("requires --service and --openclaw-ref", () => {
+    expect(() => parseUpdateOpenClawRefArgs(["--openclaw-ref", "v2026.7.1-2"])).toThrow("Missing required --service");
+    expect(() => parseUpdateOpenClawRefArgs(["--service", "acme-openclaw"])).toThrow(
+      "Missing required --openclaw-ref"
+    );
+  });
+
+  it("rejects unknown flags", () => {
+    expect(() =>
+      parseUpdateOpenClawRefArgs(["--service", "acme-openclaw", "--openclaw-ref", "v2026.7.1-2", "--bogus"])
     ).toThrow("Unknown argument: --bogus");
   });
 });

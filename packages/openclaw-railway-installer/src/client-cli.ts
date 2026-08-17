@@ -5,8 +5,10 @@ import { fileURLToPath } from "node:url";
 
 import {
   provisionClientInstance,
+  updateClientOpenClawRef,
   updateClientTemplateRef,
   type ProvisionClientOptions,
+  type UpdateClientOpenClawRefOptions,
   type UpdateClientTemplateRefOptions
 } from "./provision-client.js";
 import type { RailwayRunner } from "./index.js";
@@ -43,7 +45,17 @@ async function main(): Promise<void> {
     return;
   }
 
-  throw new Error(`Unknown subcommand '${subcommand ?? ""}'. Expected 'provision' or 'update-ref'.`);
+  if (subcommand === "update-openclaw-ref") {
+    const options = parseUpdateOpenClawRefArgs(rest);
+    const result = await updateClientOpenClawRef(options, { runner });
+    console.log("");
+    console.log(`Service '${result.serviceName}' redeployed on openclaw ref ${result.openclawRef}.`);
+    return;
+  }
+
+  throw new Error(
+    `Unknown subcommand '${subcommand ?? ""}'. Expected 'provision', 'update-ref', or 'update-openclaw-ref'.`
+  );
 }
 
 export function parseProvisionArgs(args: string[]): ProvisionClientOptions {
@@ -145,6 +157,43 @@ export function parseUpdateRefArgs(args: string[]): UpdateClientTemplateRefOptio
   }
 
   return options as UpdateClientTemplateRefOptions;
+}
+
+export function parseUpdateOpenClawRefArgs(args: string[]): UpdateClientOpenClawRefOptions {
+  const options: Partial<UpdateClientOpenClawRefOptions> = {};
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    const value = args[index + 1];
+    switch (arg) {
+      case "--service":
+        options.service = requireValue(arg, value);
+        index += 1;
+        break;
+      case "--openclaw-ref":
+        options.openclawRef = requireValue(arg, value);
+        index += 1;
+        break;
+      case "--poll-seconds":
+        options.pollSeconds = parseIntegerFlag(arg, value);
+        index += 1;
+        break;
+      case "--timeout-minutes":
+        options.timeoutMinutes = parseIntegerFlag(arg, value);
+        index += 1;
+        break;
+      default:
+        throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+
+  if (!options.service) {
+    throw new Error("Missing required --service");
+  }
+  if (!options.openclawRef) {
+    throw new Error("Missing required --openclaw-ref");
+  }
+
+  return options as UpdateClientOpenClawRefOptions;
 }
 
 function requireValue(flag: string, value: string | undefined): string {
