@@ -20,6 +20,22 @@ WORKDIR /template
 RUN curl -fsSL "${OPENCLAW_TEMPLATE_REPO}/archive/${OPENCLAW_TEMPLATE_REF}.tar.gz" \
   | tar -xz --strip-components=1
 
+# The wrapper's requireDashboardAuth gates every route with Basic Auth except
+# /healthz, /setup/healthz, and /hooks* -- with no exemption for the browser's
+# own PWA manifest/icon requests. Browsers (confirmed: Chrome) never attach
+# cached HTTP Basic-Auth credentials to <link rel="manifest"> or favicon
+# fetches, by spec/security design -- so those paths 401 forever regardless of
+# what password is entered, and the browser re-prompts every time it retries
+# them (tab refresh, PWA install checks). Not caused by an OPENCLAW_GIT_REF
+# bump specifically -- this wrapper gap has always existed; it only became
+# visible once the pinned OpenClaw version started shipping a PWA manifest/
+# icon set the browser actively fetches. Patched here (not upstream) so every
+# future OPENCLAW_GIT_REF bump inherits the fix automatically.
+RUN sed -i \
+  's#if (req.path.startsWith("/hooks")) return next(); // allow OpenClaw webhook endpoints to bypass dashboard auth#if (req.path.startsWith("/hooks")) return next(); // allow OpenClaw webhook endpoints to bypass dashboard auth\n  if (["/manifest.webmanifest", "/favicon.ico", "/favicon.svg", "/favicon-16.png", "/favicon-32.png", "/apple-touch-icon.png", "/sw.js"].includes(req.path)) return next(); // browsers never attach cached Basic-Auth credentials to these passive resource fetches#' \
+  src/server.js
+RUN grep -q 'browsers never attach cached Basic-Auth credentials' src/server.js
+
 FROM node:22-bookworm AS openclaw-build
 
 RUN apt-get update \

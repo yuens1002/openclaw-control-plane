@@ -254,6 +254,22 @@ PR after the smoke test passes.
 The setup password is needed for HTTP Basic auth on `/setup` and `/openclaw`.
 Use any username.
 
+**Recurring browser sign-in prompt on `/manifest.webmanifest`, favicons, or
+`sw.js`**: the wrapper's `requireDashboardAuth` gates every route with Basic
+Auth by design, but browsers never attach cached Basic-Auth credentials to
+`<link rel="manifest">` or favicon fetches (a browser security rule, not a
+credential problem) -- so those specific paths 401 forever and the sign-in
+dialog re-fires every time the browser retries them, no matter what password
+is entered. This repo's `Dockerfile` patches the wrapper's `src/server.js`
+(via `sed`, in the `template-source` build stage) to exempt those known
+browser-managed static paths from the auth gate, so the fix applies
+automatically on every future `OPENCLAW_GIT_REF` bump rather than needing to
+be rediscovered per client. `/avatar/main` and `/control-ui-config.json` can
+show the same symptom for a different, unconfirmed reason (likely the
+OpenClaw app's own `fetch()` omitting credentials) and are intentionally
+**not** exempted here, since unlike the manifest/icon paths they may carry
+real data worth protecting -- flagged as a follow-up, not patched blind.
+
 Both local output files are ignored by git. They are handoff conveniences, not
 source artifacts.
 
