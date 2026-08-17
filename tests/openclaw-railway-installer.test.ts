@@ -61,7 +61,7 @@ describe("OpenClaw Railway installer", () => {
     // it means no domain was ever created and one must be generated
     // explicitly.
     const runner = new FakeRailwayRunner([[], [service("BUILDING")], [service("SUCCESS")]]);
-    runner.setNoDomainUntilGenerated(8080);
+    runner.setNoDomainUntilGenerated(domainList(8080));
 
     const result = await installOpenClawOnRailway(
       {

@@ -37,9 +37,9 @@ export class FakeRailwayRunner implements RailwayRunner {
   }
 
   /** Simulates a freshly-deployed service with no domain until the generate call lands. */
-  setNoDomainUntilGenerated(generatedTargetPort: number): void {
+  setNoDomainUntilGenerated(generatedDomainListResponse: unknown): void {
     this.domainListResponse = { domains: [] };
-    this.domainGeneratesTo = domainList(generatedTargetPort);
+    this.domainGeneratesTo = generatedDomainListResponse;
   }
 
   async run(args: string[], stdin?: string): Promise<CommandResult> {

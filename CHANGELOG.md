@@ -7,6 +7,7 @@ and uses semantic versioning once releases begin.
 
 ## [Unreleased]
 
+- 2026-08-17 - feat: onboarding regression pipeline + live-discovered provisioning fixes
 - 2026-08-17 - test(railway): add real-spawn contract tests and dedupe fakes
 - 2026-08-16 - feat(railway-installer): add importWorkspaceFiles transport for /setup/import
 - 2026-08-16 - feat(railway): add per-client template-ref provisioning path
