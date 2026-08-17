@@ -41,6 +41,18 @@ client (a seat in every client's chosen tool) and turn structured
 agent traffic into free-form chat that has to be parsed rather than a
 contract that can be validated, audited, and replayed.
 
+A second instance of the same identity question surfaced when scoping
+source-control access: a CoT (ours and, by the same assumption, each
+downstream agency's) needs read access to specific private repositories.
+The ownership question is identical to (1) — the control plane tracks the
+grant, not the CoT — but source-control access adds a sharper risk: the
+practical way to offer this is one provider-owned connector (e.g. a single
+GitHub App) installed separately per tenant, which means one shared
+credential (the connector's signing key) can mint scoped access across
+every tenant's installation. A leak of that one credential has cross-tenant
+blast radius, unlike a single tenant's own grant. Credential custody, not
+just account bookkeeping, becomes part of the decision.
+
 ## Decision
 
 1. **Identity/account records are control-plane-owned durable entities.**
@@ -76,6 +88,21 @@ contract that can be validated, audited, and replayed.
    own internal connector — never by granting cross-org access into an
    internal chat workspace.
 
+4. **The same rule applies to any external-system access, not just chat —
+   source-control included.** Which systems a CoT can reach, and at what
+   scope, is control-plane-tracked identity-record state (system, tenant,
+   scope, granted/revoked timestamps), per (1). The access itself is
+   provisioned per tenant at minimum necessary scope: a shared
+   provider-owned connector (e.g. one GitHub App) is installed separately
+   per organization — ours and each downstream agency's — with the
+   specific repositories selected by that organization during its own
+   installation, never hardcoded by the control plane. Because a shared
+   connector's signing credential can reach every tenant's installation,
+   its custody matters as much as the record-keeping: least-privilege
+   permissions on the connector itself, short-lived tokens minted per use
+   rather than a long-lived static secret handed to the CoT, and an audit
+   trail tying each minted token back to the owning identity record.
+
 ## Consequences
 
 - No chat-vendor lock-in in the public baseline; stays consistent with the
@@ -90,8 +117,13 @@ contract that can be validated, audited, and replayed.
   instances need to agree on this interface, not just "join a channel."
 - Deferred/out of scope for this ADR: the concrete transport for the
   cross-org surface (custom ticket API vs. MCP server vs. both) and the
-  specific connector interface shape for internal comms. Both are flagged
-  as follow-up design work.
+  specific connector interface shape for internal comms and source-control
+  access. Both are flagged as follow-up design work.
+- Extending the pattern to source-control (and future) connectors makes
+  credential custody a first-class concern alongside identity bookkeeping:
+  a compromised shared connector credential has cross-tenant blast radius,
+  so key storage/rotation and least-privilege scoping carry as much weight
+  as tracking who was granted what.
 
 ## Alternatives Considered
 
