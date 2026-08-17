@@ -1,45 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import { updateClientTemplateRef } from "@openclaw-control-plane/openclaw-railway-installer/provision-client";
-import type { CommandResult, RailwayRunner } from "@openclaw-control-plane/openclaw-railway-installer";
-
-interface RecordedCommand {
-  args: string[];
-  stdin?: string;
-}
-
-class FakeRailwayRunner implements RailwayRunner {
-  readonly calls: RecordedCommand[] = [];
-
-  async run(args: string[], stdin?: string): Promise<CommandResult> {
-    this.calls.push(stdin === undefined ? { args } : { args, stdin });
-    const key = args.slice(0, 2).join(" ");
-
-    if (key === "variable set") {
-      return { stdout: JSON.stringify([args[2]]) };
-    }
-    if (args[0] === "redeploy") {
-      return { stdout: "{}" };
-    }
-    if (key === "service list") {
-      return {
-        stdout: JSON.stringify([
-          {
-            id: "svc_acme",
-            name: "acme-openclaw",
-            latestDeployment: { id: "dep_new", status: "SUCCESS" }
-          }
-        ])
-      };
-    }
-
-    throw new Error(`Unexpected command: ${args.join(" ")}`);
-  }
-}
+import { FakeRailwayRunner } from "./fixtures/fake-railway-runner.js";
 
 describe("updateClientTemplateRef", () => {
   it("emits exactly a variable set and a redeploy scoped to the named service, nothing else", async () => {
-    const runner = new FakeRailwayRunner();
+    const runner = new FakeRailwayRunner([
+      [
+        {
+          id: "svc_acme",
+          name: "acme-openclaw",
+          latestDeployment: { id: "dep_new", status: "SUCCESS" }
+        }
+      ]
+    ]);
 
     const result = await updateClientTemplateRef(
       { service: "acme-openclaw", templateRef: "new-ref-1234", pollSeconds: 0 },
