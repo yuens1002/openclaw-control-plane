@@ -120,7 +120,8 @@ describe("runRegressionCheck", () => {
     expect(result.passed).toBe(true);
     expect(result.statusConfigured).toBe(true);
     expect(result.healthzStatus).toBe(200);
-    expect(result.deletedKeyHash).toBe(SENTINEL_MINTED_HASH);
+    expect(result.mintedKeyHash).toBe(SENTINEL_MINTED_HASH);
+    expect(result.keyDeleted).toBe(true);
     expect(calls).toEqual(["mint", "status", "healthz", "delete"]);
     expect(runner.writes).toEqual([
       { name: "EXAMPLE_OPENROUTER_MANAGED_API_KEY", value: SENTINEL_MINTED, skipDeploys: true }
@@ -166,9 +167,56 @@ describe("runRegressionCheck", () => {
 
     expect(result.passed).toBe(false);
     expect(result.error).toBeDefined();
-    expect(result.deletedKeyHash).toBe(SENTINEL_MINTED_HASH);
+    expect(result.mintedKeyHash).toBe(SENTINEL_MINTED_HASH);
+    expect(result.keyDeleted).toBe(true);
     expect(calls.filter((c) => c === "delete")).toHaveLength(1);
     expect(calls.filter((c) => c === "mint")).toHaveLength(1);
+  });
+
+  it("never throws when deletion itself fails, folds the delete failure into the result, and forces passed=false", async () => {
+    const calls: string[] = [];
+    const runner = new FakeRailwayRunner({});
+    const fetchImpl = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "https://openrouter.ai/api/v1/keys") {
+        calls.push("mint");
+        return new Response(JSON.stringify({ key: SENTINEL_MINTED, data: { hash: SENTINEL_MINTED_HASH } }), { status: 200 });
+      }
+      if (url === `${instanceBaseUrl}/setup/api/status`) {
+        calls.push("status");
+        return new Response(JSON.stringify({ configured: true }), { status: 200 });
+      }
+      if (url === `${instanceBaseUrl}/setup/healthz`) {
+        calls.push("healthz");
+        return new Response("ok", { status: 200 });
+      }
+      if (url === `https://openrouter.ai/api/v1/keys/${SENTINEL_MINTED_HASH}`) {
+        calls.push("delete-attempt");
+        return new Response(null, { status: 401 });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    }) as typeof fetch;
+
+    const result = await runRegressionCheck(
+      {
+        service: "fixture-svc",
+        instanceBaseUrl,
+        profile: readFixture("key-provisioning-provider.json"),
+        setupUsername: "openclaw",
+        setupPassword: "sk-test-DO-NOT-LOG-pw"
+      },
+      { runner, openRouterManagementKey: "sk-test-DO-NOT-LOG-mgmt", fetchImpl }
+    );
+
+    // Even though status/healthz both passed, a failed delete forces
+    // passed=false and the delete failure's own message survives in
+    // `error` -- neither gets silently swallowed by the `finally` block.
+    expect(result.passed).toBe(false);
+    expect(result.keyDeleted).toBe(false);
+    expect(result.statusConfigured).toBe(true);
+    expect(result.healthzStatus).toBe(200);
+    expect(result.error).toContain("key deletion failed");
+    expect(calls).toEqual(["mint", "status", "healthz", "delete-attempt"]);
   });
 
   it("guarantees deletion even when the Railway variable write itself throws", async () => {

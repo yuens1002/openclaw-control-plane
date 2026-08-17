@@ -96,20 +96,27 @@ export interface RegressionCheckResult {
   statusConfigured?: boolean;
   healthzStatus?: number;
   error?: string;
-  /** The freshly-minted key's hash — always deleted before this function returns, kept here only for the caller's own record/logging. */
-  deletedKeyHash: string;
+  /** The hash of the key this run minted, regardless of whether deletion below succeeded. */
+  mintedKeyHash: string;
+  /** Whether the delete-in-`finally` call actually succeeded. `passed` is forced false when this is false. */
+  keyDeleted: boolean;
 }
 
 /**
  * Mints a fresh OpenRouter key, writes it to the profile's declared
  * model-provider Railway variable, then checks the instance is still
- * configured and healthy. The minted key is deleted unconditionally in a
- * `finally` block — whether the checks passed, failed, or threw — so no
- * regression run ever leaves a live key behind. Never re-calls
- * `/setup/api/run`: the instance is already configured by
- * `bootstrapOnboardingCycle`, and this function only proves liveness/auth
- * and the key-lifecycle round-trip, not a live model response (that stays a
- * human-supervised check elsewhere).
+ * configured and healthy. Deletion of the minted key is always attempted in
+ * a `finally` block — whether the checks passed, failed, or threw — so no
+ * regression run ever *tries* to leave a live key behind. That attempt can
+ * itself fail (network error, revoked management key, etc.): this function
+ * never throws past the `finally` boundary for that failure — it's caught
+ * and folded into the returned result (`keyDeleted: false`, `passed` forced
+ * false) instead, so an unattended scheduled run always gets back a
+ * diagnosable result rather than an uncaught exception that masks whatever
+ * the verification step already found. Never re-calls `/setup/api/run`: the
+ * instance is already configured by `bootstrapOnboardingCycle`, and this
+ * function only proves liveness/auth and the key-lifecycle round-trip, not
+ * a live model response (that stays a human-supervised check elsewhere).
  */
 export async function runRegressionCheck(
   options: RegressionCheckOptions,
@@ -148,6 +155,7 @@ export async function runRegressionCheck(
   let statusConfigured: boolean | undefined;
   let healthzStatus: number | undefined;
   let error: string | undefined;
+  let keyDeleted = false;
 
   try {
     await writeRailwayVariable(
@@ -180,13 +188,29 @@ export async function runRegressionCheck(
   } finally {
     // Unconditional: this line must run whether the try block above passed,
     // failed its own assertions, or threw. No standing OpenRouter key ever
-    // survives a regression-check run.
-    await deleteOpenRouterKey(minted.hash, openRouterOptions);
+    // survives a regression-check run. A delete failure here must not mask
+    // an earlier verification error (or throw past this function's
+    // structured-result contract) — caught and folded into the result
+    // instead, per Copilot's PR #26 review: an unattended scheduled run
+    // that crashes with only "delete failed" and no verification context
+    // is much harder to diagnose than a returned result carrying both.
+    let deleteError: string | undefined;
+    try {
+      await deleteOpenRouterKey(minted.hash, openRouterOptions);
+    } catch (deleteCaught) {
+      deleteError = deleteCaught instanceof Error ? deleteCaught.message : String(deleteCaught);
+    }
+    keyDeleted = deleteError === undefined;
+    if (!keyDeleted) {
+      passed = false;
+      error = error !== undefined ? `${error}; additionally, key deletion failed: ${deleteError}` : `key deletion failed: ${deleteError}`;
+    }
   }
 
   return {
     passed,
-    deletedKeyHash: minted.hash,
+    mintedKeyHash: minted.hash,
+    keyDeleted,
     ...(statusConfigured !== undefined ? { statusConfigured } : {}),
     ...(healthzStatus !== undefined ? { healthzStatus } : {}),
     ...(error !== undefined ? { error } : {})
