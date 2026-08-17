@@ -83,6 +83,10 @@ function baseDependencies(runner: RailwayRunner, overrides: Partial<ProvisionCli
     runner,
     sleep: async () => {},
     checkSetupStatus: async (url: string) => (url.endsWith("/setup/api/status") ? 200 : 500),
+    getConfigRaw: async () => ({ ok: true, content: "{}" }),
+    postConfigRaw: async () => ({ ok: true }),
+    getPendingDevices: async () => ({ ok: true, requestIds: [] }),
+    approveDevice: async () => ({ ok: true }),
     readText: async () => "",
     writeText: async () => {},
     readTemplateLock: async () => ({ pinnedCommit: FIXTURE_PINNED_COMMIT }),
@@ -142,6 +146,61 @@ describe("provisionClientInstance — fresh provision", () => {
     expect(result.templateRef).toBe(FIXTURE_PINNED_COMMIT);
     expect(writes.get("handoff.local.md")).toContain(`Template ref: ${FIXTURE_PINNED_COMMIT}`);
     expect(writes.get(".env.local")).toContain(`OPENCLAW_CLIENT_TEMPLATE_REF=${FIXTURE_PINNED_COMMIT}`);
+  });
+
+  it("patches allowedOrigins and approves device pairing after the readiness check (issue #23)", async () => {
+    const runner = new FakeRailwayRunner([[], [freshService("BUILDING")], [freshService("SUCCESS")]]);
+    runner.setDomainList(domainList(8080));
+    const calls: string[] = [];
+
+    const result = await provisionClientInstance(
+      { clientName: "acme", pollSeconds: 0, writeLocalFiles: false },
+      baseDependencies(runner, {
+        checkSetupStatus: async () => {
+          calls.push("status");
+          return 200;
+        },
+        getConfigRaw: async () => {
+          calls.push("getConfigRaw");
+          return { ok: true, content: "{}" };
+        },
+        postConfigRaw: async () => {
+          calls.push("postConfigRaw");
+          return { ok: true };
+        },
+        getPendingDevices: async () => {
+          calls.push("getPendingDevices");
+          return { ok: true, requestIds: ["req_1"] };
+        },
+        approveDevice: async () => {
+          calls.push("approveDevice");
+          return { ok: true };
+        }
+      })
+    );
+
+    expect(calls).toEqual(["status", "getConfigRaw", "postConfigRaw", "getPendingDevices", "approveDevice"]);
+    expect(result.patchedAllowedOrigins).toBe(true);
+    expect(result.approvedDeviceRequestId).toBe("req_1");
+  });
+
+  it("does not POST a config patch or approve anything when there's nothing to do", async () => {
+    const runner = new FakeRailwayRunner([[], [freshService("SUCCESS")]]);
+    runner.setDomainList(domainList(8080));
+
+    const result = await provisionClientInstance(
+      { clientName: "acme", pollSeconds: 0, writeLocalFiles: false },
+      baseDependencies(runner, {
+        getConfigRaw: async () => ({ ok: true, content: JSON.stringify({ gateway: { controlUi: { allowedOrigins: ["https://acme-openclaw.example.com"] } } }) }),
+        postConfigRaw: async () => {
+          throw new Error("must not be called");
+        },
+        getPendingDevices: async () => ({ ok: true, requestIds: [] })
+      })
+    );
+
+    expect(result.patchedAllowedOrigins).toBe(false);
+    expect(result.approvedDeviceRequestId).toBeUndefined();
   });
 
   it("defaults OPENCLAW_TEMPLATE_REF from the injected template-lock reader but allows an explicit override", async () => {

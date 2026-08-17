@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
+import { approveOwnDevicePairing } from "./approve-own-device.js";
 import {
   createSecret,
   ensureDomainPort,
@@ -13,6 +14,7 @@ import {
   type InstallerService,
   type SetupAuth
 } from "./index.js";
+import { patchAllowedOrigins } from "./patch-allowed-origins.js";
 import { readRailwayVariable, writeRailwayVariable } from "./railway-variables.js";
 import { readTemplateLock } from "./template-lock.js";
 
@@ -67,6 +69,8 @@ export interface ProvisionClientResult {
   reusedExistingService: boolean;
   wroteEnvLocal: boolean;
   wroteHandoff: boolean;
+  patchedAllowedOrigins: boolean;
+  approvedDeviceRequestId?: string;
 }
 
 interface ResolvedProvisionOptions {
@@ -188,6 +192,22 @@ export async function provisionClientInstance(
   const setupStatusUrl = `${baseUrl}/setup/api/status`;
   await waitForSetupReady(setupStatusUrl, setupAuth, resolved.pollSeconds, resolved.timeoutMinutes, dependencies);
 
+  // Issue #23: #22 added these two steps to the marketplace install path
+  // (installOpenClawOnRailway) and ported only the readiness poll above
+  // into this provisioning path, not these -- confirmed live (dogfood
+  // throwaway fixture, 2026-08-16/17) that a provisionClientInstance
+  // instance's dashboard chat fails with "origin not allowed" and would
+  // also need a manual device-pairing approval without them. Mirrors
+  // installOpenClawOnRailway's call order and dependency wiring exactly.
+  const { patched: patchedAllowedOrigins } = await patchAllowedOrigins(baseUrl, setupAuth, domain.domain, {
+    getConfigRaw: dependencies.getConfigRaw,
+    postConfigRaw: dependencies.postConfigRaw
+  });
+  const approvedDeviceRequestId = await approveOwnDevicePairing(baseUrl, setupAuth, {
+    getPendingDevices: dependencies.getPendingDevices,
+    approveDevice: dependencies.approveDevice
+  });
+
   const resultBase = {
     serviceId: service.id,
     serviceName: service.name,
@@ -199,7 +219,9 @@ export async function provisionClientInstance(
     healthUrl,
     setupUsername: resolved.setupUsername,
     setupPassword,
-    reusedExistingService
+    reusedExistingService,
+    patchedAllowedOrigins,
+    ...(approvedDeviceRequestId ? { approvedDeviceRequestId } : {})
   } satisfies Omit<ProvisionClientResult, "wroteEnvLocal" | "wroteHandoff">;
 
   let wroteEnvLocal = false;
@@ -355,6 +377,11 @@ ${result.projectId ? `- Project ID: ${result.projectId}\n` : ""}- Template ref: 
 
 - Username: ${result.setupUsername}
 - Password: ${result.setupPassword}
+
+## Post-Deploy Automation
+
+- Patched allowedOrigins: ${result.patchedAllowedOrigins ? "yes" : "no (already present)"}
+- Approved device pairing request: ${result.approvedDeviceRequestId ?? "none pending"}
 
 ## Updating the wrapper version later
 

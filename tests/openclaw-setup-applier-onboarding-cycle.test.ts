@@ -271,6 +271,14 @@ describe("bootstrapOnboardingCycle", () => {
         // routing it through the setup-applier-side `fetchImpl` above, since
         // that's a distinct injection point (`InstallerDependencies.checkSetupStatus`).
         checkSetupStatus: async () => 200,
+        // provisionClientInstance now also runs the #23 post-deploy steps
+        // (allowedOrigins patch, device-pairing approve) -- stub both to
+        // their "nothing to do" shape so this test stays focused on the
+        // bootstrap/apply/mint ordering it actually asserts.
+        getConfigRaw: async () => ({ ok: true, content: "{}" }),
+        postConfigRaw: async () => ({ ok: true }),
+        getPendingDevices: async () => ({ ok: true, requestIds: [] }),
+        approveDevice: async () => ({ ok: true }),
         // `pollServiceUntilSuccess` sleeps before its first check (real
         // default is 15s) — stub it so the test doesn't wait out a real timer.
         sleep: async () => {}
