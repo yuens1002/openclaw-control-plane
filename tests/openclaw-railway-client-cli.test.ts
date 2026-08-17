@@ -59,6 +59,30 @@ describe("client-cli runCommand — real subprocess, no fake runner", () => {
       writeSpy.mockRestore();
     }
   });
+
+  // No test previously exercised the real spawn+stdin path for byte
+  // fidelity: provision-client.test.ts's "issue #18: no PowerShell-pipe
+  // BOM/CRLF corruption" test only checks the string handed to a *fake*
+  // RailwayRunner. This spawns a real child and round-trips a payload that
+  // would reveal BOM/CRLF corruption if the spawn+stdin.end() path ever
+  // introduced any.
+  it("round-trips stdin byte-identical through a real spawned child", async () => {
+    const payload = " \tleading/trailing space, a unicode glyph (☂), and\nan embedded newline ";
+    const result = await runCommand(process.execPath, [
+      "-e",
+      "let s = ''; process.stdin.on('data', (d) => { s += d; }); process.stdin.on('end', () => process.stdout.write(s));"
+    ], payload);
+
+    expect(result.stdout).toBe(payload);
+    expect(result.stdout).not.toMatch(/﻿/);
+    expect(result.stdout).not.toMatch(/\r\n/);
+  });
+
+  it("rejects with the real captured stderr on a non-zero exit code", async () => {
+    await expect(
+      runCommand(process.execPath, ["-e", "process.stderr.write('boom'); process.exit(3);"])
+    ).rejects.toThrow("failed with exit code 3: boom");
+  });
 });
 
 describe("client-cli update-ref arg parsing", () => {
