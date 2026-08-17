@@ -66,6 +66,18 @@ export interface ProvisionClientResult {
   healthUrl: string;
   setupUsername: string;
   setupPassword: string;
+  gatewayToken: string;
+  /**
+   * The single link a fresh browser/device needs to connect the dashboard,
+   * fully authenticated -- no manual "paste the gateway token" step.
+   * Confirmed live (dogfood throwaway fixture, 2026-08-17): OpenClaw's own
+   * Control UI reads a `#token=` URL fragment on load and auto-connects,
+   * the same mechanism the wrapper's own pairing-required panel documents
+   * (`openclaw dashboard --no-open`) -- this just constructs that URL
+   * directly from data this function already has, without needing that
+   * console command (which isn't in the wrapper's allowlist anyway).
+   */
+  dashboardUrl: string;
   reusedExistingService: boolean;
   wroteEnvLocal: boolean;
   wroteHandoff: boolean;
@@ -168,6 +180,7 @@ export async function provisionClientInstance(
   // generated password that wouldn't match the service's actual auth
   // configuration — fail loudly so the operator investigates or reprovisions.
   let setupPassword = resolved.setupPassword;
+  let gatewayToken = resolved.gatewayToken;
   if (reusedExistingService) {
     const existingPassword = await readRailwayVariable("SETUP_PASSWORD", service.name, dependencies);
     if (!existingPassword) {
@@ -177,6 +190,15 @@ export async function provisionClientInstance(
       );
     }
     setupPassword = existingPassword;
+
+    const existingToken = await readRailwayVariable("OPENCLAW_GATEWAY_TOKEN", service.name, dependencies);
+    if (!existingToken) {
+      throw new Error(
+        `Service '${service.name}' exists but has no OPENCLAW_GATEWAY_TOKEN variable set. ` +
+          `Re-run with --force-new to reprovision, or set OPENCLAW_GATEWAY_TOKEN manually before retrying.`
+      );
+    }
+    gatewayToken = existingToken;
   }
 
   const domain = await ensureDomainPort(service.name, resolved.targetPort, dependencies.runner);
@@ -208,6 +230,7 @@ export async function provisionClientInstance(
     approveDevice: dependencies.approveDevice
   });
 
+  const openclawUrl = `${baseUrl}/openclaw`;
   const resultBase = {
     serviceId: service.id,
     serviceName: service.name,
@@ -215,10 +238,12 @@ export async function provisionClientInstance(
     templateRef: resolved.templateRef,
     domain: domain.domain,
     setupUrl: `${baseUrl}/setup`,
-    openclawUrl: `${baseUrl}/openclaw`,
+    openclawUrl,
     healthUrl,
     setupUsername: resolved.setupUsername,
     setupPassword,
+    gatewayToken,
+    dashboardUrl: `${openclawUrl}#token=${gatewayToken}`,
     reusedExistingService,
     patchedAllowedOrigins,
     ...(approvedDeviceRequestId ? { approvedDeviceRequestId } : {})
@@ -346,7 +371,9 @@ async function writeProvisionEnvLocal(
     OPENCLAW_CLIENT_SERVICE_NAME: result.serviceName,
     OPENCLAW_CLIENT_TEMPLATE_REF: result.templateRef,
     OPENCLAW_CLIENT_SETUP_USERNAME: result.setupUsername,
-    OPENCLAW_CLIENT_SETUP_PASSWORD: result.setupPassword
+    OPENCLAW_CLIENT_SETUP_PASSWORD: result.setupPassword,
+    OPENCLAW_CLIENT_GATEWAY_TOKEN: result.gatewayToken,
+    OPENCLAW_CLIENT_DASHBOARD_URL: result.dashboardUrl
   });
   await writeLocalText(path, merged, dependencies);
 }
@@ -365,6 +392,18 @@ This file is local-only and should not be committed.
 - Setup: ${result.setupUrl}
 - OpenClaw UI: ${result.openclawUrl}
 - Healthcheck: ${result.healthUrl}
+
+## Client Handoff Link
+
+Hand the client this single link. It fully authenticates the dashboard's
+gateway connection on first open -- no manual token entry, no separate
+"Connect" step. (Confirmed live: OpenClaw's Control UI reads a \`#token=\`
+URL fragment on load and auto-connects.) Not independently confirmed yet
+whether a genuinely new browser/device still hits a one-time pairing
+approval on top of this -- see \`openclaw devices approve <requestId>\` in
+the wrapper's own pairing-required panel if so.
+
+- ${result.dashboardUrl}
 
 ## Railway
 

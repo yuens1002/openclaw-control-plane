@@ -39,6 +39,7 @@ async function main(): Promise<void> {
     console.log(`OpenClaw URL: ${result.provision.openclawUrl}`);
     console.log(`Username: ${result.provision.setupUsername}`);
     console.log(`Setup password: ${result.provision.setupPassword}`);
+    console.log(`Client handoff link (single-click dashboard connect): ${result.provision.dashboardUrl}`);
     console.log(`Reused existing service: ${result.provision.reusedExistingService}`);
     console.log(`Apply outcome: ${result.apply.outcome}`);
     if (result.apply.mintedKeyHash !== undefined) {
