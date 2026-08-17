@@ -7,6 +7,7 @@ and uses semantic versioning once releases begin.
 
 ## [Unreleased]
 
+- 2026-08-17 - test(railway): add real-spawn contract tests and dedupe fakes
 - 2026-08-16 - feat(railway): add per-client template-ref provisioning path
 - 2026-08-15 - fix(setup-applier): send the real flat /setup/api/run payload shape
 - 2026-08-15 - fix(setup-applier): add basic auth to setup api client
