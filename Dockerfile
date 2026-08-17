@@ -43,10 +43,20 @@ RUN curl -fsSL "${OPENCLAW_TEMPLATE_REPO}/archive/${OPENCLAW_TEMPLATE_REF}.tar.g
 # secrets), and it's the dominant source of the recurring native sign-in
 # popup in practice, so it's exempted outright rather than left to keep
 # re-triggering the browser's Basic-Auth challenge on every failed poll.
+#
+# /avatar/<agentId> (e.g. /avatar/main) is exempted for the original,
+# browser-passive-fetch reason (same class as manifest/favicon): confirmed
+# live it's 401 in 100% of real request-log samples, never once succeeding,
+# consistent with an <img> tag load the browser never attaches cached
+# Basic-Auth to. Confirmed with valid credentials it currently 404s (no
+# avatar configured yet) -- nothing sensitive is served either way, and an
+# avatar image wouldn't be sensitive even once one is set. Matched by prefix
+# rather than a literal path since it's built from the agent id.
 RUN sed -i \
-  's#if (req.path.startsWith("/hooks")) return next(); // allow OpenClaw webhook endpoints to bypass dashboard auth#if (req.path.startsWith("/hooks")) return next(); // allow OpenClaw webhook endpoints to bypass dashboard auth\n  if (["/manifest.webmanifest", "/favicon.ico", "/favicon.svg", "/favicon-16.png", "/favicon-32.png", "/apple-touch-icon.png", "/sw.js", "/control-ui-config.json"].includes(req.path)) return next(); // see comments above and below this RUN step for why each path is exempted#' \
+  's#if (req.path.startsWith("/hooks")) return next(); // allow OpenClaw webhook endpoints to bypass dashboard auth#if (req.path.startsWith("/hooks")) return next(); // allow OpenClaw webhook endpoints to bypass dashboard auth\n  if (req.path.startsWith("/avatar/")) return next(); // see comments above and below this RUN step for why each path is exempted\n  if (["/manifest.webmanifest", "/favicon.ico", "/favicon.svg", "/favicon-16.png", "/favicon-32.png", "/apple-touch-icon.png", "/sw.js", "/control-ui-config.json"].includes(req.path)) return next(); // see comments above and below this RUN step for why each path is exempted#' \
   src/server.js
 RUN grep -q '/control-ui-config.json' src/server.js
+RUN grep -q 'req.path.startsWith("/avatar/")' src/server.js
 
 # requireDashboardAuth only accepts `Authorization: Basic ...` -- it rejects
 # any other scheme outright, including a perfectly valid

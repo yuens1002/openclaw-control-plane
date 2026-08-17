@@ -305,6 +305,16 @@ source of the recurring popup, it's exempted from the Basic-Auth gate
 entirely (added to the fix 1 path list above) rather than left to keep
 re-triggering the browser's native challenge on every failed poll.
 
+`/avatar/<agentId>` (e.g. `/avatar/main`) needed the same fix 1 treatment as
+manifest/favicon, for the original browser-passive-fetch reason: confirmed
+live it was `401` in 100% of real request-log samples, never once
+succeeding -- consistent with an `<img>` tag load the browser never attaches
+cached Basic-Auth to. Confirmed with valid credentials it currently `404`s
+(no avatar configured yet), so nothing sensitive was ever exposed by
+exempting it, and an avatar image wouldn't be sensitive once one is set
+either. Matched by path prefix, not a literal path, since it's built from
+the agent id.
+
 Both local output files are ignored by git. They are handoff conveniences, not
 source artifacts.
 
