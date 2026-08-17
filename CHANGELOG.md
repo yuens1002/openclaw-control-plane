@@ -7,6 +7,7 @@ and uses semantic versioning once releases begin.
 
 ## [Unreleased]
 
+- 2026-08-17 - fix(railway): exempt control-ui-config.json from wrapper Basic Auth (client-side token attachment is unreliable)
 - 2026-08-17 - fix(railway): accept the app's own gateway Bearer token as valid dashboard auth
 - 2026-08-17 - fix(railway): always forward the gateway Bearer token instead of a cached client Basic-Auth header
 - 2026-08-17 - fix(railway): exempt browser-managed static paths from wrapper Basic Auth

@@ -255,7 +255,7 @@ The setup password is needed for HTTP Basic auth on `/setup` and `/openclaw`.
 Use any username.
 
 **Recurring browser sign-in prompt, even after entering the correct
-password or verifying the gateway token**: three independent wrapper bugs
+password or verifying the gateway token**: three independent wrapper issues
 cause this, all patched in this repo's `Dockerfile` (via `sed` against the
 wrapper's `src/server.js` in the `template-source` build stage) so the fix
 applies automatically on every future `OPENCLAW_GIT_REF` bump rather than
@@ -293,6 +293,17 @@ needing to be rediscovered per client:
    regardless, because the wrapper's gate simply didn't recognize `Bearer` as
    valid. Patched by accepting a correct `Bearer <OPENCLAW_GATEWAY_TOKEN>` as
    an alternative to dashboard Basic Auth.
+
+Even with fix 3 landed, `/control-ui-config.json` kept flipping between `401`
+and `200` for the *same* browser session within the same second -- confirmed
+live in the request logs. That's a client-side bug in the OpenClaw app's own
+(compiled/minified) frontend inconsistently attaching its Bearer token to
+this frequently-polled call, not anything the wrapper or this repo controls.
+Since its response body is confirmed non-sensitive (`assistantName`, avatar
+status, local media paths -- no secrets) and it was the dominant real-world
+source of the recurring popup, it's exempted from the Basic-Auth gate
+entirely (added to the fix 1 path list above) rather than left to keep
+re-triggering the browser's native challenge on every failed poll.
 
 Both local output files are ignored by git. They are handoff conveniences, not
 source artifacts.

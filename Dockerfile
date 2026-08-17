@@ -31,10 +31,22 @@ RUN curl -fsSL "${OPENCLAW_TEMPLATE_REPO}/archive/${OPENCLAW_TEMPLATE_REF}.tar.g
 # visible once the pinned OpenClaw version started shipping a PWA manifest/
 # icon set the browser actively fetches. Patched here (not upstream) so every
 # future OPENCLAW_GIT_REF bump inherits the fix automatically.
+#
+# /control-ui-config.json is exempted for a different, client-side reason:
+# confirmed live that the OpenClaw app's own frontend attaches its Bearer
+# token to this frequently-polled call inconsistently -- the exact same
+# browser session flips between 401 and 200 for it within the same second,
+# repeatedly, even after fix 2/3 below made a correctly-authed request to it
+# succeed reliably via curl. That's a client-side bug in compiled/minified
+# app JS this repo has no safe way to patch. Its response body is confirmed
+# non-sensitive (assistantName, avatar status, local media paths -- no
+# secrets), and it's the dominant source of the recurring native sign-in
+# popup in practice, so it's exempted outright rather than left to keep
+# re-triggering the browser's Basic-Auth challenge on every failed poll.
 RUN sed -i \
-  's#if (req.path.startsWith("/hooks")) return next(); // allow OpenClaw webhook endpoints to bypass dashboard auth#if (req.path.startsWith("/hooks")) return next(); // allow OpenClaw webhook endpoints to bypass dashboard auth\n  if (["/manifest.webmanifest", "/favicon.ico", "/favicon.svg", "/favicon-16.png", "/favicon-32.png", "/apple-touch-icon.png", "/sw.js"].includes(req.path)) return next(); // browsers never attach cached Basic-Auth credentials to these passive resource fetches#' \
+  's#if (req.path.startsWith("/hooks")) return next(); // allow OpenClaw webhook endpoints to bypass dashboard auth#if (req.path.startsWith("/hooks")) return next(); // allow OpenClaw webhook endpoints to bypass dashboard auth\n  if (["/manifest.webmanifest", "/favicon.ico", "/favicon.svg", "/favicon-16.png", "/favicon-32.png", "/apple-touch-icon.png", "/sw.js", "/control-ui-config.json"].includes(req.path)) return next(); // see comments above and below this RUN step for why each path is exempted#' \
   src/server.js
-RUN grep -q 'browsers never attach cached Basic-Auth credentials' src/server.js
+RUN grep -q '/control-ui-config.json' src/server.js
 
 # requireDashboardAuth only accepts `Authorization: Basic ...` -- it rejects
 # any other scheme outright, including a perfectly valid
