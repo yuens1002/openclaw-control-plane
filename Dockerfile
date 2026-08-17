@@ -42,7 +42,7 @@ RUN corepack enable
 
 WORKDIR /openclaw
 
-ARG OPENCLAW_GIT_REF=v2026.3.8
+ARG OPENCLAW_GIT_REF=v2026.7.1-2
 RUN git clone --depth 1 --branch "${OPENCLAW_GIT_REF}" https://github.com/openclaw/openclaw.git .
 
 RUN set -eux; \
