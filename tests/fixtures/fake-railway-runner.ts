@@ -17,6 +17,8 @@ export class FakeRailwayRunner implements RailwayRunner {
   private domainListResponse: unknown = domainList(3000);
   private domainUpdateResponse: unknown = { domain: serviceDomain(8080) };
   private variableListResponse: Record<string, string> = {};
+  /** When set, simulates a service with no domain yet until `domain --service` (generate) is called. */
+  private domainGeneratesTo: unknown | undefined;
 
   constructor(serviceListResponses: unknown[][] = []) {
     this.serviceListResponses = [...serviceListResponses];
@@ -32,6 +34,12 @@ export class FakeRailwayRunner implements RailwayRunner {
 
   setVariableListResponse(response: Record<string, string>): void {
     this.variableListResponse = response;
+  }
+
+  /** Simulates a freshly-deployed service with no domain until the generate call lands. */
+  setNoDomainUntilGenerated(generatedDomainListResponse: unknown): void {
+    this.domainListResponse = { domains: [] };
+    this.domainGeneratesTo = generatedDomainListResponse;
   }
 
   async run(args: string[], stdin?: string): Promise<CommandResult> {
@@ -76,6 +84,18 @@ export class FakeRailwayRunner implements RailwayRunner {
     }
     if (key === "domain update") {
       return { stdout: JSON.stringify(this.domainUpdateResponse) };
+    }
+    if (args[0] === "domain" && args[1] === "--service") {
+      // The generate form (`railway domain --service <name> --port <n> --json`)
+      // -- confirmed live to return `{domain: "<full-url>"}`, a different
+      // shape than `domain list`/`update`. This fake doesn't need to
+      // reproduce that shape exactly since the real code re-lists rather
+      // than parsing it; it only needs to make the *next* `domain list`
+      // call reflect that a domain now exists.
+      if (this.domainGeneratesTo !== undefined) {
+        this.domainListResponse = this.domainGeneratesTo;
+      }
+      return { stdout: JSON.stringify({ domain: "https://generated-example.up.railway.app" }) };
     }
 
     throw new Error(`Unexpected command: ${args.join(" ")}`);

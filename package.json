@@ -1,6 +1,6 @@
 {
   "name": "openclaw-control-plane",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -18,7 +18,8 @@
     "typecheck": "tsc -b --pretty false",
     "railway-template:check": "tsx packages/openclaw-railway-installer/src/check-template-lock.ts",
     "railway-proof:verify": "tsx packages/openclaw-railway-installer/src/verify-proof-cli.ts",
-    "railway-vars:guard": "tsx packages/openclaw-railway-installer/src/guard-cli.ts"
+    "railway-vars:guard": "tsx packages/openclaw-railway-installer/src/guard-cli.ts",
+    "onboarding-cycle": "tsx packages/openclaw-setup-applier/src/onboarding-cycle-cli.ts"
   },
   "workspaces": [
     "apps/*",

@@ -18,6 +18,10 @@ function baseDependencies(runner: RailwayRunner, overrides: Partial<ProvisionCli
     runner,
     sleep: async () => {},
     checkSetupStatus: async (url: string) => (url.endsWith("/setup/api/status") ? 200 : 500),
+    getConfigRaw: async () => ({ ok: true, content: "{}" }),
+    postConfigRaw: async () => ({ ok: true }),
+    getPendingDevices: async () => ({ ok: true, requestIds: [] }),
+    approveDevice: async () => ({ ok: true }),
     readText: async () => "",
     writeText: async () => {},
     readTemplateLock: async () => ({ pinnedCommit: FIXTURE_PINNED_COMMIT }),
@@ -77,6 +81,69 @@ describe("provisionClientInstance — fresh provision", () => {
     expect(result.templateRef).toBe(FIXTURE_PINNED_COMMIT);
     expect(writes.get("handoff.local.md")).toContain(`Template ref: ${FIXTURE_PINNED_COMMIT}`);
     expect(writes.get(".env.local")).toContain(`OPENCLAW_CLIENT_TEMPLATE_REF=${FIXTURE_PINNED_COMMIT}`);
+
+    // Client handoff link: constructed from the freshly generated gateway
+    // token, not a separate value -- and it's the one artifact both output
+    // files actually surface (unlike the raw token/password, which a client
+    // shouldn't need to type in manually at all).
+    expect(result.dashboardUrl).toBe(`${result.openclawUrl}#token=${result.gatewayToken}`);
+    expect(writes.get("handoff.local.md")).toContain(`- ${result.dashboardUrl}`);
+    expect(writes.get(".env.local")).toContain(`OPENCLAW_CLIENT_DASHBOARD_URL=${result.dashboardUrl}`);
+  });
+
+  it("patches allowedOrigins and approves device pairing after the readiness check (issue #23)", async () => {
+    const runner = new FakeRailwayRunner([[], [freshService("BUILDING")], [freshService("SUCCESS")]]);
+    runner.setDomainList(domainList(8080));
+    const calls: string[] = [];
+
+    const result = await provisionClientInstance(
+      { clientName: "acme", pollSeconds: 0, writeLocalFiles: false },
+      baseDependencies(runner, {
+        checkSetupStatus: async () => {
+          calls.push("status");
+          return 200;
+        },
+        getConfigRaw: async () => {
+          calls.push("getConfigRaw");
+          return { ok: true, content: "{}" };
+        },
+        postConfigRaw: async () => {
+          calls.push("postConfigRaw");
+          return { ok: true };
+        },
+        getPendingDevices: async () => {
+          calls.push("getPendingDevices");
+          return { ok: true, requestIds: ["req_1"] };
+        },
+        approveDevice: async () => {
+          calls.push("approveDevice");
+          return { ok: true };
+        }
+      })
+    );
+
+    expect(calls).toEqual(["status", "getConfigRaw", "postConfigRaw", "getPendingDevices", "approveDevice"]);
+    expect(result.patchedAllowedOrigins).toBe(true);
+    expect(result.approvedDeviceRequestId).toBe("req_1");
+  });
+
+  it("does not POST a config patch or approve anything when there's nothing to do", async () => {
+    const runner = new FakeRailwayRunner([[], [freshService("SUCCESS")]]);
+    runner.setDomainList(domainList(8080));
+
+    const result = await provisionClientInstance(
+      { clientName: "acme", pollSeconds: 0, writeLocalFiles: false },
+      baseDependencies(runner, {
+        getConfigRaw: async () => ({ ok: true, content: JSON.stringify({ gateway: { controlUi: { allowedOrigins: ["https://acme-openclaw.example.com"] } } }) }),
+        postConfigRaw: async () => {
+          throw new Error("must not be called");
+        },
+        getPendingDevices: async () => ({ ok: true, requestIds: [] })
+      })
+    );
+
+    expect(result.patchedAllowedOrigins).toBe(false);
+    expect(result.approvedDeviceRequestId).toBeUndefined();
   });
 
   it("defaults OPENCLAW_TEMPLATE_REF from the injected template-lock reader but allows an explicit override", async () => {
@@ -168,7 +235,10 @@ describe("provisionClientInstance — forceNew against a project with an existin
 describe("provisionClientInstance — idempotent rerun", () => {
   it("skips up/service-link/volume/variable-set/redeploy when a service already exists for the linked project", async () => {
     const runner = new FakeRailwayRunner([[freshService("SUCCESS")]]);
-    runner.setVariableListResponse({ SETUP_PASSWORD: "already-handed-off-secret" });
+    runner.setVariableListResponse({
+      SETUP_PASSWORD: "already-handed-off-secret",
+      OPENCLAW_GATEWAY_TOKEN: "already-handed-off-token"
+    });
     runner.setDomainList(domainList(8080));
 
     const result = await provisionClientInstance(
@@ -186,7 +256,10 @@ describe("provisionClientInstance — idempotent rerun", () => {
 
   it("reuses the service's actual SETUP_PASSWORD instead of generating a fresh one", async () => {
     const runner = new FakeRailwayRunner([[freshService("SUCCESS")]]);
-    runner.setVariableListResponse({ SETUP_PASSWORD: "already-handed-off-secret" });
+    runner.setVariableListResponse({
+      SETUP_PASSWORD: "already-handed-off-secret",
+      OPENCLAW_GATEWAY_TOKEN: "already-handed-off-token"
+    });
     runner.setDomainList(domainList(8080));
 
     const result = await provisionClientInstance(
@@ -218,6 +291,35 @@ describe("provisionClientInstance — idempotent rerun", () => {
         baseDependencies(runner)
       )
     ).rejects.toThrow("exists but has no SETUP_PASSWORD variable set");
+  });
+
+  it("throws instead of silently generating a fresh token when the existing service has no OPENCLAW_GATEWAY_TOKEN set", async () => {
+    const runner = new FakeRailwayRunner([[freshService("SUCCESS")]]);
+    runner.setVariableListResponse({ SETUP_PASSWORD: "already-handed-off-secret" });
+
+    await expect(
+      provisionClientInstance(
+        { clientName: "acme", projectId: "proj_123", pollSeconds: 0, writeLocalFiles: false },
+        baseDependencies(runner)
+      )
+    ).rejects.toThrow("exists but has no OPENCLAW_GATEWAY_TOKEN variable set");
+  });
+
+  it("reuses the service's actual OPENCLAW_GATEWAY_TOKEN and constructs dashboardUrl from it, not a freshly generated one", async () => {
+    const runner = new FakeRailwayRunner([[freshService("SUCCESS")]]);
+    runner.setVariableListResponse({
+      SETUP_PASSWORD: "already-handed-off-secret",
+      OPENCLAW_GATEWAY_TOKEN: "already-handed-off-token"
+    });
+    runner.setDomainList(domainList(8080));
+
+    const result = await provisionClientInstance(
+      { clientName: "acme", projectId: "proj_123", pollSeconds: 0, writeLocalFiles: false },
+      baseDependencies(runner)
+    );
+
+    expect(result.gatewayToken).toBe("already-handed-off-token");
+    expect(result.dashboardUrl).toBe(`${result.openclawUrl}#token=already-handed-off-token`);
   });
 
   it("refuses to guess when the linked project already has more than one service (PR #21 review comment)", async () => {
