@@ -7,6 +7,7 @@ and uses semantic versioning once releases begin.
 
 ## [Unreleased]
 
+- 2026-08-17 - docs(adr): add identity and communication boundary decision record
 - 2026-08-17 - feat: onboarding regression pipeline + live-discovered provisioning fixes
 - 2026-08-17 - test(railway): add real-spawn contract tests and dedupe fakes
 - 2026-08-16 - feat(railway-installer): add importWorkspaceFiles transport for /setup/import
