@@ -255,11 +255,11 @@ The setup password is needed for HTTP Basic auth on `/setup` and `/openclaw`.
 Use any username.
 
 **Recurring browser sign-in prompt, even after entering the correct
-password**: two independent wrapper bugs cause this, both patched in this
-repo's `Dockerfile` (via `sed` against the wrapper's `src/server.js` in the
-`template-source` build stage) so the fix applies automatically on every
-future `OPENCLAW_GIT_REF` bump rather than needing to be rediscovered per
-client:
+password or verifying the gateway token**: three independent wrapper bugs
+cause this, all patched in this repo's `Dockerfile` (via `sed` against the
+wrapper's `src/server.js` in the `template-source` build stage) so the fix
+applies automatically on every future `OPENCLAW_GIT_REF` bump rather than
+needing to be rediscovered per client:
 
 1. `requireDashboardAuth` gates every route with Basic Auth by design, but
    browsers never attach cached Basic-Auth credentials to
@@ -282,6 +282,17 @@ client:
    attaching cached credentials. Patched by always overwriting the
    `Authorization` header with the gateway's Bearer token before proxying,
    regardless of what the client sent to satisfy the wrapper's own gate.
+3. `requireDashboardAuth` also only accepts the `Basic` scheme -- it rejects
+   any other scheme outright, including a perfectly valid
+   `Authorization: Bearer <OPENCLAW_GATEWAY_TOKEN>` the Control UI itself
+   sends directly for its own API calls once paired (unlike WebSocket
+   upgrades, regular `fetch()` calls can set custom headers, so the app
+   doesn't rely on the wrapper's Basic-Auth caching for these at all).
+   Confirmed live: with the gateway token verified correct in the app's own
+   Control UI settings, calls like `/control-ui-config.json` kept 401'ing
+   regardless, because the wrapper's gate simply didn't recognize `Bearer` as
+   valid. Patched by accepting a correct `Bearer <OPENCLAW_GATEWAY_TOKEN>` as
+   an alternative to dashboard Basic Auth.
 
 Both local output files are ignored by git. They are handoff conveniences, not
 source artifacts.

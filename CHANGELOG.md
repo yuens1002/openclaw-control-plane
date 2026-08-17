@@ -7,6 +7,7 @@ and uses semantic versioning once releases begin.
 
 ## [Unreleased]
 
+- 2026-08-17 - fix(railway): accept the app's own gateway Bearer token as valid dashboard auth
 - 2026-08-17 - fix(railway): always forward the gateway Bearer token instead of a cached client Basic-Auth header
 - 2026-08-17 - fix(railway): exempt browser-managed static paths from wrapper Basic Auth
 - 2026-08-17 - feat(railway): add per-client OPENCLAW_GIT_REF update lever, bump default to v2026.7.1-2

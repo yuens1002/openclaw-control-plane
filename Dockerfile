@@ -36,6 +36,22 @@ RUN sed -i \
   src/server.js
 RUN grep -q 'browsers never attach cached Basic-Auth credentials' src/server.js
 
+# requireDashboardAuth only accepts `Authorization: Basic ...` -- it rejects
+# any other scheme outright, including a perfectly valid
+# `Authorization: Bearer <OPENCLAW_GATEWAY_TOKEN>` the Control UI itself
+# already sends for its own API calls once paired (unlike WebSocket upgrades,
+# regular fetch() calls CAN set custom headers, so the app doesn't need the
+# wrapper's Basic-Auth caching for these at all -- it sends its own Bearer
+# token directly). Confirmed live: with the gateway token verified correct in
+# the app's own Control UI settings, /control-ui-config.json and similar
+# app-issued calls kept 401'ing regardless, because the wrapper's gate
+# doesn't recognize Bearer as valid at all. Fix: accept a correct
+# `Bearer <OPENCLAW_GATEWAY_TOKEN>` as an alternative to dashboard Basic Auth.
+RUN sed -i \
+  's#if (!SETUP_PASSWORD) return next(); // no password configured → open#if (!SETUP_PASSWORD) return next(); // no password configured → open\n  { const authHeader = req.headers.authorization || ""; const [authScheme, authValue] = authHeader.split(" "); if (authScheme === "Bearer" \&\& OPENCLAW_GATEWAY_TOKEN \&\& authValue === OPENCLAW_GATEWAY_TOKEN) return next(); }#' \
+  src/server.js
+RUN grep -q 'authScheme === "Bearer"' src/server.js
+
 # attachGatewayAuthHeader only injects the gateway's Bearer token when no
 # Authorization header is already present. Once a browser has cached
 # dashboard Basic-Auth credentials for this origin (guaranteed -- /setup and
