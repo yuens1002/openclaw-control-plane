@@ -9,6 +9,8 @@
     "./railway-variables": "./src/railway-variables.ts",
     "./apply-profile": "./src/apply-profile.ts",
     "./openrouter-provisioning": "./src/openrouter-provisioning.ts",
+    "./onboarding-cycle": "./src/onboarding-cycle.ts",
+    "./onboarding-cycle-cli": "./src/onboarding-cycle-cli.ts",
     "./cli": "./src/cli.ts"
   },
   "dependencies": {

@@ -203,6 +203,8 @@ export type ApplyOutcome = "already-configured" | "applied";
 
 export interface ApplyResult {
   outcome: ApplyOutcome;
+  /** Set only when this call actually minted a new OpenRouter key (the secret name was absent from Railway variables). */
+  mintedKeyHash?: string;
 }
 
 /**
@@ -250,10 +252,12 @@ export async function applyProfile(
         customProviderApiKeyEnv?: string;
       }
     | undefined;
+  let mintedKeyHash: string | undefined;
 
   if (provider !== undefined) {
     const resolution = await resolveProviderSecret(provider, existingVars, options.service, dependencies);
     redeployTriggered = redeployTriggered || resolution.triggeredRedeploy;
+    mintedKeyHash = resolution.mintedKeyHash;
     resolvedProvider = {
       authChoice: provider.nonSecretConfig.authChoice,
       flow: provider.nonSecretConfig.flow,
@@ -304,7 +308,7 @@ export async function applyProfile(
     );
   }
 
-  return { outcome: "applied" };
+  return { outcome: "applied", ...(mintedKeyHash !== undefined ? { mintedKeyHash } : {}) };
 }
 
 function isConfigured(status: unknown): boolean {
@@ -324,7 +328,7 @@ async function resolveProviderSecret(
   existingVars: Record<string, string>,
   service: string,
   dependencies: ApplyProfileDependencies
-): Promise<{ value: string; triggeredRedeploy: boolean }> {
+): Promise<{ value: string; triggeredRedeploy: boolean; mintedKeyHash?: string }> {
   const secretName = provider.requiredSecretNames[0];
   if (secretName === undefined) {
     throw new Error("Model provider attachment has no requiredSecretNames.");
@@ -356,11 +360,11 @@ async function resolveProviderSecret(
 
   const requiresRedeploy = provider.nonSecretConfig.customProviderApiKeyEnv !== undefined;
   await writeRailwayVariable(
-    { name: secretName, value: minted, service, skipDeploys: !requiresRedeploy },
+    { name: secretName, value: minted.key, service, skipDeploys: !requiresRedeploy },
     dependencies
   );
 
-  return { value: minted, triggeredRedeploy: requiresRedeploy };
+  return { value: minted.key, triggeredRedeploy: requiresRedeploy, mintedKeyHash: minted.hash };
 }
 
 interface WaitForHealthyOptions {

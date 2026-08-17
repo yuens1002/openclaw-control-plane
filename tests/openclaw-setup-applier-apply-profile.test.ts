@@ -12,6 +12,7 @@ import { createSetupApiClient } from "@openclaw-control-plane/openclaw-setup-app
 
 const SENTINEL_SECRET = "sk-test-DO-NOT-LOG-9f8e7d";
 const SENTINEL_MINTED = "sk-test-DO-NOT-LOG-minted-key";
+const SENTINEL_MINTED_HASH = "hash-test-minted-abc123";
 
 class FakeRailwayRunner implements RailwayRunner {
   readonly writes: Array<{ name: string; value?: string; skipDeploys: boolean }> = [];
@@ -69,7 +70,7 @@ function buildFetchStub(options: {
     }
     if (url === "https://openrouter.ai/api/v1/keys") {
       options.callOrder.push("mint");
-      return new Response(JSON.stringify({ key: SENTINEL_MINTED }), { status: 200 });
+      return new Response(JSON.stringify({ key: SENTINEL_MINTED, data: { hash: SENTINEL_MINTED_HASH } }), { status: 200 });
     }
     throw new Error(`Unexpected fetch: ${url}`);
   }) as typeof fetch;
@@ -200,7 +201,7 @@ describe("apply-profile apply mode", () => {
     const fetchImpl = buildFetchStub({ instanceUrl, configured: false, callOrder });
     const setupApiClient = createSetupApiClient({ baseUrl: instanceUrl, fetchImpl });
 
-    await applyProfile(
+    const result = await applyProfile(
       readFixture("key-provisioning-provider.json"),
       { service: "svc", instanceBaseUrl: instanceUrl },
       { runner, setupApiClient, openRouterManagementKey: "sk-test-DO-NOT-LOG-mgmt", fetchImpl }
@@ -211,6 +212,23 @@ describe("apply-profile apply mode", () => {
       { name: "EXAMPLE_OPENROUTER_MANAGED_API_KEY", value: SENTINEL_MINTED, skipDeploys: true }
     ]);
     expect(callOrder.indexOf("mint")).toBeLessThan(callOrder.indexOf("run"));
+    expect(result.mintedKeyHash).toBe(SENTINEL_MINTED_HASH);
+  });
+
+  it("leaves mintedKeyHash undefined when no mint occurred (secret already present)", async () => {
+    const callOrder: string[] = [];
+    const runner = new FakeRailwayRunner({ EXAMPLE_OPENROUTER_MANAGED_API_KEY: SENTINEL_SECRET });
+    const fetchImpl = buildFetchStub({ instanceUrl, configured: false, callOrder });
+    const setupApiClient = createSetupApiClient({ baseUrl: instanceUrl, fetchImpl });
+
+    const result = await applyProfile(
+      readFixture("key-provisioning-provider.json"),
+      { service: "svc", instanceBaseUrl: instanceUrl },
+      { runner, setupApiClient, openRouterManagementKey: "sk-test-DO-NOT-LOG-mgmt", fetchImpl }
+    );
+
+    expect(callOrder).not.toContain("mint");
+    expect(result.mintedKeyHash).toBeUndefined();
   });
 
   it("omits --skip-deploys and re-healthchecks before run for a customProviderApiKeyEnv attachment", async () => {
@@ -546,7 +564,7 @@ describe("apply-profile apply mode", () => {
       }
       if (url === "https://openrouter.ai/api/v1/keys") {
         callOrder.push("mint");
-        return new Response(JSON.stringify({ key: SENTINEL_MINTED }), { status: 200 });
+        return new Response(JSON.stringify({ key: SENTINEL_MINTED, data: { hash: SENTINEL_MINTED_HASH } }), { status: 200 });
       }
       throw new Error(`Unexpected fetch: ${url}`);
     };

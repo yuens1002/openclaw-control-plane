@@ -54,6 +54,40 @@ describe("OpenClaw Railway installer", () => {
     );
   });
 
+  it("generates a domain when the service has none yet, then proceeds normally", async () => {
+    // Confirmed live (first-ever smoke of provisionClientInstance,
+    // 2026-08-16): a freshly-deployed service can have zero domains --
+    // `domain list` returning empty isn't a Railway-side propagation delay,
+    // it means no domain was ever created and one must be generated
+    // explicitly.
+    const runner = new FakeRailwayRunner([[], [service("BUILDING")], [service("SUCCESS")]]);
+    runner.setNoDomainUntilGenerated(domainList(8080));
+
+    const result = await installOpenClawOnRailway(
+      {
+        setupPassword: "setup-secret",
+        gatewayToken: "gateway-secret",
+        pollSeconds: 0,
+        writeLocalFiles: false
+      },
+      {
+        runner,
+        sleep: async () => {},
+        checkSetupStatus: async (url) => (url.endsWith("/setup/api/status") ? 200 : 500),
+        getConfigRaw: async () => ({ ok: true, content: "{}" }),
+        postConfigRaw: async () => ({ ok: true }),
+        getPendingDevices: async () => ({ ok: true, requestIds: [] }),
+        approveDevice: async () => ({ ok: true })
+      }
+    );
+
+    expect(result.setupUrl).toBe("https://example-openclaw.example.com/setup");
+    expect(runner.calls.some((call) => call.args[0] === "domain" && call.args[1] === "--service")).toBe(true);
+    // Already generated at the requested port -- no separate `domain
+    // update` call needed on top of the generate call.
+    expect(runner.calls.some((call) => call.args[0] === "domain" && call.args[1] === "update")).toBe(false);
+  });
+
   it("reuses an existing successful service without deploying a duplicate", async () => {
     const runner = new FakeRailwayRunner([[service("SUCCESS")]]);
     runner.setDomainList(domainList(8080));
