@@ -11,6 +11,7 @@ Use lowercase kebab-case filenames:
 docs/<topic>.md
 docs/<area>/<topic>.md
 docs/plans/<feature-slug>/{plan,ACs,review}.md
+docs/adr/<NNNN>-<topic>.md
 ```
 
 Examples:
@@ -19,6 +20,7 @@ Examples:
 - `docs/openclaw-tools.md`
 - `docs/vending.md`
 - `docs/plans/client-grade-railway-install/plan.md`
+- `docs/adr/0001-identity-and-communication-boundary.md`
 
 ## Document Types
 
@@ -27,6 +29,11 @@ Examples:
 - Operations docs describe setup, deploy, verification, and recovery flows.
 - Plans live under `docs/plans/<feature-slug>/` and are used by the
   agentic-workflow cadence.
+- ADRs (architecture decision records) live under `docs/adr/`, one
+  sequentially numbered file per point-in-time decision (status, context,
+  decision, consequences). Unlike architecture docs, an ADR is not updated
+  to match the latest state — a changed decision gets a new ADR that
+  supersedes the old one.
 
 ## Public-Repo Rule
 
