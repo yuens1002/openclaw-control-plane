@@ -135,3 +135,43 @@ just account bookkeeping, becomes part of the decision.
 - **Standardize on one internal comm provider (e.g. Slack) as the
   supported default.** Rejected: contradicts the workflow-neutral baseline
   and excludes clients whose business model runs on a different tool.
+
+## Status Updates
+
+### 2026-08-18 — Decision (4), source-control: PAT adopted as a documented single-tenant outlier
+
+Decision (4)'s App-based model — one provider-owned GitHub App installed
+separately per organization, short-lived per-use tokens minted from an
+App JWT, never a static secret handed to the CoT — was designed for a
+multi-tenant scenario: the agency and each downstream client org each
+needing their own scoped installation. That scenario does not currently
+exist. This agency's target clients do not have their own GitHub org,
+repos, or any notion of what a repo is — the agency builds and owns the
+workflows/servers the CoT tracks on their behalf. As of this writing, the
+agency itself is the only org that needs the CoT to read a GitHub repo at
+all.
+
+Given that, decision (4)'s App-based model was built
+(`openclaw-control-plane` `packages/openclaw-source-control-connector`,
+PR [#32](https://github.com/yuens1002/openclaw-control-plane/pull/32) —
+`buildAppJwt` + `mintInstallationToken`, tested, documented, deliberately
+unwired) and then **reverted**, not carried forward. A classic GitHub
+Personal Access Token, scoped to the agency's own account, is what the
+agency's live CoT instance actually uses today — already configured and
+working. Building and operating the App's mint-and-refresh pipeline
+(installation tokens expire in ≤1hr, requiring a recurring refresh job
+with no existing scheduling infrastructure to run it from) was
+disproportionate effort for a single, low-risk, single-tenant credential.
+
+Decision (4)'s general principle — provider-owned App, least-privilege
+per-installation scope, short-lived minted tokens, no static secret
+handed to the CoT — **still stands** for a future scenario where a client
+actually has its own org/repos the CoT needs scoped access to. At that
+point, the reverted transport code and the research trail behind this
+decision (installation vs. PAT tradeoffs; OpenClaw's own native MCP
+support, confirmed live from `openclaw/openclaw` source, not assumed)
+are the starting point, not a from-scratch investigation — see
+[`[private-repo]#6`](https://github.com/[private-org]/[private-repo]/issues/6)
+for the full writeup. It's also plausible OpenClaw ships native GitHub
+App support upstream before that scenario ever arises, which would
+obsolete this control-plane package entirely rather than just revive it.

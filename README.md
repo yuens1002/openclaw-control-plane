@@ -50,9 +50,6 @@ OpenClaw manages the system; it does not become the system.
 - `packages/contracts`: shared schemas and TypeScript types
 - `packages/db`: migrations and typed persistence primitives
 - `packages/openclaw-adapter`: OpenClaw-facing API wrappers
-- `packages/openclaw-source-control-connector`: signs GitHub App JWTs and
-  mints short-lived installation access tokens (see
-  `docs/architecture.md`)
 - `workers/vending`: fake/manual example worker package
 - `deploy/openclaw-railway`: OpenClaw Railway template installer and
   agency-controlled per-client provisioning

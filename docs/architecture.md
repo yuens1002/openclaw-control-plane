@@ -19,16 +19,6 @@ business-specific automations from private client repos or plugin packages.
 - `packages/openclaw-setup-applier`: reads a generated client profile and
   drives a live OpenClaw instance's `/setup` API idempotently — see
   [docs/setup-profile-applier.md](setup-profile-applier.md).
-- `packages/openclaw-source-control-connector`: signs GitHub App JWTs and
-  mints short-lived installation access tokens, per ADR 0001's source-control
-  connector pattern — see
-  [docs/plans/github-installation-connector/plan.md](plans/github-installation-connector/plan.md).
-  Named after the connector category, not the single provider, so a future
-  host (e.g. GitLab) adds a sibling module rather than a new package. Not yet
-  wired into a CLI or any provisioning flow — the transport half of
-  [`[private-repo]#4`](https://github.com/[private-org]/[private-repo]/issues/4),
-  which owns the content half (App registration, installation records) in
-  that private repo.
 - `apps/api`: Hono HTTP API for ingesting events and controlling pipelines.
 - `apps/worker`: Background runner entrypoint.
 - `workers/vending`: Fake/manual example worker package.
