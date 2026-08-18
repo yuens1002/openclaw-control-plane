@@ -6,6 +6,7 @@
     { "path": "./packages/openclaw-railway-installer" },
     { "path": "./packages/openclaw-adapter" },
     { "path": "./packages/openclaw-setup-applier" },
+    { "path": "./packages/openclaw-source-control-connector" },
     { "path": "./workers/vending" },
     { "path": "./apps/api" },
     { "path": "./apps/worker" },
