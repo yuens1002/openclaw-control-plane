@@ -251,8 +251,70 @@ OpenClaw-controlled GitHub repo and point Railway at an approved branch such as
 `openclaw-control-plane-approved`. Advance that branch only through a reviewed
 PR after the smoke test passes.
 
-The setup password is needed for HTTP Basic auth on `/setup` and `/openclaw`.
-Use any username.
+The setup password is needed for HTTP Basic auth on `/setup` and `/openclaw`
+(use any username), or a correct `Authorization: Bearer <OPENCLAW_GATEWAY_TOKEN>`
+is accepted as an alternative on `/openclaw` -- see fix 3 below.
+
+**Recurring browser sign-in prompt, even after entering the correct
+password or verifying the gateway token**: three independent wrapper issues
+cause this, all patched in this repo's `Dockerfile` (via `sed` against the
+wrapper's `src/server.js` in the `template-source` build stage) so the fix
+applies automatically on every future `OPENCLAW_GIT_REF` bump rather than
+needing to be rediscovered per client:
+
+1. `requireDashboardAuth` gates every route with Basic Auth by design, but
+   browsers never attach cached Basic-Auth credentials to
+   `<link rel="manifest">` or favicon fetches (a browser security rule, not a
+   credential problem) -- so `/manifest.webmanifest`, favicons, and `sw.js`
+   401 forever and the sign-in dialog re-fires every time the browser retries
+   them, no matter what password is entered. Patched by exempting those known
+   browser-managed static paths from the auth gate.
+2. The bigger one: `attachGatewayAuthHeader` only injects the real OpenClaw
+   gateway's Bearer token when no `Authorization` header is already present.
+   Once a browser has cached dashboard Basic-Auth credentials for the origin
+   (guaranteed -- `/setup` requires it), Chrome auto-attaches that cached
+   header to *every* same-origin request, including the app's own `fetch()`
+   calls -- satisfying `requireDashboardAuth`'s gate, then getting forwarded
+   as-is to the gateway, which only understands `Bearer <token>` and rejects
+   it. The app's frontend then shows its own sign-in prompt. Not scoped to
+   one route -- confirmed live on `/control-ui-config.json`
+   (`{"error":{"message":"Unauthorized"}}` even with valid dashboard
+   credentials), and can hit any proxied request once the browser starts
+   attaching cached credentials. Patched by always overwriting the
+   `Authorization` header with the gateway's Bearer token before proxying,
+   regardless of what the client sent to satisfy the wrapper's own gate.
+3. `requireDashboardAuth` also only accepts the `Basic` scheme -- it rejects
+   any other scheme outright, including a perfectly valid
+   `Authorization: Bearer <OPENCLAW_GATEWAY_TOKEN>` the Control UI itself
+   sends directly for its own API calls once paired (unlike WebSocket
+   upgrades, regular `fetch()` calls can set custom headers, so the app
+   doesn't rely on the wrapper's Basic-Auth caching for these at all).
+   Confirmed live: with the gateway token verified correct in the app's own
+   Control UI settings, calls like `/control-ui-config.json` kept 401'ing
+   regardless, because the wrapper's gate simply didn't recognize `Bearer` as
+   valid. Patched by accepting a correct `Bearer <OPENCLAW_GATEWAY_TOKEN>` as
+   an alternative to dashboard Basic Auth.
+
+Even with fix 3 landed, `/control-ui-config.json` kept flipping between `401`
+and `200` for the *same* browser session within the same second -- confirmed
+live in the request logs. That's a client-side bug in the OpenClaw app's own
+(compiled/minified) frontend inconsistently attaching its Bearer token to
+this frequently-polled call, not anything the wrapper or this repo controls.
+Since its response body is confirmed non-sensitive (`assistantName`, avatar
+status, local media paths -- no secrets) and it was the dominant real-world
+source of the recurring popup, it's exempted from the Basic-Auth gate
+entirely (added to the fix 1 path list above) rather than left to keep
+re-triggering the browser's native challenge on every failed poll.
+
+`/avatar/<agentId>` (e.g. `/avatar/main`) needed the same fix 1 treatment as
+manifest/favicon, for the original browser-passive-fetch reason: confirmed
+live it was `401` in 100% of real request-log samples, never once
+succeeding -- consistent with an `<img>` tag load the browser never attaches
+cached Basic-Auth to. Confirmed with valid credentials it currently `404`s
+(no avatar configured yet), so nothing sensitive was ever exposed by
+exempting it, and an avatar image wouldn't be sensitive once one is set
+either. Matched by path prefix, not a literal path, since it's built from
+the agent id.
 
 Both local output files are ignored by git. They are handoff conveniences, not
 source artifacts.
