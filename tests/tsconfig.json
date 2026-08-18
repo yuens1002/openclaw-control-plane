@@ -12,6 +12,7 @@
     { "path": "../packages/db" },
     { "path": "../packages/openclaw-railway-installer" },
     { "path": "../packages/openclaw-setup-applier" },
+    { "path": "../packages/openclaw-source-control-connector" },
     { "path": "../apps/api" }
   ]
 }

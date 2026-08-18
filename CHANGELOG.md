@@ -7,6 +7,7 @@ and uses semantic versioning once releases begin.
 
 ## [Unreleased]
 
+- 2026-08-18 - feat(source-control-connector): add github installation token minting transport
 - 2026-08-17 - fix(railway): exempt /avatar/<agentId> from wrapper Basic Auth (browser never attaches cached credentials to it)
 - 2026-08-17 - fix(railway): exempt control-ui-config.json from wrapper Basic Auth (client-side token attachment is unreliable)
 - 2026-08-17 - fix(railway): accept the app's own gateway Bearer token as valid dashboard auth
