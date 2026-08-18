@@ -1,9 +1,0 @@
-{
-  "name": "@openclaw-control-plane/openclaw-source-control-connector",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "exports": {
-    "./github-installation-provisioning": "./src/github-installation-provisioning.ts"
-  }
-}
