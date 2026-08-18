@@ -251,8 +251,9 @@ OpenClaw-controlled GitHub repo and point Railway at an approved branch such as
 `openclaw-control-plane-approved`. Advance that branch only through a reviewed
 PR after the smoke test passes.
 
-The setup password is needed for HTTP Basic auth on `/setup` and `/openclaw`.
-Use any username.
+The setup password is needed for HTTP Basic auth on `/setup` and `/openclaw`
+(use any username), or a correct `Authorization: Bearer <OPENCLAW_GATEWAY_TOKEN>`
+is accepted as an alternative on `/openclaw` -- see fix 3 below.
 
 **Recurring browser sign-in prompt, even after entering the correct
 password or verifying the gateway token**: three independent wrapper issues

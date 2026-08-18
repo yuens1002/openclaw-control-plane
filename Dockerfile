@@ -55,8 +55,8 @@ RUN curl -fsSL "${OPENCLAW_TEMPLATE_REPO}/archive/${OPENCLAW_TEMPLATE_REF}.tar.g
 RUN sed -i \
   's#if (req.path.startsWith("/hooks")) return next(); // allow OpenClaw webhook endpoints to bypass dashboard auth#if (req.path.startsWith("/hooks")) return next(); // allow OpenClaw webhook endpoints to bypass dashboard auth\n  if (req.path.startsWith("/avatar/")) return next(); // see comments above and below this RUN step for why each path is exempted\n  if (["/manifest.webmanifest", "/favicon.ico", "/favicon.svg", "/favicon-16.png", "/favicon-32.png", "/apple-touch-icon.png", "/sw.js", "/control-ui-config.json"].includes(req.path)) return next(); // see comments above and below this RUN step for why each path is exempted#' \
   src/server.js
-RUN grep -q '/control-ui-config.json' src/server.js
-RUN grep -q 'req.path.startsWith("/avatar/")' src/server.js
+RUN grep -qF '/control-ui-config.json' src/server.js
+RUN grep -qF 'req.path.startsWith("/avatar/")' src/server.js
 
 # requireDashboardAuth only accepts `Authorization: Basic ...` -- it rejects
 # any other scheme outright, including a perfectly valid
@@ -72,7 +72,7 @@ RUN grep -q 'req.path.startsWith("/avatar/")' src/server.js
 RUN sed -i \
   's#if (!SETUP_PASSWORD) return next(); // no password configured → open#if (!SETUP_PASSWORD) return next(); // no password configured → open\n  { const authHeader = req.headers.authorization || ""; const [authScheme, authValue] = authHeader.split(" "); if (authScheme === "Bearer" \&\& OPENCLAW_GATEWAY_TOKEN \&\& authValue === OPENCLAW_GATEWAY_TOKEN) return next(); }#' \
   src/server.js
-RUN grep -q 'authScheme === "Bearer"' src/server.js
+RUN grep -qF 'authScheme === "Bearer"' src/server.js
 
 # attachGatewayAuthHeader only injects the gateway's Bearer token when no
 # Authorization header is already present. Once a browser has cached
@@ -93,8 +93,8 @@ RUN grep -q 'authScheme === "Bearer"' src/server.js
 RUN sed -i \
   's#if (!req?.headers?.authorization \&\& OPENCLAW_GATEWAY_TOKEN) {#if (OPENCLAW_GATEWAY_TOKEN) {#' \
   src/server.js
-RUN grep -q '  if (OPENCLAW_GATEWAY_TOKEN) {' src/server.js
-RUN ! grep -q '!req?.headers?.authorization' src/server.js
+RUN grep -qF '  if (OPENCLAW_GATEWAY_TOKEN) {' src/server.js
+RUN ! grep -qF '!req?.headers?.authorization' src/server.js
 
 FROM node:22-bookworm AS openclaw-build
 
