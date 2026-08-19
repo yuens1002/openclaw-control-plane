@@ -7,6 +7,7 @@ and uses semantic versioning once releases begin.
 
 ## [Unreleased]
 
+- 2026-08-19 - fix(railway): exempt /openclaw base-path routes from wrapper basic auth
 - 2026-08-18 - revert(source-control-connector): remove unused github installation token minting transport (PAT adopted instead — see ADR 0001 Status Updates)
 - 2026-08-17 - fix(railway): exempt /avatar/<agentId> from wrapper Basic Auth (browser never attaches cached credentials to it)
 - 2026-08-17 - fix(railway): exempt control-ui-config.json from wrapper Basic Auth (client-side token attachment is unreliable)
