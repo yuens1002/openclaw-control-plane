@@ -58,6 +58,24 @@ RUN sed -i \
 RUN grep -qF '/control-ui-config.json' src/server.js
 RUN grep -qF 'req.path.startsWith("/avatar/")' src/server.js
 
+# The Control UI's HTML shell and static assets are served under this
+# wrapper's fixed /openclaw base path (see deploy/openclaw-railway/README.md),
+# but every exemption above only matches root-level paths -- not their
+# /openclaw/-prefixed equivalents. Live-verified (2026-08-19, issue #34):
+# opening the dashboard at .../openclaw triggers Chrome's native Basic-Auth
+# popup because every request it makes -- the HTML shell itself, plus
+# manifest/favicon/sw.js/config and *.js bundles under /openclaw/ --
+# 401s, none of them matching the exact root-level list above.
+# The shell and its bundled assets are public-safe: it's the same Lit/Vite
+# SPA regardless of requester, and all real data/control access is gated
+# separately by the gateway's own WebSocket auth + device pairing. Matched
+# by prefix (not added to the exact-list above) since /openclaw covers a
+# whole path tree, not one file.
+RUN sed -i \
+  's#if (req.path.startsWith("/avatar/")) return next(); // see comments above and below this RUN step for why each path is exempted#if (req.path.startsWith("/avatar/")) return next(); // see comments above and below this RUN step for why each path is exempted\n  if (req.path === "/openclaw" || req.path.startsWith("/openclaw/")) return next(); // see comment above this RUN step for why#' \
+  src/server.js
+RUN grep -qF 'req.path.startsWith("/openclaw/")' src/server.js
+
 # requireDashboardAuth only accepts `Authorization: Basic ...` -- it rejects
 # any other scheme outright, including a perfectly valid
 # `Authorization: Bearer <OPENCLAW_GATEWAY_TOKEN>` the Control UI itself
