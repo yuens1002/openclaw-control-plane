@@ -1,8 +1,10 @@
-# DRAFT ISSUE — not filed
+# Issue source — FILED as #36
 
-This file is a **draft only**. Filing is an outward-facing action
-reserved for a human; nothing in this branch files it. Copy the body
-below into a new issue when ready.
+Filed at https://github.com/yuens1002/openclaw-control-plane/issues/36
+after human approval. Filing was deliberately withheld from the
+authoring worker: publishing to a public repo is an outward-facing
+action reserved for a human. This file is retained as the source text
+and rationale record; the issue itself is now the live artifact.
 
 Public-Repo Rule check: the text below names no service, domain, client,
 private repo, or credential value. Keep it that way if it is edited
