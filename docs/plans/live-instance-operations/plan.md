@@ -70,7 +70,7 @@ owned by the orchestrating thread, not by any implementing worker.
 | D1 | `docs/live-instance-operations.md` — the protocol: scope, two-axis classification table, credential-flow rule, pre-flight declaration, prod-state change procedure, incident annex, decision section | doc | security/ops | A |
 | D2 | Tier-marker doc-comment header on every live-touching module (CORS-patch, profile-apply, device-pairing-approve, Railway-variables, client-provisioning, setup-API-client, workspace-import) | doc-comment | tooling/devops | B |
 | D3 | GitHub issue proposing deletion of the unused destructive config-reset capability | issue | security/ops | A |
-| D4 | Cross-reference pass so `docs/setup-profile-applier.md`, `deploy/openclaw-railway/README.md`, and `docs/adr/0001-identity-and-communication-boundary.md` link to/from D1 without duplicating or contradicting it | doc | security/ops | A |
+| D4 | Cross-reference pass so `docs/setup-profile-applier.md` and `deploy/openclaw-railway/README.md` link to/from D1 without duplicating or contradicting it. `docs/adr/0001-identity-and-communication-boundary.md` is referenced **one-way only** (protocol → ADR): per `docs/README.md`, an ADR records a point-in-time decision and is not updated to match later state, so adding a back-link would violate the repo's own convention | doc | security/ops | A |
 | D5 | This plan | doc | coordination | — |
 | D6 | `docs/plans/live-instance-operations/ACs.md` | doc | coordination | — |
 | D7 | Base-path mount analysis: determine the intended end state (root-mount vs base-path mount), verify whether the wrapper's auth gate is independent of the gateway's base-path config, and recommend a target state. **Read-only — touches no live state.** | analysis doc | tooling/devops | C1 |
