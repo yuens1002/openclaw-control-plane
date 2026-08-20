@@ -1,3 +1,17 @@
+// LIVE-INSTANCE TIER: restart-or-redeploy-triggering
+// See docs/live-instance-operations.md for what this tier permits.
+//
+// Compare-then-write: GETs the raw config first and returns
+// `{ patched: false }` without POSTing when `existingOrigins` already
+// includes the origin. That compare is the only thing keeping the common
+// path off this tier -- POSTing this endpoint always restarts the gateway
+// once the instance reports configured (evidence:
+// docs/plans/post-deploy-readiness/plan.md, Item 4), so every skipped POST
+// is a skipped live restart. When the POST does fire, this module does NOT
+// re-read the config to confirm the write landed, unlike the profile-apply
+// path -- that missing second half is a named follow-up, not something this
+// marker asserts.
+
 import { basicAuthHeader, type SetupAuth } from "./setup-auth.js";
 
 // `gateway.controlUi.allowedOrigins` has no environment-variable override

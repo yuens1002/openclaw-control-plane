@@ -1,3 +1,16 @@
+// LIVE-INSTANCE TIER: destructive
+// See docs/live-instance-operations.md for what this tier permits.
+//
+// Highest tier comes from `reset`, which POSTs the setup API's reset
+// endpoint and deletes the instance's config file outright. It has zero
+// callers anywhere in this repo and no gate of any kind in front of it --
+// its presence on this client's surface is what sets the whole module's
+// tier, and deleting the capability (rather than gating unused code) is
+// tracked separately. Each returned method carries its own marker below.
+// On the credential axis this module is uniformly secret-bearing: it holds
+// Basic auth credentials for the life of the client and its POST bodies
+// can carry resolved secret values.
+
 // GET /setup/api/status and GET /setup/api/auth-groups response shapes ARE
 // now confirmed against a live instance -- see
 // docs/plans/setup-run-payload-contract/plan.md's Live Confirmation. Both
@@ -65,7 +78,9 @@ export function createSetupApiClient(options: SetupApiClientOptions) {
   }
 
   return {
+    // LIVE-INSTANCE TIER: read
     getStatus: (): Promise<unknown> => getJson("/setup/api/status"),
+    // LIVE-INSTANCE TIER: read
     getAuthGroups: (): Promise<unknown> => getJson("/setup/api/auth-groups"),
     // `run`'s response shape is not independently confirmed live. `run`
     // accepts `unknown` rather than a typed payload because its exact
@@ -76,7 +91,14 @@ export function createSetupApiClient(options: SetupApiClientOptions) {
     // docs/plans/setup-run-payload-contract/plan.md) -- is assembled by
     // apply-profile.ts from the parsed profile; this client stays a thin,
     // unopinionated transport.
+    // LIVE-INSTANCE TIER: unconditional-write
+    // This transport POSTs whatever it is handed with no idempotency check
+    // of its own; the guard that makes the apply path safe (skip the call
+    // entirely when the instance already reports configured) lives in
+    // apply-profile.ts, not here. Calling this directly bypasses it.
     run: (payload: unknown): Promise<unknown> => postJson("/setup/api/run", payload),
+    // LIVE-INSTANCE TIER: destructive
+    // Deletes the live instance's config file. Zero callers in this repo.
     reset: (): Promise<unknown> => postJson("/setup/api/reset", {})
   };
 }

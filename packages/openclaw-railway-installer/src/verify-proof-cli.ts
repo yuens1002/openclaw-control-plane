@@ -1,3 +1,14 @@
+// LIVE-INSTANCE TIER: read
+// See docs/live-instance-operations.md for what this tier permits.
+//
+// Not in the original tier-marking list, but every live call it makes is a
+// read: Railway GraphQL queries for service source and runtime settings,
+// `deployment list` and `domain list`, and unauthenticated GETs against
+// the instance's own public routes recording status codes only. It writes
+// nothing, and skips the live half entirely unless all four scoping
+// environment variables are set. The verification logic it feeds is pure
+// and takes a snapshot as input, so that module carries no tier.
+
 import { execFile } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";

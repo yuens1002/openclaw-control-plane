@@ -1,3 +1,16 @@
+// LIVE-INSTANCE TIER: deploy
+// See docs/live-instance-operations.md for what this tier permits.
+//
+// Highest tier comes from `provisionClientInstance`, which runs `railway
+// up` -- a one-shot snapshot upload from the local working tree,
+// unconnected to any git push or PR merge. The two update functions below
+// are a tier lower (restart-or-redeploy-triggering) and carry their own
+// markers. On the credential axis the module is not uniform:
+// `provisionClientInstance` both requires and returns secrets -- it
+// generates and reads back SETUP_PASSWORD and OPENCLAW_GATEWAY_TOKEN and
+// returns both to its caller -- while the two update functions write a
+// non-secret ref variable and handle no credential at all.
+
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -104,6 +117,13 @@ interface ResolvedProvisionOptions {
 
 const DEFAULT_TEMPLATE_LOCK_PATH = "deploy/openclaw-railway/template-lock.json";
 
+// LIVE-INSTANCE TIER: deploy
+// Runs `railway up` (snapshot upload), attaches a volume, writes six
+// service variables, and triggers a build via `redeploy --yes`. Reuses an
+// existing healthy service instead of redeploying it when one is already
+// present and `--force-new` was not passed, and waits on the auth-gated
+// `/setup/api/status` -- not an unauthenticated healthcheck -- before
+// touching instance config.
 export async function provisionClientInstance(
   options: ProvisionClientOptions,
   dependencies: ProvisionClientDependencies
@@ -273,6 +293,21 @@ export interface UpdateClientTemplateRefResult {
   templateRef: string;
 }
 
+// LIVE-INSTANCE TIER: restart-or-redeploy-triggering
+// The variable write is unconditional -- nothing reads the current
+// OPENCLAW_TEMPLATE_REF first, so calling this with the value the service
+// already has still redeploys a healthy live instance -- and the
+// `redeploy` call hardcodes `--yes`, so no confirmation naming the target
+// service is ever required. Afterwards it polls deployment status only
+// (`pollServiceUntilSuccess`); unlike `provisionClientInstance` it does not
+// wait on the auth-gated `/setup/api/status`, so SUCCESS here proves the
+// deployment finished, not that the instance is answering authenticated
+// requests. Adding a compare-then-write and a confirmation naming the
+// service is a named follow-up.
+//
+// The "never touches any other service" guarantee below is enforced only
+// by `options.service` being a required parameter -- it is prose, not a
+// runtime assertion.
 /**
  * Updates one already-provisioned client service to a new
  * OPENCLAW_TEMPLATE_REF and redeploys it. Never touches any other
@@ -307,6 +342,13 @@ export interface UpdateClientOpenClawRefResult {
   openclawRef: string;
 }
 
+// LIVE-INSTANCE TIER: restart-or-redeploy-triggering
+// Same shape and same gaps as `updateClientTemplateRef` above:
+// unconditional variable write, `redeploy --yes` with no confirmation
+// naming the service, and a deployment-status poll rather than an
+// auth-gated readiness check. Bumping the pinned application version is
+// the higher-risk of the two, since it changes what the live instance
+// actually runs.
 /**
  * Updates one already-provisioned client service to a new OPENCLAW_GIT_REF
  * (the pinned openclaw/openclaw application version, not the
