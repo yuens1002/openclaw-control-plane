@@ -370,7 +370,7 @@ Notes that matter for whoever executes D8:
 
 - **Surface 2 is deploy-tier, and deploys here are one-shot snapshot uploads**
   unconnected to git state
-  (`packages/openclaw-railway-installer/src/provision-client.ts:21-32`). So "roll back" means building and deploying the prior
+  (`packages/openclaw-railway-installer/src/provision-client.ts`, the module header above `provisionClientInstance`). So "roll back" means building and deploying the prior
   Dockerfile, not reverting a branch. There is no automatic reversion, and the
   window between a bad deploy and its replacement is a live outage window for
   the dashboard. This is the tier the triggering incident bypassed entirely.

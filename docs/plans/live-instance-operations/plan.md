@@ -14,7 +14,7 @@ misconfiguration that prompted this work.
 The trigger was a pair of ungoverned live-instance operations during an
 unrelated bug fix: a deploy command run straight from a local checkout to a
 live service (bypassing the PR-merge flow entirely, since deploys here are
-one-shot snapshots — see `packages/openclaw-railway-installer/src/provision-client.ts:21-32`),
+one-shot snapshots — see the module header above `provisionClientInstance` in `packages/openclaw-railway-installer/src/provision-client.ts`),
 and an attempt to interpolate a live setup password into a `curl` argument
 string against the instance's raw-config endpoint. The second was blocked by a
 permission prompt; the first was not gated at all.
@@ -112,7 +112,9 @@ will accrue rows and rules over time, which is what an operations doc is for.
 - Create: `docs/plans/live-instance-operations/plan.md`, `ACs.md`
 - Edit (cross-reference only): `docs/setup-profile-applier.md`,
   `deploy/openclaw-railway/README.md`
-- Edit (doc-comment headers only): the seven modules named in D2
+- Edit (doc-comment headers only): the modules named in D2, plus any further
+  live-touching module found during implementation (the initial list of seven
+  grew to twelve once unlisted live-touching paths were found)
 
 ## Acceptance Criteria
 

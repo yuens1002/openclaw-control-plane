@@ -2,8 +2,9 @@
 // See docs/live-instance-operations.md for what this tier permits.
 //
 // Highest tier comes from `reset`, which POSTs the setup API's reset
-// endpoint and deletes the instance's config file outright. It has zero
-// callers anywhere in this repo and no gate of any kind in front of it --
+// endpoint and deletes the instance's config file outright. It has no
+// production callers -- the only callers are unit tests that exist to
+// exercise it -- and no gate of any kind in front of it --
 // its presence on this client's surface is what sets the whole module's
 // tier, and deleting the capability (rather than gating unused code) is
 // tracked separately. Each returned method carries its own marker below.
@@ -98,7 +99,8 @@ export function createSetupApiClient(options: SetupApiClientOptions) {
     // apply-profile.ts, not here. Calling this directly bypasses it.
     run: (payload: unknown): Promise<unknown> => postJson("/setup/api/run", payload),
     // LIVE-INSTANCE TIER: destructive
-    // Deletes the live instance's config file. Zero callers in this repo.
+    // Deletes the live instance's config file. No production callers; the
+    // only callers are unit tests that exist to exercise this method.
     reset: (): Promise<unknown> => postJson("/setup/api/reset", {})
   };
 }
