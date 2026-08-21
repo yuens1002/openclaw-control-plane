@@ -7,6 +7,7 @@ and uses semantic versioning once releases begin.
 
 ## [Unreleased]
 
+- 2026-08-21 - fix(railway): add post-write verification to the allowedOrigins patch (closes protocol gap G5's first half)
 - 2026-08-21 - fix(railway): make root the canonical Control UI URL, exempt passive-fetch paths, and revert the base-path auth exemption
 - 2026-08-20 - docs(ops): add live-instance operations protocol, tier markers, and base-path mount analysis
 - 2026-08-19 - fix(railway): exempt /openclaw base-path routes from wrapper basic auth

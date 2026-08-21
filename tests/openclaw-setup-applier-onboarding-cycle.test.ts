@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { CommandResult, RailwayRunner } from "@openclaw-control-plane/openclaw-railway-installer";
 import { bootstrapOnboardingCycle, runRegressionCheck } from "@openclaw-control-plane/openclaw-setup-applier/onboarding-cycle";
+import { createFakeConfigStore } from "./fixtures/fake-config-store.js";
 
 const SENTINEL_MINTED = "sk-test-DO-NOT-LOG-minted-key";
 const SENTINEL_MINTED_HASH = "hash-test-minted-abc123";
@@ -323,8 +324,7 @@ describe("bootstrapOnboardingCycle", () => {
         // (allowedOrigins patch, device-pairing approve) -- stub both to
         // their "nothing to do" shape so this test stays focused on the
         // bootstrap/apply/mint ordering it actually asserts.
-        getConfigRaw: async () => ({ ok: true, content: "{}" }),
-        postConfigRaw: async () => ({ ok: true }),
+        ...createFakeConfigStore().deps,
         getPendingDevices: async () => ({ ok: true, requestIds: [] }),
         approveDevice: async () => ({ ok: true }),
         // `pollServiceUntilSuccess` sleeps before its first check (real
