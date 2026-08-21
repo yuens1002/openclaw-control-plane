@@ -3,7 +3,16 @@
 Use OpenClaw's Railway-recommended template instead of deploying the raw
 `ghcr.io/openclaw/openclaw` image directly. The template runs a Railway wrapper
 that listens on the public port, stores state on `/data`, serves `/setup`, and
-proxies the Control UI at `/openclaw`.
+proxies the Control UI at the root path `/`.
+
+> **Canonical Control UI URL is `/`, not `/openclaw`.** The application's
+> `gateway.controlUi.basePath` is unset (its documented default), so the Control
+> UI is root-mounted. A prefixed URL such as `/openclaw` may appear to load, but
+> only through the SPA fallback serving `index.html` for unmatched navigations;
+> its manifest, icons, service worker, and bootstrap config all 404 under that
+> prefix. Earlier revisions of this document claimed `/openclaw` was the served
+> path — that claim was wrong, and nothing in this repo ever set a base path.
+> See `docs/plans/live-instance-operations/mount-analysis.md`.
 
 ## One-Command Install
 
@@ -85,7 +94,7 @@ runtime routes supplied by the wrapper:
 
 - `/setup/healthz`
 - `/setup`
-- `/openclaw`
+- `/` (the Control UI)
 
 The live proof should not be a deployment of the TypeScript API shell alone, and
 it should not source `vignesh07/clawdbot-railway-template` directly except as the
@@ -243,17 +252,18 @@ and repository variable `RAILWAY_PROOF_URL` for autonomous weekly verification.
 
 If the upstream ref has moved, the check fails and reports the pinned commit and
 latest upstream commit. It does not update the lock automatically. Bump the lock
-only after a Railway proof smoke confirms `/setup/healthz`, `/setup`,
-`/openclaw`, domain/port behavior, and persistent `/data` state still work.
+only after a Railway proof smoke confirms `/setup/healthz`, `/setup`, `/` (the
+Control UI), domain/port behavior, and persistent `/data` state still work.
 
 For an immutable proof instance, eject or mirror the upstream template into an
 OpenClaw-controlled GitHub repo and point Railway at an approved branch such as
 `openclaw-control-plane-approved`. Advance that branch only through a reviewed
 PR after the smoke test passes.
 
-The setup password is needed for HTTP Basic auth on `/setup` and `/openclaw`
-(use any username), or a correct `Authorization: Bearer <OPENCLAW_GATEWAY_TOKEN>`
-is accepted as an alternative on `/openclaw` -- see fix 3 below.
+The setup password is needed for HTTP Basic auth on `/setup` and on the Control
+UI at `/` (use any username), or a correct
+`Authorization: Bearer <OPENCLAW_GATEWAY_TOKEN>` is accepted as an alternative
+-- see fix 3 below.
 
 **Recurring browser sign-in prompt, even after entering the correct
 password or verifying the gateway token**: three independent wrapper issues
