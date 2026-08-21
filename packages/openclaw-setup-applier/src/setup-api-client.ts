@@ -1,13 +1,12 @@
-// LIVE-INSTANCE TIER: destructive
+// LIVE-INSTANCE TIER: unconditional-write
 // See docs/live-instance-operations.md for what this tier permits.
 //
-// Highest tier comes from `reset`, which POSTs the setup API's reset
-// endpoint and deletes the instance's config file outright. It has no
-// production callers -- the only callers are unit tests that exist to
-// exercise it -- and no gate of any kind in front of it --
-// its presence on this client's surface is what sets the whole module's
-// tier, and deleting the capability (rather than gating unused code) is
-// tracked separately. Each returned method carries its own marker below.
+// Highest tier now comes from `run`, which POSTs whatever payload it is
+// handed with no idempotency check of its own. This module was previously
+// tiered `destructive` because it also exposed a `reset` method wrapping the
+// setup API's config-delete endpoint; that method had no production callers
+// and no gate, and was removed rather than fenced (issue #36). Each returned
+// method carries its own marker below.
 // On the credential axis this module is uniformly secret-bearing: it holds
 // Basic auth credentials for the life of the client and its POST bodies
 // can carry resolved secret values.
@@ -97,11 +96,15 @@ export function createSetupApiClient(options: SetupApiClientOptions) {
     // of its own; the guard that makes the apply path safe (skip the call
     // entirely when the instance already reports configured) lives in
     // apply-profile.ts, not here. Calling this directly bypasses it.
-    run: (payload: unknown): Promise<unknown> => postJson("/setup/api/run", payload),
-    // LIVE-INSTANCE TIER: destructive
-    // Deletes the live instance's config file. No production callers; the
-    // only callers are unit tests that exist to exercise this method.
-    reset: (): Promise<unknown> => postJson("/setup/api/reset", {})
+    run: (payload: unknown): Promise<unknown> => postJson("/setup/api/run", payload)
+    // No `reset` method here by design. The setup API's reset endpoint
+    // deletes the target's config file outright, which
+    // docs/live-instance-operations.md classifies as destructive -- a tier
+    // whose rule is Forbidden, not gated. This client used to expose it with
+    // no callers and no gate; it was removed rather than fenced, because a
+    // gate around unused code protects nothing while leaving the capability
+    // one call away. The endpoint still exists on the instance; nothing in
+    // this repo offers a way to reach it. See issue #36.
   };
 }
 
