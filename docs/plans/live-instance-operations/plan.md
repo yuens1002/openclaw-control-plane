@@ -32,7 +32,10 @@ Existing patterns worth generalizing:
   the only path with **post-write verification**.
 - `packages/openclaw-railway-installer/src/patch-allowed-origins.ts` —
   compare-then-write, avoiding an unnecessary live gateway restart, but with
-  no post-write verification.
+  no post-write verification. *(State at planning time. The verification half
+  was this plan's first named follow-up and has since been implemented; see
+  gap G5 in the protocol. Concurrency control on the same function remains
+  open.)*
 - `packages/openclaw-railway-installer/src/approve-own-device.ts` — refuses
   (throws) under ambiguity rather than guessing which pending request to act on.
 - `packages/openclaw-railway-installer/src/railway-variables.ts` — pipes secret

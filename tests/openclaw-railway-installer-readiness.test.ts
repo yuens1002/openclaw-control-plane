@@ -5,6 +5,7 @@ import {
   type CommandResult,
   type RailwayRunner
 } from "@openclaw-control-plane/openclaw-railway-installer";
+import { createFakeConfigStore } from "./fixtures/fake-config-store.js";
 
 class FakeRailwayRunner implements RailwayRunner {
   private serviceListResponses: unknown[];
@@ -60,8 +61,7 @@ describe("installOpenClawOnRailway readiness check", () => {
           readinessCalls.push({ url, auth });
           return 200;
         },
-        getConfigRaw: async () => ({ ok: true, content: "{}" }),
-        postConfigRaw: async () => ({ ok: true }),
+        ...createFakeConfigStore().deps,
         getPendingDevices: async () => ({ ok: true, requestIds: [] }),
         approveDevice: async () => ({ ok: true })
       }
@@ -118,8 +118,7 @@ describe("installOpenClawOnRailway readiness check", () => {
           attempts += 1;
           return attempts < 3 ? 401 : 200;
         },
-        getConfigRaw: async () => ({ ok: true, content: "{}" }),
-        postConfigRaw: async () => ({ ok: true }),
+        ...createFakeConfigStore().deps,
         getPendingDevices: async () => ({ ok: true, requestIds: [] }),
         approveDevice: async () => ({ ok: true })
       }
@@ -149,14 +148,7 @@ describe("installOpenClawOnRailway post-deploy step order and result reporting",
           order.push("readiness");
           return 200;
         },
-        getConfigRaw: async () => {
-          order.push("getConfigRaw");
-          return { ok: true, content: "{}" };
-        },
-        postConfigRaw: async () => {
-          order.push("postConfigRaw");
-          return { ok: true };
-        },
+        ...createFakeConfigStore({ onCall: (c) => order.push(c) }).deps,
         getPendingDevices: async () => {
           order.push("getPendingDevices");
           return { ok: true, requestIds: ["req_xyz789"] };
@@ -168,7 +160,18 @@ describe("installOpenClawOnRailway post-deploy step order and result reporting",
       }
     );
 
-    expect(order).toEqual(["readiness", "getConfigRaw", "postConfigRaw", "getPendingDevices", "approveDevice"]);
+    // The second getConfigRaw is patchAllowedOrigins' post-write verification
+    // read -- it re-reads the config to confirm the origin actually landed
+    // before reporting success. A single read here would mean the write was
+    // never confirmed.
+    expect(order).toEqual([
+      "readiness",
+      "getConfigRaw",
+      "postConfigRaw",
+      "getConfigRaw",
+      "getPendingDevices",
+      "approveDevice"
+    ]);
     expect(result.patchedAllowedOrigins).toBe(true);
     expect(result.approvedDeviceRequestId).toBe("req_xyz789");
   });

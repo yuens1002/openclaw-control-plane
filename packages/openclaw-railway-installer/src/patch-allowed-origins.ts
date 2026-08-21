@@ -7,10 +7,10 @@
 // path off this tier -- POSTing this endpoint always restarts the gateway
 // once the instance reports configured (evidence:
 // docs/plans/post-deploy-readiness/plan.md, Item 4), so every skipped POST
-// is a skipped live restart. When the POST does fire, this module does NOT
-// re-read the config to confirm the write landed, unlike the profile-apply
-// path -- that missing second half is a named follow-up, not something this
-// marker asserts.
+// is a skipped live restart. When the POST does fire, this module re-reads
+// the config and asserts the origin is actually present before returning --
+// the post-write verification half the protocol's idempotent-write rule
+// requires, matching the profile-apply path.
 
 import { basicAuthHeader, type SetupAuth } from "./setup-auth.js";
 
@@ -64,7 +64,46 @@ export async function patchAllowedOrigins(
   if (!postResult.ok) {
     throw new Error("POST /setup/api/config/raw responded ok:false");
   }
+
+  // Post-write verification. A POST that returns ok:true reports that the
+  // request was accepted, not that the intended value is present -- so re-read
+  // and assert it. No wait is needed before this read despite the POST
+  // restarting the gateway: /setup/api/config/raw is served by the wrapper
+  // itself, reading the config file directly, and is never proxied to the
+  // gateway. Adding a sleep here would only slow the common path.
+  const verifyResult = await getConfigRaw(baseUrl, auth);
+  if (!verifyResult.ok) {
+    throw new Error("Post-write verification failed: GET /setup/api/config/raw responded ok:false");
+  }
+  if (!readAllowedOrigins(verifyResult.content).includes(origin)) {
+    throw new Error(
+      `Post-write verification failed: ${origin} is absent from gateway.controlUi.allowedOrigins after the write reported success`
+    );
+  }
   return { patched: true };
+}
+
+/**
+ * Reads `gateway.controlUi.allowedOrigins` out of a raw config document
+ * without creating any of the intermediate objects. Deliberately separate
+ * from `asRecord`, which materialises the path so the write can target it --
+ * a verification read must not mutate what it is checking, and must tolerate
+ * a config whose shape changed underneath the write.
+ */
+function readAllowedOrigins(content: string): unknown[] {
+  const parsed: unknown = content.trim().length > 0 ? JSON.parse(content) : {};
+  const gateway = readObject(parsed, "gateway");
+  const controlUi = readObject(gateway, "controlUi");
+  const origins = controlUi?.allowedOrigins;
+  return Array.isArray(origins) ? origins : [];
+}
+
+function readObject(parent: unknown, key: string): Record<string, unknown> | undefined {
+  if (!parent || typeof parent !== "object" || Array.isArray(parent)) {
+    return undefined;
+  }
+  const value = (parent as Record<string, unknown>)[key];
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 }
 
 function asRecord(parent: Record<string, unknown>, key: string): Record<string, unknown> {
