@@ -78,21 +78,30 @@ RUN ! grep -qF '<a href="/openclaw" target="_blank">' src/server.js
 
 # Two root-level paths the browser fetches passively are absent from the
 # exact-match exemption list above, and both are the same class as
-# /avatar/<agentId> -- which this repo already had to exempt because browsers
-# never attach cached Basic-Auth credentials to a passive fetch, so it 401'd in
-# 100% of live samples. /__openclaw__/assistant-media is rendered directly as an
-# <img src> (its signed mediaTicket query-param mechanism exists precisely
-# because a media element cannot set an auth header), and /provider-icons/*.svg
-# is fetched as a CSS url() background. Neither can carry credentials, so
-# without these exemptions each would 401 at the wrapper and re-trigger the
-# native sign-in popup -- trading the base-path popup for a different one.
-# Neither serves anything sensitive: provider icons are static brand assets, and
+# /avatar/<agentId> -- which this repo already had to exempt after observing it
+# 401 in 100% of live request-log samples. The precise limitation is that a
+# passive fetch cannot set an Authorization header of its own (so the app's
+# Bearer token is unavailable to it); whether the browser volunteers *cached*
+# Basic-Auth credentials is browser-dependent and, for the avatar path on this
+# deployment, observed not to happen. /__openclaw__/assistant-media is rendered
+# directly as an <img src> -- its signed mediaTicket query-param mechanism
+# exists precisely because a media element cannot set an auth header -- and
+# /provider-icons/*.svg is fetched as a CSS url() background. Without these
+# exemptions each would 401 at the wrapper and re-trigger the native sign-in
+# popup, trading the base-path popup for a different one. Neither serves
+# anything sensitive: provider icons are static brand assets, and
 # assistant-media is separately gated by the gateway's own signed-ticket check.
+#
+# assistant-media is matched EXACTLY, not by prefix: this is an auth bypass, and
+# a prefix would silently exempt any future sibling route sharing the string
+# (/__openclaw__/assistant-media-foo). req.path excludes the query string, so an
+# exact match still covers the real ?source=...&mediaTicket=... requests.
 RUN sed -i \
-  's#if (req.path.startsWith("/avatar/")) return next(); // see comments above and below this RUN step for why each path is exempted#if (req.path.startsWith("/avatar/")) return next(); // see comments above and below this RUN step for why each path is exempted\n  if (req.path.startsWith("/provider-icons/")) return next(); // see comment above this RUN step for why\n  if (req.path.startsWith("/__openclaw__/assistant-media")) return next(); // see comment above this RUN step for why#' \
+  's#if (req.path.startsWith("/avatar/")) return next(); // see comments above and below this RUN step for why each path is exempted#if (req.path.startsWith("/avatar/")) return next(); // see comments above and below this RUN step for why each path is exempted\n  if (req.path.startsWith("/provider-icons/")) return next(); // see comment above this RUN step for why\n  if (req.path === "/__openclaw__/assistant-media") return next(); // exact match, not prefix -- see comment above this RUN step for why#' \
   src/server.js
 RUN grep -qF 'req.path.startsWith("/provider-icons/")' src/server.js
-RUN grep -qF 'req.path.startsWith("/__openclaw__/assistant-media")' src/server.js
+RUN grep -qF 'req.path === "/__openclaw__/assistant-media"' src/server.js
+RUN ! grep -qF 'req.path.startsWith("/__openclaw__/assistant-media")' src/server.js
 
 # requireDashboardAuth only accepts `Authorization: Basic ...` -- it rejects
 # any other scheme outright, including a perfectly valid
