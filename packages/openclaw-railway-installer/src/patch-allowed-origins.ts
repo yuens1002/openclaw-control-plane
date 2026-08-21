@@ -75,7 +75,18 @@ export async function patchAllowedOrigins(
   if (!verifyResult.ok) {
     throw new Error("Post-write verification failed: GET /setup/api/config/raw responded ok:false");
   }
-  if (!readAllowedOrigins(verifyResult.content).includes(origin)) {
+  let verifiedOrigins: unknown[];
+  try {
+    verifiedOrigins = readAllowedOrigins(verifyResult.content);
+  } catch (cause) {
+    // A bare SyntaxError here would read as a parse bug rather than as the
+    // write having produced a config this process can no longer validate.
+    throw new Error(
+      `Post-write verification failed: the config returned after the write is not parseable JSON. ${String(cause)}`,
+      { cause }
+    );
+  }
+  if (!verifiedOrigins.includes(origin)) {
     throw new Error(
       `Post-write verification failed: ${origin} is absent from gateway.controlUi.allowedOrigins after the write reported success`
     );

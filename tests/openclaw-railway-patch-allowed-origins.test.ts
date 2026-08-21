@@ -1,55 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import { patchAllowedOrigins } from "@openclaw-control-plane/openclaw-railway-installer/patch-allowed-origins";
+import { createFakeConfigStore } from "./fixtures/fake-config-store.js";
 
 const AUTH = { username: "openclaw-admin", password: "setup-secret" };
 const BASE_URL = "https://example-openclaw.example.com";
 const DOMAIN = "example-openclaw.example.com";
 const ORIGIN = "https://example-openclaw.example.com";
 
-/**
- * A fake config endpoint that behaves like the real wrapper: a successful POST
- * changes what the next GET returns.
- *
- * Static stubs cannot exercise the post-write verification read at all -- they
- * report the pre-write state forever, so a write that genuinely landed looks
- * like a failure. `persistWrites: false` deliberately models the case this
- * verification exists to catch: the endpoint answers ok:true but the intended
- * value is not actually present afterward.
- */
-function createFakeConfigStore(initialContent: string, options: { persistWrites?: boolean } = {}) {
-  const persistWrites = options.persistWrites ?? true;
-  let content = initialContent;
-  const posted: string[] = [];
-  let getCalls = 0;
-
-  return {
-    posted,
-    get getCalls() {
-      return getCalls;
-    },
-    getConfigRaw: async () => {
-      getCalls += 1;
-      return { ok: true, content };
-    },
-    postConfigRaw: async (_baseUrl: string, _auth: unknown, next: string) => {
-      posted.push(next);
-      if (persistWrites) {
-        content = next;
-      }
-      return { ok: true };
-    }
-  };
-}
-
 describe("patchAllowedOrigins", () => {
   it("appends the instance's own domain when absent and preserves the rest of the config", async () => {
-    const store = createFakeConfigStore(
-      JSON.stringify({
+    const store = createFakeConfigStore({
+      initialContent: JSON.stringify({
         agents: { defaults: { model: "anthropic/claude" } },
         gateway: { controlUi: { allowedOrigins: ["https://existing.example.com"] } }
       })
-    );
+    });
 
     const result = await patchAllowedOrigins(BASE_URL, AUTH, DOMAIN, store);
 
@@ -62,9 +28,9 @@ describe("patchAllowedOrigins", () => {
   });
 
   it("is idempotent -- no POST when the origin is already present", async () => {
-    const store = createFakeConfigStore(
-      JSON.stringify({ gateway: { controlUi: { allowedOrigins: [ORIGIN] } } })
-    );
+    const store = createFakeConfigStore({
+      initialContent: JSON.stringify({ gateway: { controlUi: { allowedOrigins: [ORIGIN] } } })
+    });
 
     const result = await patchAllowedOrigins(BASE_URL, AUTH, DOMAIN, store);
 
@@ -75,7 +41,7 @@ describe("patchAllowedOrigins", () => {
   });
 
   it("handles an empty/unconfigured config file by creating the nested path", async () => {
-    const store = createFakeConfigStore("");
+    const store = createFakeConfigStore({ initialContent: "" });
 
     const result = await patchAllowedOrigins(BASE_URL, AUTH, DOMAIN, store);
 
@@ -85,7 +51,7 @@ describe("patchAllowedOrigins", () => {
   });
 
   it("re-reads the config after writing to confirm the origin actually landed", async () => {
-    const store = createFakeConfigStore("{}");
+    const store = createFakeConfigStore();
 
     await patchAllowedOrigins(BASE_URL, AUTH, DOMAIN, store);
 
@@ -97,7 +63,7 @@ describe("patchAllowedOrigins", () => {
   it("throws when the write reports success but the origin is absent afterward", async () => {
     // The endpoint answers ok:true and the value never lands -- exactly the
     // silent-failure class an ok:true check alone cannot detect.
-    const store = createFakeConfigStore("{}", { persistWrites: false });
+    const store = createFakeConfigStore({ persistWrites: false });
 
     await expect(patchAllowedOrigins(BASE_URL, AUTH, DOMAIN, store)).rejects.toThrow(
       /Post-write verification failed/
@@ -114,6 +80,20 @@ describe("patchAllowedOrigins", () => {
           getCalls += 1;
           // First read succeeds; the verification read fails.
           return getCalls === 1 ? { ok: true, content: "{}" } : { ok: false, content: "" };
+        },
+        postConfigRaw: async () => ({ ok: true })
+      })
+    ).rejects.toThrow(/Post-write verification failed/);
+  });
+
+  it("reports a verification failure, not a bare parse error, when the config comes back unparseable", async () => {
+    let getCalls = 0;
+    await expect(
+      patchAllowedOrigins(BASE_URL, AUTH, DOMAIN, {
+        getConfigRaw: async () => {
+          getCalls += 1;
+          // Valid on the first read; corrupt on the verification read.
+          return getCalls === 1 ? { ok: true, content: "{}" } : { ok: true, content: "{ not json" };
         },
         postConfigRaw: async () => ({ ok: true })
       })
