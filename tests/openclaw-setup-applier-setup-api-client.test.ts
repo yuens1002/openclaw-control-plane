@@ -67,21 +67,6 @@ describe("setup API client (mutating calls)", () => {
     expect(requests[0]?.body).toContain("sk-test-DO-NOT-LOG-9f8e7d");
   });
 
-  it("POSTs to /setup/api/reset", async () => {
-    const requests: string[] = [];
-    const client = createSetupApiClient({
-      baseUrl: "https://example-openclaw.example.com",
-      fetchImpl: async (input) => {
-        requests.push(String(input));
-        return new Response(JSON.stringify({ ok: true }), { status: 200 });
-      }
-    });
-
-    await client.reset();
-
-    expect(requests).toEqual(["https://example-openclaw.example.com/setup/api/reset"]);
-  });
-
   it("throws a status-only error for a failed run call, never leaking the response body", async () => {
     const client = createSetupApiClient({
       baseUrl: "https://example-openclaw.example.com",
@@ -109,12 +94,13 @@ describe("setup API client (Basic auth)", () => {
       }
     });
 
+    // Every method the client exposes -- keep this list exhaustive so a newly
+    // added method without header coverage shows up as a length mismatch.
     await client.getStatus();
     await client.getAuthGroups();
     await client.run({});
-    await client.reset();
 
-    expect(headersSeen).toHaveLength(4);
+    expect(headersSeen).toHaveLength(3);
     for (const headers of headersSeen) {
       const authorization = headers?.authorization;
       expect(authorization).toMatch(/^Basic .+/);
@@ -133,12 +119,13 @@ describe("setup API client (Basic auth)", () => {
       }
     });
 
+    // Every method the client exposes -- keep this list exhaustive so a newly
+    // added method without header coverage shows up as a length mismatch.
     await client.getStatus();
     await client.getAuthGroups();
     await client.run({});
-    await client.reset();
 
-    expect(headersSeen).toHaveLength(4);
+    expect(headersSeen).toHaveLength(3);
     for (const headers of headersSeen) {
       expect(headers?.authorization).toBeUndefined();
     }
