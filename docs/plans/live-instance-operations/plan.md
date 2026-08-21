@@ -74,8 +74,11 @@ owned by the orchestrating thread, not by any implementing worker.
 | D5 | This plan | doc | coordination | — |
 | D6 | `docs/plans/live-instance-operations/ACs.md` | doc | coordination | — |
 | D7 | Base-path mount analysis: determine the intended end state (root-mount vs base-path mount), verify whether the wrapper's auth gate is independent of the gateway's base-path config, and recommend a target state. **Read-only — touches no live state.** | analysis doc | tooling/devops | C1 |
-| D8 | Prod-state remediation: apply the agreed mount configuration, executed under D1's prod-state change procedure. **Gated on D1 complete + human approval of D7.** | config change | tooling/devops | C2 |
-| D9 | Re-decision on the merged base-path auth exemption: keep as-is, derive it from configuration, or revert — recorded with rationale | doc + possible code | tooling/devops | C2 |
+| D8 | Correct the documentation that claims the Control UI is served under a base path, and make the root URL the documented entry point: `deploy/openclaw-railway/README.md` and the `Dockerfile` comment block above the exemption patches. Repo-only; **no live write** | doc | tooling/devops | C2 |
+| D8b | Patch the wrapper's setup-page link from the prefixed path to the root path, using the same `sed` + `grep -F` assertion technique the `Dockerfile` already applies four times. Without this the setup page keeps sending users to a non-canonical URL that works only via the SPA fallback — and in the no-trailing-slash form, the branch that happens to work, so the breakage stays latent | code | tooling/devops | C2 |
+| D8c | Close the root-mount residual risk: add the two root-level paths the browser fetches passively but that are absent from the exempt list — the assistant-media route (rendered as an `<img src>`, so no auth header can be attached) and the provider-icon assets (fetched as CSS `url()` backgrounds). Both are the same class as the avatar path this repo already had to exempt for exactly this reason. Reverting D9 without this trades one popup for another | code | tooling/devops | C2 |
+| D9 | Revert the merged base-path auth exemption — decided by D7, not re-litigated here. **Strictly sequenced after D8, D8b, D8c**: reverting first re-fires the popup the exemption was merged to stop | code | tooling/devops | C2 |
+| D10 | Rebuild, deploy, and verify against the live target under D1's prod-state change procedure: no auth challenge at the canonical root URL, the setup route still gated, the previously-404ing asset paths resolved, and — checked explicitly — the persistent volume still attached with state intact after the gateway restart | verification | tooling/devops | C2 |
 
 ## Design Decisions
 
@@ -134,8 +137,18 @@ every AC by a valid plan reference, is confirmed by read-through.
 - **Stream B** (tooling/devops): D2 alone. Independent of D1's prose because
   the tier vocabulary is fixed by this plan.
 - **Stream C1** (tooling/devops): D7. Read-only, parallel with A and B.
-- **Stream C2** (tooling/devops): D8, D9. Starts only after D1 exists and a
-  human approves D7's recommendation.
+- **Stream C2** (tooling/devops): D8, D8b, D8c, D9, D10. Started only after D1
+  landed and a human approved D7's root-mount recommendation. Unlike A/B/C1
+  these are a strict dependency chain, not parallel work, so C2 is implemented
+  directly rather than through multi-stream orchestration — the ordering *is*
+  the safety property, and D9 before D8/D8b/D8c reproduces the original bug.
+
+  Root-mount was chosen partly on a security ground surfaced by D7: under
+  base-path mount the exemption would have to widen over a real mount, pulling
+  genuinely auth-gated endpoints under a blanket bypass — and because the
+  merged exemption also made the gateway Bearer token inject unconditionally,
+  those requests would arrive at the gateway already authenticated. That
+  exposure would be created by the remediation. Root-mount avoids it.
 - **Wrap-up** (orchestrating thread, after all streams): runs the acceptance
   checks across all deliverables together — no implementing worker verifies
   its own output, and the final verdict is not delegated.

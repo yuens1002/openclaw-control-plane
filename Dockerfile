@@ -2,7 +2,10 @@
 #
 # The Railway service source should point at this public repo's main branch.
 # This Dockerfile then pulls the pinned OpenClaw Railway wrapper dependency and
-# builds the actual OpenClaw dashboard/runtime that serves /setup and /openclaw.
+# builds the actual OpenClaw dashboard/runtime that serves /setup and the
+# root-mounted Control UI at /. The Control UI is NOT served under a base path:
+# gateway.controlUi.basePath is unset (its documented default) and nothing in
+# this repo sets it. See docs/plans/live-instance-operations/mount-analysis.md.
 
 FROM node:22-bookworm AS template-source
 
@@ -58,23 +61,38 @@ RUN sed -i \
 RUN grep -qF '/control-ui-config.json' src/server.js
 RUN grep -qF 'req.path.startsWith("/avatar/")' src/server.js
 
-# The Control UI's HTML shell and static assets are served under this
-# wrapper's fixed /openclaw base path (see deploy/openclaw-railway/README.md),
-# but every exemption above only matches root-level paths -- not their
-# /openclaw/-prefixed equivalents. Live-verified (2026-08-19, issue #34):
-# opening the dashboard at .../openclaw triggers Chrome's native Basic-Auth
-# popup because every request it makes -- the HTML shell itself, plus
-# manifest/favicon/sw.js/config and *.js bundles under /openclaw/ --
-# 401s, none of them matching the exact root-level list above.
-# The shell and its bundled assets are public-safe: it's the same Lit/Vite
-# SPA regardless of requester, and all real data/control access is gated
-# separately by the gateway's own WebSocket auth + device pairing. Matched
-# by prefix (not added to the exact-list above) since /openclaw covers a
-# whole path tree, not one file.
+# The Control UI is root-mounted (gateway.controlUi.basePath is unset, its
+# documented default, and nothing in this repo ever sets it), but the wrapper's
+# setup page links to a /openclaw prefix. That URL only appears to work: the
+# gateway's SPA fallback serves index.html for unmatched browser navigations,
+# so the shell loads while its manifest, icons, service worker, and bootstrap
+# config all 404 under the prefix. Worse, the working-vs-half-broken split
+# depends on a trailing slash, with nothing pinning which form a user lands on.
+# Point the link at the canonical root path instead. See
+# docs/plans/live-instance-operations/mount-analysis.md for the full trace.
 RUN sed -i \
-  's#if (req.path.startsWith("/avatar/")) return next(); // see comments above and below this RUN step for why each path is exempted#if (req.path.startsWith("/avatar/")) return next(); // see comments above and below this RUN step for why each path is exempted\n  if (req.path === "/openclaw" || req.path.startsWith("/openclaw/")) return next(); // see comment above this RUN step for why#' \
+  's#<a href="/openclaw" target="_blank">Open OpenClaw UI</a>#<a href="/" target="_blank">Open OpenClaw UI</a>#' \
   src/server.js
-RUN grep -qF 'req.path.startsWith("/openclaw/")' src/server.js
+RUN grep -qF '<a href="/" target="_blank">Open OpenClaw UI</a>' src/server.js
+RUN ! grep -qF '<a href="/openclaw" target="_blank">' src/server.js
+
+# Two root-level paths the browser fetches passively are absent from the
+# exact-match exemption list above, and both are the same class as
+# /avatar/<agentId> -- which this repo already had to exempt because browsers
+# never attach cached Basic-Auth credentials to a passive fetch, so it 401'd in
+# 100% of live samples. /__openclaw__/assistant-media is rendered directly as an
+# <img src> (its signed mediaTicket query-param mechanism exists precisely
+# because a media element cannot set an auth header), and /provider-icons/*.svg
+# is fetched as a CSS url() background. Neither can carry credentials, so
+# without these exemptions each would 401 at the wrapper and re-trigger the
+# native sign-in popup -- trading the base-path popup for a different one.
+# Neither serves anything sensitive: provider icons are static brand assets, and
+# assistant-media is separately gated by the gateway's own signed-ticket check.
+RUN sed -i \
+  's#if (req.path.startsWith("/avatar/")) return next(); // see comments above and below this RUN step for why each path is exempted#if (req.path.startsWith("/avatar/")) return next(); // see comments above and below this RUN step for why each path is exempted\n  if (req.path.startsWith("/provider-icons/")) return next(); // see comment above this RUN step for why\n  if (req.path.startsWith("/__openclaw__/assistant-media")) return next(); // see comment above this RUN step for why#' \
+  src/server.js
+RUN grep -qF 'req.path.startsWith("/provider-icons/")' src/server.js
+RUN grep -qF 'req.path.startsWith("/__openclaw__/assistant-media")' src/server.js
 
 # requireDashboardAuth only accepts `Authorization: Basic ...` -- it rejects
 # any other scheme outright, including a perfectly valid
