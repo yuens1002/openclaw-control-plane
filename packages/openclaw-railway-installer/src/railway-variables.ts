@@ -1,3 +1,15 @@
+// LIVE-INSTANCE TIER: restart-or-redeploy-triggering
+// See docs/live-instance-operations.md for what this tier permits.
+//
+// Highest tier in this file comes from `writeRailwayVariable` with
+// `skipDeploys: false`, which lets a variable write trigger a real
+// redeploy of a live service. The readers below are read tier but are
+// credential-bearing on the other axis: they return raw secret values.
+// These calls go through the injected runner directly and are therefore
+// NOT covered by the human-CLI guard's service-scoping and secret-echo
+// checks, which only wrap a direct human invocation -- a named follow-up,
+// not something this marker asserts away.
+
 import type { RailwayRunner } from "./index.js";
 
 // Confirmed locally against the Railway CLI (5.40.0): `railway variable
@@ -9,6 +21,7 @@ export interface RailwayVariableReaderDependencies {
   runner: RailwayRunner;
 }
 
+// LIVE-INSTANCE TIER: read
 export async function listRailwayVariables(
   service: string,
   dependencies: RailwayVariableReaderDependencies
@@ -17,6 +30,7 @@ export async function listRailwayVariables(
   return JSON.parse(result.stdout) as Record<string, string>;
 }
 
+// LIVE-INSTANCE TIER: read
 export async function readRailwayVariable(
   name: string,
   service: string,
@@ -41,6 +55,7 @@ export interface WriteRailwayVariableOptions {
   skipDeploys?: boolean;
 }
 
+// LIVE-INSTANCE TIER: unconditional-write (restart-or-redeploy-triggering when skipDeploys is false)
 /**
  * Writes a single Railway variable. The value is piped via `--stdin`,
  * never included in `args`, so it never lands in a process listing or

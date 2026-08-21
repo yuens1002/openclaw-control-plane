@@ -1,3 +1,25 @@
+// LIVE-INSTANCE TIER: restart-or-redeploy-triggering
+// See docs/live-instance-operations.md for what this tier permits.
+//
+// `importWorkspaceFiles` POSTs unconditionally: there is no pre-read of
+// what the instance already holds and no comparison, so the archive is
+// uploaded on every call. The server side extracts into the live data
+// directory without deleting existing files first, and calling the import
+// endpoint at all stops the gateway as a side effect -- which is why this
+// module deliberately makes no retry on failure. Provenance of the
+// gateway-stop claim: it is asserted in the premise of AC-XPORT-003
+// (docs/plans/workspace-identity-transport/ACs.md) and is the stated reason
+// for the no-retry behavior, but it is second-hand in this repo -- that AC's
+// evidence verifies the throw and the single call, and the independent
+// upstream re-fetch recorded in that plan belongs to AC-XPORT-005 (response
+// shape), not to the gateway stop. Tiered at the higher level because
+// over-classifying under unresolved provenance is the safe direction.
+// Adding a compare step before this is ever wired into a provisioning path
+// is a named follow-up.
+//
+// `buildWorkspaceArchive` is local-only -- it stages and tars files on this
+// machine and touches no live instance -- so it carries no tier of its own.
+
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

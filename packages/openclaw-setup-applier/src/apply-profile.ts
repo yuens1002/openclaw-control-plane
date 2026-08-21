@@ -1,3 +1,15 @@
+// LIVE-INSTANCE TIER: restart-or-redeploy-triggering
+// See docs/live-instance-operations.md for what this tier permits.
+//
+// `applyProfile` is the strongest existing pattern in this repo: it is
+// idempotent (returns "already-configured" without calling the mutating
+// endpoint when the instance already reports configured) AND it verifies
+// after writing (re-reads status and throws if the write did not take).
+// It reaches this tier anyway because the model-provider path can write a
+// Railway variable with `skipDeploys: false`, which triggers a real
+// redeploy -- and then waits it out by polling the healthcheck rather than
+// racing it. Each exported function carries its own marker below.
+
 import { mintOpenRouterKey } from "./openrouter-provisioning.js";
 import { parseClientProfile, type ClientProfile, type ModelProviderAttachment } from "./profile-schema.js";
 import {
@@ -41,6 +53,7 @@ export interface DryRunResult {
   payloadPreview: DryRunPayloadPreview;
 }
 
+// LIVE-INSTANCE TIER: read
 /**
  * Resolves a candidate profile against the target Railway service without
  * mutating anything: no key is minted, no variable is written, and
@@ -207,6 +220,10 @@ export interface ApplyResult {
   mintedKeyHash?: string;
 }
 
+// LIVE-INSTANCE TIER: idempotent-write (restart-or-redeploy-triggering conditionally)
+// Escalates to restart-or-redeploy-triggering when the model-provider
+// attachment declares customProviderApiKeyEnv, which makes the variable
+// write omit --skip-deploys and redeploy the live service.
 /**
  * Applies a candidate profile to a live OpenClaw instance. Idempotent:
  * skips /setup/api/run entirely if the instance already reports configured,
