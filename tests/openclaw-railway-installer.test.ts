@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { installOpenClawOnRailway, mergeEnv } from "@openclaw-control-plane/openclaw-railway-installer";
 import { FakeRailwayRunner } from "./fixtures/fake-railway-runner.js";
+import { createFakeConfigStore } from "./fixtures/fake-config-store.js";
 
 describe("OpenClaw Railway installer", () => {
   it("deploys a fresh template, fixes the domain port, verifies health, and writes local outputs", async () => {
@@ -29,8 +30,7 @@ describe("OpenClaw Railway installer", () => {
         runner,
         sleep: async () => {},
         checkSetupStatus: async (url) => (url.endsWith("/setup/api/status") ? 200 : 500),
-        getConfigRaw: async () => ({ ok: true, content: "{}" }),
-        postConfigRaw: async () => ({ ok: true }),
+        ...createFakeConfigStore().deps,
         getPendingDevices: async () => ({ ok: true, requestIds: [] }),
         approveDevice: async () => ({ ok: true }),
         readText: async () => "",
@@ -74,8 +74,7 @@ describe("OpenClaw Railway installer", () => {
         runner,
         sleep: async () => {},
         checkSetupStatus: async (url) => (url.endsWith("/setup/api/status") ? 200 : 500),
-        getConfigRaw: async () => ({ ok: true, content: "{}" }),
-        postConfigRaw: async () => ({ ok: true }),
+        ...createFakeConfigStore().deps,
         getPendingDevices: async () => ({ ok: true, requestIds: [] }),
         approveDevice: async () => ({ ok: true })
       }
@@ -101,8 +100,7 @@ describe("OpenClaw Railway installer", () => {
       {
         runner,
         checkSetupStatus: async () => 200,
-        getConfigRaw: async () => ({ ok: true, content: "{}" }),
-        postConfigRaw: async () => ({ ok: true }),
+        ...createFakeConfigStore().deps,
         getPendingDevices: async () => ({ ok: true, requestIds: [] }),
         approveDevice: async () => ({ ok: true })
       }

@@ -6,6 +6,7 @@ import {
 } from "@openclaw-control-plane/openclaw-railway-installer/provision-client";
 import type { RailwayRunner } from "@openclaw-control-plane/openclaw-railway-installer";
 import { FakeRailwayRunner, domainList } from "./fixtures/fake-railway-runner.js";
+import { createFakeConfigStore } from "./fixtures/fake-config-store.js";
 
 // A deliberately fake, non-Dockerfile-default ref: this feature must never
 // pin the repo's real pinnedCommit SHA as a test literal (that's the Gate
@@ -18,8 +19,7 @@ function baseDependencies(runner: RailwayRunner, overrides: Partial<ProvisionCli
     runner,
     sleep: async () => {},
     checkSetupStatus: async (url: string) => (url.endsWith("/setup/api/status") ? 200 : 500),
-    getConfigRaw: async () => ({ ok: true, content: "{}" }),
-    postConfigRaw: async () => ({ ok: true }),
+    ...createFakeConfigStore().deps,
     getPendingDevices: async () => ({ ok: true, requestIds: [] }),
     approveDevice: async () => ({ ok: true }),
     readText: async () => "",
@@ -103,14 +103,7 @@ describe("provisionClientInstance — fresh provision", () => {
           calls.push("status");
           return 200;
         },
-        getConfigRaw: async () => {
-          calls.push("getConfigRaw");
-          return { ok: true, content: "{}" };
-        },
-        postConfigRaw: async () => {
-          calls.push("postConfigRaw");
-          return { ok: true };
-        },
+        ...createFakeConfigStore({ onCall: (c) => calls.push(c) }).deps,
         getPendingDevices: async () => {
           calls.push("getPendingDevices");
           return { ok: true, requestIds: ["req_1"] };
@@ -122,7 +115,16 @@ describe("provisionClientInstance — fresh provision", () => {
       })
     );
 
-    expect(calls).toEqual(["status", "getConfigRaw", "postConfigRaw", "getPendingDevices", "approveDevice"]);
+    // The second getConfigRaw is patchAllowedOrigins' post-write verification
+    // read (see the same assertion in the readiness suite).
+    expect(calls).toEqual([
+      "status",
+      "getConfigRaw",
+      "postConfigRaw",
+      "getConfigRaw",
+      "getPendingDevices",
+      "approveDevice"
+    ]);
     expect(result.patchedAllowedOrigins).toBe(true);
     expect(result.approvedDeviceRequestId).toBe("req_1");
   });
