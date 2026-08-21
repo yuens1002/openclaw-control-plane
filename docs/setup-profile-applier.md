@@ -36,9 +36,11 @@ legitimate tested caller: `applyProfile`. `POST /setup/api/reset` has none.
 [`docs/live-instance-operations.md`](live-instance-operations.md) classifies
 the reset endpoint as **destructive**, and the rule for that tier is
 Forbidden outright — not gated, not confirmed, not available — so there is
-no "tested code path" exception for it to reach. The `reset()` method still
-present on this package's setup API client is therefore slated for deletion
-rather than for a gate; treat it as unavailable in the meantime.
+no "tested code path" exception for it to reach. This package's setup API
+client therefore exposes **no** `reset()` method: it was removed rather than
+gated, because a gate around a capability nothing calls protects nothing
+while leaving it one call away. The endpoint still exists on the instance;
+nothing in this repo offers a way to reach it.
 
 That is the specific rule for these two endpoints. The general rule it is
 an instance of — how any operator (this repo's code, a human at a
