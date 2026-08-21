@@ -30,6 +30,24 @@ instance except through this applier's own tested code path.** Calling them
 by hand, from a script, or from an ad-hoc HTTP client bypasses the
 idempotency and ordering guarantees this package is built to provide.
 
+The two endpoints are not equally available, and this rule is the floor for
+`run` rather than the whole story for `reset`. `POST /setup/api/run` has a
+legitimate tested caller: `applyProfile`. `POST /setup/api/reset` has none.
+[`docs/live-instance-operations.md`](live-instance-operations.md) classifies
+the reset endpoint as **destructive**, and the rule for that tier is
+Forbidden outright — not gated, not confirmed, not available — so there is
+no "tested code path" exception for it to reach. The `reset()` method still
+present on this package's setup API client is therefore slated for deletion
+rather than for a gate; treat it as unavailable in the meantime.
+
+That is the specific rule for these two endpoints. The general rule it is
+an instance of — how any operator (this repo's code, a human at a
+terminal, or an agent mid-session) may read or write state on an
+already-provisioned instance, including the classification these
+endpoints fall under and the pre-flight declaration required before any
+ad hoc command — lives in
+[docs/live-instance-operations.md](live-instance-operations.md).
+
 ## What it consumes
 
 A **client profile**: a JSON document produced by a private agency/client

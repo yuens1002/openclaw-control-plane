@@ -1,3 +1,12 @@
+// LIVE-INSTANCE TIER: deploy
+// See docs/live-instance-operations.md for what this tier permits.
+//
+// Not in the original tier-marking list, but this module composes the
+// provisioning and apply paths and adds a recurring live write of its own.
+// Highest tier is inherited from `provisionClientInstance` via
+// `bootstrapOnboardingCycle`. Each exported function carries its own
+// marker below.
+
 import {
   provisionClientInstance,
   type ProvisionClientDependencies,
@@ -37,6 +46,8 @@ export interface BootstrapOnboardingCycleResult {
   apply: ApplyResult;
 }
 
+// LIVE-INSTANCE TIER: deploy
+// Inherited from `provisionClientInstance`, which this calls directly.
 /**
  * Provisions the fixture instance (idempotent — reuses an existing healthy
  * service rather than recreating it) and applies the given profile.
@@ -102,6 +113,13 @@ export interface RegressionCheckResult {
   keyDeleted: boolean;
 }
 
+// LIVE-INSTANCE TIER: unconditional-write
+// Overwrites the profile's declared model-provider variable on an
+// already-provisioned instance every run, with no pre-read comparison --
+// by design, since the whole point is to prove a fresh key round-trips.
+// The write passes `skipDeploys: true`, so it does not redeploy. The rest
+// of the function is read tier (status plus healthcheck). The mint/delete
+// pair either side of it acts on a third-party key, not on this instance.
 /**
  * Mints a fresh OpenRouter key, writes it to the profile's declared
  * model-provider Railway variable, then checks the instance is still

@@ -352,7 +352,27 @@ whether the plain form masks them either) without
 either check fails, so a rejected command never has a chance to print
 anything.
 
+That is the specific rule for these two Railway subcommands. The general
+rule it is an instance of -- how any operator (this repo's code, a human
+at a terminal, or an agent mid-session) may read or write state on an
+already-provisioned instance, including the two-axis classification, the
+prohibition on putting a secret in any command's argument string, and the
+pre-flight declaration required before any ad hoc command -- lives in
+[docs/live-instance-operations.md](../../docs/live-instance-operations.md).
+Note that the guard covers direct human CLI invocation only: the
+programmatic variable read/write helpers in
+`packages/openclaw-railway-installer/src/railway-variables.ts` do not pass
+through it (tracked as gap G4 in that document).
+
 ## Manual Install
+
+> The `-v "NAME=VALUE"` form below puts secret values on the argument
+> line, which
+> [docs/live-instance-operations.md](../../docs/live-instance-operations.md)
+> forbids against a live instance at every tier, including reads. It is
+> shown here only as the raw fallback for standing up a brand-new
+> throwaway service; prefer the guarded and programmatic paths above,
+> which pipe values via stdin.
 
 ```powershell
 railway deploy -t clawdbot-railway-template `

@@ -1,3 +1,13 @@
+// LIVE-INSTANCE TIER: idempotent-write
+// See docs/live-instance-operations.md for what this tier permits.
+//
+// Reads the pending-pairing list first and returns `undefined` without
+// approving when `requestIds` is empty, so a rerun against an instance
+// whose pairing was already approved makes no write at all. Refuses under
+// ambiguity rather than guessing: more than one pending request throws.
+// Grants dashboard access to one device; it does not restart the gateway
+// and does not redeploy.
+
 import { basicAuthHeader, type SetupAuth } from "./setup-auth.js";
 
 // First-time browser/device connections require pairing approval even with

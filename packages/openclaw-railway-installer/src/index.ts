@@ -1,3 +1,18 @@
+// LIVE-INSTANCE TIER: deploy
+// See docs/live-instance-operations.md for what this tier permits.
+//
+// Highest tier comes from `installOpenClawOnRailway`, which runs a raw
+// `deploy` command. This module is also the repo's worst credential-axis
+// offender: that same command passes SETUP_PASSWORD and
+// OPENCLAW_GATEWAY_TOKEN as `-v NAME=<value>` argument-vector entries, so
+// both values land in a process listing while the deploy runs -- the exact
+// pattern the sibling Railway-variables module exists to avoid by piping
+// values through stdin instead. Not fixed here (this change is
+// comment-only); recorded so the marker matches what the code does rather
+// than what it should do. The shared helpers below carry their own
+// markers; the pure local helpers (secret generation, env merging, handoff
+// text, local file writes) touch no live instance and carry none.
+
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -177,6 +192,11 @@ This file is local-only and should not be committed.
 `;
 }
 
+// LIVE-INSTANCE TIER: deploy
+// Skips the deploy entirely and reuses the service when a healthy one
+// already exists and `forceNew` was not passed, so a rerun is not
+// automatically a redeploy. When it does deploy, it passes both generated
+// secrets on the argument line (see the file header).
 export async function installOpenClawOnRailway(
   options: InstallerOptions,
   dependencies: InstallerDependencies
@@ -290,6 +310,7 @@ function findTemplateService(services: InstallerService[], serviceName: string):
   return services.find((service) => service.name === serviceName);
 }
 
+// LIVE-INSTANCE TIER: read
 /**
  * Polls `service list` until the named service's latest deployment reaches
  * `SUCCESS`, or throws on a terminal failure status / timeout. Generic over
@@ -326,6 +347,7 @@ export async function pollServiceUntilSuccess(
   throw new Error(`Timed out waiting for '${serviceName}' to deploy.`);
 }
 
+// LIVE-INSTANCE TIER: read
 export async function listServices(runner: RailwayRunner): Promise<InstallerService[]> {
   const result = await runner.run(["service", "list", "--json"]);
   return JSON.parse(result.stdout) as InstallerService[];
@@ -336,6 +358,12 @@ async function listDomains(serviceName: string, runner: RailwayRunner): Promise<
   return JSON.parse(result.stdout) as { domains: RailwayDomain[] };
 }
 
+// LIVE-INSTANCE TIER: idempotent-write
+// Both writes are conditional: a domain is generated only when `domain
+// list` comes back with none, and `domain update` runs only when the
+// existing domain's targetPort differs from the requested one. Rerunning
+// against an already-correct domain makes no write. Changing a live
+// service's public domain routing is still a write, hence not read tier.
 export async function ensureDomainPort(
   serviceName: string,
   targetPort: number,
@@ -393,6 +421,8 @@ async function checkSetupStatus(
   return response.status;
 }
 
+// LIVE-INSTANCE TIER: read
+// Credential-bearing on the other axis: sends Basic auth on every poll.
 /**
  * Polls `checkSetupStatus` until it returns 200 or the timeout elapses.
  * Newly-rotated setup credentials can take a few seconds to propagate after
