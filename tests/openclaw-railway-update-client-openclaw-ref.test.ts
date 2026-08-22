@@ -80,6 +80,39 @@ describe("updateClientOpenClawRef", () => {
     expect(mutating(runner)).toHaveLength(0);
   });
 
+  it("does not report a no-op success when the ref matches but the instance is unhealthy", async () => {
+    // The retry-after-failure case: a previous attempt wrote the variable and
+    // then failed before the redeploy landed. The variable now matches, but
+    // the running deployment may still be the old one -- reporting
+    // changed:false here would claim success for an unverified instance.
+    const runner = runnerWith({ OPENCLAW_GIT_REF: NEW_REF, SETUP_PASSWORD: "setup-secret" });
+
+    await expect(
+      updateClientOpenClawRef(
+        { service: SERVICE, openclawRef: NEW_REF, expectedCurrentRef: NEW_REF, pollSeconds: 0, timeoutMinutes: 0 },
+        { runner, sleep: async () => {}, checkSetupStatus: async () => 401 }
+      )
+    ).rejects.toThrow(/not answering authenticated requests.*forceRedeploy/s);
+  });
+
+  it("forceRedeploy redeploys even when the variable already reads as the requested ref", async () => {
+    const runner = runnerWith({ OPENCLAW_GIT_REF: NEW_REF, SETUP_PASSWORD: "setup-secret" });
+
+    const result = await updateClientOpenClawRef(
+      {
+        service: SERVICE,
+        openclawRef: NEW_REF,
+        expectedCurrentRef: NEW_REF,
+        forceRedeploy: true,
+        pollSeconds: 0
+      },
+      { runner, ...READY }
+    );
+
+    expect(result.changed).toBe(true);
+    expect(mutating(runner).some((c) => c.args[0] === "redeploy")).toBe(true);
+  });
+
   it("refuses to overwrite when the current ref is not what the caller expected", async () => {
     const runner = runnerWith({ OPENCLAW_GIT_REF: "v-something-else", SETUP_PASSWORD: "setup-secret" });
 

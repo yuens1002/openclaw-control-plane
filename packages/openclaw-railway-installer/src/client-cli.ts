@@ -152,6 +152,9 @@ export function parseUpdateRefArgs(args: string[]): UpdateClientTemplateRefOptio
         options.setupUsername = requireValue(arg, value);
         index += 1;
         break;
+      case "--force-redeploy":
+        options.forceRedeploy = true;
+        break;
       case "--poll-seconds":
         options.pollSeconds = parseIntegerFlag(arg, value);
         index += 1;
@@ -199,6 +202,9 @@ export function parseUpdateOpenClawRefArgs(args: string[]): UpdateClientOpenClaw
       case "--setup-username":
         options.setupUsername = requireValue(arg, value);
         index += 1;
+        break;
+      case "--force-redeploy":
+        options.forceRedeploy = true;
         break;
       case "--openclaw-ref":
         options.openclawRef = requireValue(arg, value);

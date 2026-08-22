@@ -298,6 +298,12 @@ export interface UpdateClientTemplateRefOptions {
   templateRef: string;
   /** The ref the caller believes is currently set. A mismatch aborts the update. */
   expectedCurrentRef: string;
+  /**
+   * Redeploy even when the variable already reads as the requested ref. For
+   * recovering an instance whose previous update wrote the ref and then
+   * failed before the redeploy or readiness completed.
+   */
+  forceRedeploy?: boolean;
   setupUsername?: string;
   pollSeconds?: number;
   timeoutMinutes?: number;
@@ -347,6 +353,54 @@ export interface UpdateClientTemplateRefResult {
 // The "never touches any other service" guarantee is still enforced only by
 // `service` being a required parameter -- prose, not a runtime assertion
 // (gap G6).
+/**
+ * Waits for the service to answer an authenticated request. Shared by the
+ * post-redeploy path and the already-at-this-ref path, because "the variable
+ * says the right thing" and "the instance is actually serving it" are
+ * different claims and only the second one is worth reporting as success.
+ */
+async function assertInstanceReady(
+  params: {
+    service: string;
+    setupUsername?: string | undefined;
+    pollSeconds: number;
+    timeoutMinutes: number;
+  },
+  dependencies: InstallerDependencies,
+  contextForFailure?: string
+): Promise<void> {
+  const setupPassword = await readRailwayVariable("SETUP_PASSWORD", params.service, dependencies);
+  if (!setupPassword) {
+    throw new Error("the service has no SETUP_PASSWORD to authenticate with");
+  }
+
+  const { domains } = await listDomains(params.service, dependencies.runner);
+  const domain = domains.find((candidate) => candidate.type === "service") ?? domains[0];
+  if (!domain) {
+    throw new Error("the service has no domain");
+  }
+
+  try {
+    await waitForSetupReady(
+      `https://${domain.domain}/setup/api/status`,
+      { username: params.setupUsername ?? DEFAULT_SETUP_USERNAME, password: setupPassword },
+      params.pollSeconds,
+      params.timeoutMinutes,
+      dependencies
+    );
+  } catch (cause) {
+    if (contextForFailure === undefined) {
+      throw cause;
+    }
+    throw new Error(
+      `${contextForFailure}, but the instance is not answering authenticated requests, so it cannot be ` +
+        `confirmed to be running it -- most likely a previous attempt wrote the ref and then failed before ` +
+        `the redeploy completed. Re-run with forceRedeploy to redeploy it.`,
+      { cause }
+    );
+  }
+}
+
 async function updateClientRefVariable(
   params: {
     service: string;
@@ -354,6 +408,8 @@ async function updateClientRefVariable(
     nextRef: string;
     expectedCurrentRef: string;
     setupUsername?: string | undefined;
+    /** Redeploy even when the variable already reads as the requested ref. */
+    forceRedeploy?: boolean | undefined;
     pollSeconds: number;
     timeoutMinutes: number;
   },
@@ -385,9 +441,21 @@ async function updateClientRefVariable(
     );
   }
 
-  if (current === params.nextRef) {
-    // Already at the requested ref. Skipping the write also skips the
-    // redeploy, which is the point: a redeploy is live downtime.
+  if (current === params.nextRef && !params.forceRedeploy) {
+    // The variable already reads as the requested ref -- but the variable is
+    // written *before* the redeploy, and everything after that write can
+    // fail. So a matching variable is not proof the running deployment is on
+    // this ref: it is equally consistent with a previous attempt that wrote
+    // the value and then failed to redeploy or failed readiness.
+    //
+    // Returning `changed: false` on that basis alone would report success for
+    // an instance that may still be running the old build, and would directly
+    // contradict the "live and unverified -- check the instance" error a
+    // failed attempt raises. So confirm the instance is actually healthy
+    // before calling this a no-op. This costs a readiness check, not a
+    // redeploy, so the common already-up-to-date case still causes no
+    // downtime.
+    await assertInstanceReady(params, dependencies, `${params.variableName} already reads as '${params.nextRef}'`);
     return { changed: false };
   }
 
@@ -439,24 +507,7 @@ async function updateClientRefVariable(
       priorDeploymentId
     );
 
-    const setupPassword = await readRailwayVariable("SETUP_PASSWORD", params.service, dependencies);
-    if (!setupPassword) {
-      throw new Error("the service has no SETUP_PASSWORD to authenticate with");
-    }
-
-    const { domains } = await listDomains(params.service, dependencies.runner);
-    const domain = domains.find((candidate) => candidate.type === "service") ?? domains[0];
-    if (!domain) {
-      throw new Error("the service has no domain");
-    }
-
-    await waitForSetupReady(
-      `https://${domain.domain}/setup/api/status`,
-      { username: params.setupUsername ?? DEFAULT_SETUP_USERNAME, password: setupPassword },
-      params.pollSeconds,
-      params.timeoutMinutes,
-      dependencies
-    );
+    await assertInstanceReady(params, dependencies);
 
     // Post-write verification, the second half the protocol's own
     // idempotent-write rule requires. A healthy instance is not proof it is
@@ -497,6 +548,7 @@ export async function updateClientTemplateRef(
       variableName: "OPENCLAW_TEMPLATE_REF",
       nextRef: options.templateRef,
       expectedCurrentRef: options.expectedCurrentRef,
+      forceRedeploy: options.forceRedeploy,
       setupUsername: options.setupUsername,
       pollSeconds: options.pollSeconds ?? 15,
       timeoutMinutes: options.timeoutMinutes ?? 25
@@ -512,6 +564,12 @@ export interface UpdateClientOpenClawRefOptions {
   openclawRef: string;
   /** The ref the caller believes is currently set. A mismatch aborts the update. */
   expectedCurrentRef: string;
+  /**
+   * Redeploy even when the variable already reads as the requested ref. For
+   * recovering an instance whose previous update wrote the ref and then
+   * failed before the redeploy or readiness completed.
+   */
+  forceRedeploy?: boolean;
   setupUsername?: string;
   pollSeconds?: number;
   timeoutMinutes?: number;
@@ -543,6 +601,7 @@ export async function updateClientOpenClawRef(
       variableName: "OPENCLAW_GIT_REF",
       nextRef: options.openclawRef,
       expectedCurrentRef: options.expectedCurrentRef,
+      forceRedeploy: options.forceRedeploy,
       setupUsername: options.setupUsername,
       pollSeconds: options.pollSeconds ?? 15,
       timeoutMinutes: options.timeoutMinutes ?? 25

@@ -170,6 +170,13 @@ sentinel makes that an explicit declaration rather than a silent special
 case: passing it against a service that *does* have a value is refused,
 just like any other mismatch.
 
+If an update fails *after* the variable was written — the error says the ref
+"WAS updated" but the instance is not confirmed healthy — a plain retry will
+not fix it. The variable already matches, so there is nothing to change, and
+the update declines to report that as success while the instance is
+unhealthy. Re-run with `-ForceRedeploy` to redeploy the already-written ref
+and re-verify.
+
 `OPENCLAW_TEMPLATE_REF` is a **different** pin from `OPENCLAW_GIT_REF`: the
 template ref is the Railway wrapper/scaffold (`vignesh07/clawdbot-railway-template`)
 that serves `/setup` and proxies to OpenClaw; `OPENCLAW_GIT_REF` is the

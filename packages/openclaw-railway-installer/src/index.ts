@@ -344,14 +344,18 @@ export async function pollServiceUntilSuccess(
     }
 
     const status = service.latestDeployment?.status;
-    const isSuperseded =
-      supersedesDeploymentId !== undefined && service.latestDeployment?.id === supersedesDeploymentId;
-    if (status === "SUCCESS" && !isSuperseded) {
-      return service;
-    }
-    if (isSuperseded) {
-      // Still showing the pre-redeploy deployment; the new one has not
-      // surfaced yet. Keep waiting rather than accepting the old success.
+    if (status === "SUCCESS") {
+      if (supersedesDeploymentId === undefined) {
+        return service;
+      }
+      // Guarded mode: only a deployment we can positively identify as a
+      // *different* one counts. A missing id is not evidence of rollover --
+      // treating it as acceptable would let the guard pass without ever
+      // observing a new deployment, which is the whole thing it prevents.
+      const observedId = service.latestDeployment?.id;
+      if (observedId !== undefined && observedId !== supersedesDeploymentId) {
+        return service;
+      }
       continue;
     }
     if (status && terminalFailureStatuses.has(status)) {

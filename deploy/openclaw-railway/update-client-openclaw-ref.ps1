@@ -6,6 +6,7 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$ExpectedCurrentRef,
   [string]$SetupUsername,
+  [switch]$ForceRedeploy,
   [int]$PollSeconds = 15,
   [int]$TimeoutMinutes = 25
 )
@@ -37,6 +38,10 @@ $argsList = @(
 
 if ($SetupUsername) {
   $argsList += @("--setup-username", $SetupUsername)
+}
+
+if ($ForceRedeploy) {
+  $argsList += @("--force-redeploy")
 }
 
 & $npm.Source @argsList
