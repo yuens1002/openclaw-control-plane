@@ -219,6 +219,55 @@ describe("updateClientOpenClawRef", () => {
     expect(mutating(runner)).toHaveLength(0);
   });
 
+  it("authenticates readiness with a custom setup username when one is given", async () => {
+    // Every other test here uses a stub that discards the auth object, so a
+    // regression to the default username would silently break custom-auth
+    // clients while the suite stayed green.
+    const runner = runnerWith({ OPENCLAW_GIT_REF: OLD_REF, SETUP_PASSWORD: "setup-secret" });
+    const seen: Array<{ username: string; password: string }> = [];
+
+    await updateClientOpenClawRef(
+      {
+        service: SERVICE,
+        openclawRef: NEW_REF,
+        expectedCurrentRef: OLD_REF,
+        setupUsername: "custom-admin",
+        pollSeconds: 0
+      },
+      {
+        runner,
+        sleep: async () => {},
+        checkSetupStatus: async (_url, auth) => {
+          seen.push(auth);
+          return 200;
+        }
+      }
+    );
+
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen[0]?.username).toBe("custom-admin");
+    expect(seen[0]?.password).toBe("setup-secret");
+  });
+
+  it("falls back to the default setup username when none is given", async () => {
+    const runner = runnerWith({ OPENCLAW_GIT_REF: OLD_REF, SETUP_PASSWORD: "setup-secret" });
+    const seen: Array<{ username: string; password: string }> = [];
+
+    await updateClientOpenClawRef(
+      { service: SERVICE, openclawRef: NEW_REF, expectedCurrentRef: OLD_REF, pollSeconds: 0 },
+      {
+        runner,
+        sleep: async () => {},
+        checkSetupStatus: async (_url, auth) => {
+          seen.push(auth);
+          return 200;
+        }
+      }
+    );
+
+    expect(seen[0]?.username).toBe("openclaw-admin");
+  });
+
   it("refuses to overwrite when the current ref is not what the caller expected", async () => {
     const runner = runnerWith({ OPENCLAW_GIT_REF: "v-something-else", SETUP_PASSWORD: "setup-secret" });
 

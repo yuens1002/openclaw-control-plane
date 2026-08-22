@@ -403,7 +403,9 @@ async function assertInstanceReady(
     throw new Error(
       `${contextForFailure}, but the instance is not answering authenticated requests, so it cannot be ` +
         `confirmed to be running it -- most likely a previous attempt wrote the ref and then failed before ` +
-        `the redeploy completed. Re-run with forceRedeploy to redeploy it.`,
+        `the redeploy completed. Re-run with the force-redeploy option to redeploy it: --force-redeploy on the ` +
+        `CLI, -ForceRedeploy on the PowerShell wrappers, or forceRedeploy: true when calling this library ` +
+        `directly. Pass the already-written ref as the expected current ref on that retry.`,
       { cause }
     );
   }

@@ -219,6 +219,55 @@ describe("updateClientTemplateRef", () => {
     expect(mutating(runner)).toHaveLength(0);
   });
 
+  it("authenticates readiness with a custom setup username when one is given", async () => {
+    // Every other test here uses a stub that discards the auth object, so a
+    // regression to the default username would silently break custom-auth
+    // clients while the suite stayed green.
+    const runner = runnerWith({ OPENCLAW_TEMPLATE_REF: OLD_REF, SETUP_PASSWORD: "setup-secret" });
+    const seen: Array<{ username: string; password: string }> = [];
+
+    await updateClientTemplateRef(
+      {
+        service: SERVICE,
+        templateRef: NEW_REF,
+        expectedCurrentRef: OLD_REF,
+        setupUsername: "custom-admin",
+        pollSeconds: 0
+      },
+      {
+        runner,
+        sleep: async () => {},
+        checkSetupStatus: async (_url, auth) => {
+          seen.push(auth);
+          return 200;
+        }
+      }
+    );
+
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen[0]?.username).toBe("custom-admin");
+    expect(seen[0]?.password).toBe("setup-secret");
+  });
+
+  it("falls back to the default setup username when none is given", async () => {
+    const runner = runnerWith({ OPENCLAW_TEMPLATE_REF: OLD_REF, SETUP_PASSWORD: "setup-secret" });
+    const seen: Array<{ username: string; password: string }> = [];
+
+    await updateClientTemplateRef(
+      { service: SERVICE, templateRef: NEW_REF, expectedCurrentRef: OLD_REF, pollSeconds: 0 },
+      {
+        runner,
+        sleep: async () => {},
+        checkSetupStatus: async (_url, auth) => {
+          seen.push(auth);
+          return 200;
+        }
+      }
+    );
+
+    expect(seen[0]?.username).toBe("openclaw-admin");
+  });
+
   it("refuses to overwrite when the current ref is not what the caller expected", async () => {
     const runner = runnerWith({ OPENCLAW_TEMPLATE_REF: "v-something-else", SETUP_PASSWORD: "setup-secret" });
 
@@ -246,9 +295,10 @@ describe("updateClientTemplateRef", () => {
   });
 
   it("bootstraps a client that has no OPENCLAW_TEMPLATE_REF yet when the caller declares it unset", async () => {
-    // provisionClientInstance never writes this variable, so every freshly
-    // provisioned client starts here. Refusing outright would make the first
-    // version bump impossible.
+    // Unlike OPENCLAW_GIT_REF, provisioning *does* write this variable, so a
+    // client that reaches here is one where it was never set or was removed
+    // -- an externally managed or hand-built service. The declare-unset path
+    // still has to work for it.
     const runner = runnerWith({ SETUP_PASSWORD: "setup-secret" });
 
     const result = await updateClientTemplateRef(
