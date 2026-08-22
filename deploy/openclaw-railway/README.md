@@ -138,11 +138,21 @@ template, or control-plane's own `main`.
 .\deploy\openclaw-railway\provision-client.ps1 -ClientName acme -ProjectId <existing-project-id>
 .\deploy\openclaw-railway\provision-client.ps1 -ClientName acme -TemplateRef <commit-sha>
 
-.\deploy\openclaw-railway\update-client-template-ref.ps1 -Service acme-openclaw -TemplateRef <new-commit-sha>
+.\deploy\openclaw-railway\update-client-template-ref.ps1 -Service acme-openclaw -TemplateRef <new-commit-sha> -ExpectedCurrentRef <current-commit-sha>
 ```
 
 `OPENCLAW_TEMPLATE_REF` defaults to this repo's own
 `template-lock.json` → `pinnedCommit` when not passed explicitly.
+
+`-ExpectedCurrentRef` is required on both update scripts. State the ref you
+believe the service is currently on: the update reads the live value first,
+does nothing at all when it already equals the ref you asked for (a redeploy
+is downtime, so a no-op must not cause one), and aborts without writing when
+the live value is neither the expected one nor the target. That makes it
+impossible to redeploy a client without knowing what you are replacing, and
+stops a concurrent change from being silently overwritten. After the
+redeploy both scripts wait for the instance to answer an *authenticated*
+request, not merely for the platform to report a finished deployment.
 
 `OPENCLAW_TEMPLATE_REF` is a **different** pin from `OPENCLAW_GIT_REF`: the
 template ref is the Railway wrapper/scaffold (`vignesh07/clawdbot-railway-template`)
@@ -154,7 +164,7 @@ baked into this repo's `Dockerfile` and, like the template ref, can be
 overridden per client without touching any other service:
 
 ```powershell
-.\deploy\openclaw-railway\update-client-openclaw-ref.ps1 -Service acme-openclaw -OpenClawRef v2026.7.1-2
+.\deploy\openclaw-railway\update-client-openclaw-ref.ps1 -Service acme-openclaw -OpenClawRef v2026.7.1-2 -ExpectedCurrentRef v2026.6.0-1
 ```
 
 Provisioning sets `PORT=8080`, `OPENCLAW_STATE_DIR=/data/.openclaw`, and

@@ -3,45 +3,125 @@ import { describe, expect, it } from "vitest";
 import { updateClientTemplateRef } from "@openclaw-control-plane/openclaw-railway-installer/provision-client";
 import { FakeRailwayRunner } from "./fixtures/fake-railway-runner.js";
 
+const SERVICE = "acme-openclaw";
+const OLD_REF = "b9e2467189d02dfe51a80173c40bad650a58eaf2";
+const NEW_REF = "c1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4";
+
+function runnerWith(vars: Record<string, string>) {
+  const runner = new FakeRailwayRunner([
+    [{ id: "svc_acme", name: SERVICE, latestDeployment: { id: "dep_new", status: "SUCCESS" } }]
+  ]);
+  runner.setVariableListResponse(vars);
+  return runner;
+}
+
+const READY = { sleep: async () => {}, checkSetupStatus: async () => 200 };
+
+function mutating(runner: FakeRailwayRunner) {
+  return runner.calls.filter(
+    (c) => !(c.args[0] === "service" && c.args[1] === "list") && !(c.args[0] === "variable" && c.args[1] === "list") && c.args[0] !== "domain"
+  );
+}
+
 describe("updateClientTemplateRef", () => {
-  it("emits exactly a variable set and a redeploy scoped to the named service, nothing else", async () => {
-    const runner = new FakeRailwayRunner([
-      [
-        {
-          id: "svc_acme",
-          name: "acme-openclaw",
-          latestDeployment: { id: "dep_new", status: "SUCCESS" }
-        }
-      ]
-    ]);
+  it("writes and redeploys when the current ref matches what the caller expected", async () => {
+    const runner = runnerWith({ OPENCLAW_TEMPLATE_REF: OLD_REF, SETUP_PASSWORD: "setup-secret" });
 
     const result = await updateClientTemplateRef(
-      { service: "acme-openclaw", templateRef: "new-ref-1234", pollSeconds: 0 },
-      { runner, sleep: async () => {} }
+      { service: SERVICE, templateRef: NEW_REF, expectedCurrentRef: OLD_REF, pollSeconds: 0 },
+      { runner, ...READY }
     );
 
-    expect(result).toEqual({ serviceName: "acme-openclaw", templateRef: "new-ref-1234" });
+    expect(result).toEqual({ serviceName: SERVICE, templateRef: NEW_REF, changed: true });
 
-    const mutatingCalls = runner.calls.filter((c) => !(c.args[0] === "service" && c.args[1] === "list"));
-    expect(mutatingCalls).toHaveLength(2);
-    expect(mutatingCalls[0]?.args).toEqual([
+    const calls = mutating(runner);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.args).toEqual([
       "variable",
       "set",
       "OPENCLAW_TEMPLATE_REF",
       "--service",
-      "acme-openclaw",
+      SERVICE,
       "--skip-deploys",
       "--stdin",
       "--json"
     ]);
-    expect(mutatingCalls[0]?.stdin).toBe("new-ref-1234");
-    expect(mutatingCalls[1]?.args).toEqual(["redeploy", "--service", "acme-openclaw", "--yes", "--json"]);
+    expect(calls[0]?.stdin).toBe(NEW_REF);
+    expect(calls[1]?.args).toEqual(["redeploy", "--service", SERVICE, "--yes", "--json"]);
 
+    // Scoping guarantee: nothing addressed a different service.
     for (const call of runner.calls) {
-      const serviceFlagIndex = call.args.indexOf("--service");
-      if (serviceFlagIndex >= 0) {
-        expect(call.args[serviceFlagIndex + 1]).toBe("acme-openclaw");
+      const i = call.args.indexOf("--service");
+      if (i >= 0) {
+        expect(call.args[i + 1]).toBe(SERVICE);
       }
     }
+  });
+
+  it("does not redeploy when the service is already at the requested ref", async () => {
+    const runner = runnerWith({ OPENCLAW_TEMPLATE_REF: NEW_REF, SETUP_PASSWORD: "setup-secret" });
+
+    const result = await updateClientTemplateRef(
+      { service: SERVICE, templateRef: NEW_REF, expectedCurrentRef: NEW_REF, pollSeconds: 0 },
+      { runner, ...READY }
+    );
+
+    // A redeploy is live downtime; a no-op must not buy one.
+    expect(result.changed).toBe(false);
+    expect(mutating(runner)).toHaveLength(0);
+  });
+
+  it("refuses to overwrite when the current ref is not what the caller expected", async () => {
+    const runner = runnerWith({ OPENCLAW_TEMPLATE_REF: "v-something-else", SETUP_PASSWORD: "setup-secret" });
+
+    await expect(
+      updateClientTemplateRef(
+        { service: SERVICE, templateRef: NEW_REF, expectedCurrentRef: OLD_REF, pollSeconds: 0 },
+        { runner, ...READY }
+      )
+    ).rejects.toThrow(/expected it to currently be/);
+
+    // Nothing was written and nothing was redeployed.
+    expect(mutating(runner)).toHaveLength(0);
+  });
+
+  it("refuses when the variable is not set at all, rather than treating it as a first write", async () => {
+    const runner = runnerWith({ SETUP_PASSWORD: "setup-secret" });
+
+    await expect(
+      updateClientTemplateRef(
+        { service: SERVICE, templateRef: NEW_REF, expectedCurrentRef: OLD_REF, pollSeconds: 0 },
+        { runner, ...READY }
+      )
+    ).rejects.toThrow(/has no OPENCLAW_TEMPLATE_REF variable set/);
+    expect(mutating(runner)).toHaveLength(0);
+  });
+
+  it("fails loudly, naming the completed change, when the instance never becomes ready", async () => {
+    const runner = runnerWith({ OPENCLAW_TEMPLATE_REF: OLD_REF, SETUP_PASSWORD: "setup-secret" });
+
+    // Deployment reports SUCCESS but the instance never answers an
+    // authenticated request -- the exact case a status-only poll misses.
+    await expect(
+      updateClientTemplateRef(
+        { service: SERVICE, templateRef: NEW_REF, expectedCurrentRef: OLD_REF, pollSeconds: 0, timeoutMinutes: 0 },
+        { runner, sleep: async () => {}, checkSetupStatus: async () => 401 }
+      )
+    ).rejects.toThrow(/Setup readiness check/);
+
+    // The write and redeploy did happen, so the operator must be able to
+    // tell that the instance was changed and is unverified, not untouched.
+    expect(mutating(runner)).toHaveLength(2);
+  });
+
+  it("reports the change but flags unverifiable readiness when the service has no SETUP_PASSWORD", async () => {
+    const runner = runnerWith({ OPENCLAW_TEMPLATE_REF: OLD_REF });
+
+    await expect(
+      updateClientTemplateRef(
+        { service: SERVICE, templateRef: NEW_REF, expectedCurrentRef: OLD_REF, pollSeconds: 0 },
+        { runner, ...READY }
+      )
+    ).rejects.toThrow(/was updated to '.*' and redeployed, but readiness could not be verified/);
   });
 });

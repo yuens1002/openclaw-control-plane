@@ -297,7 +297,7 @@ function resolveOptions(options: InstallerOptions): RequiredOptions {
     pollSeconds: options.pollSeconds ?? 15,
     timeoutMinutes: options.timeoutMinutes ?? 25,
     forceNew: options.forceNew ?? false,
-    setupUsername: options.setupUsername ?? "openclaw-admin",
+    setupUsername: options.setupUsername ?? DEFAULT_SETUP_USERNAME,
     setupPassword: options.setupPassword ?? createSecret(24, "oc-"),
     gatewayToken: options.gatewayToken ?? createSecret(32),
     envLocalPath: options.envLocalPath ?? ".env.local",
@@ -353,7 +353,10 @@ export async function listServices(runner: RailwayRunner): Promise<InstallerServ
   return JSON.parse(result.stdout) as InstallerService[];
 }
 
-async function listDomains(serviceName: string, runner: RailwayRunner): Promise<{ domains: RailwayDomain[] }> {
+/** Default Basic-auth username for the wrapper's /setup routes. */
+export const DEFAULT_SETUP_USERNAME = "openclaw-admin";
+
+export async function listDomains(serviceName: string, runner: RailwayRunner): Promise<{ domains: RailwayDomain[] }> {
   const result = await runner.run(["domain", "list", "--service", serviceName, "--json"]);
   return JSON.parse(result.stdout) as { domains: RailwayDomain[] };
 }

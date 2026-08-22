@@ -8,8 +8,10 @@
 // markers. On the credential axis the module is not uniform:
 // `provisionClientInstance` both requires and returns secrets -- it
 // generates and reads back SETUP_PASSWORD and OPENCLAW_GATEWAY_TOKEN and
-// returns both to its caller -- while the two update functions write a
-// non-secret ref variable and handle no credential at all.
+// returns both to its caller. The two update functions write a non-secret
+// ref variable but do read SETUP_PASSWORD back, purely to authenticate
+// their own post-redeploy readiness check; they never return it or place
+// it on a command line.
 
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -18,10 +20,12 @@ import { approveOwnDevicePairing } from "./approve-own-device.js";
 import {
   createSecret,
   ensureDomainPort,
+  listDomains,
   listServices,
   mergeEnv,
   pollServiceUntilSuccess,
   waitForSetupReady,
+  DEFAULT_SETUP_USERNAME,
   writeLocalText,
   type InstallerDependencies,
   type InstallerService,
@@ -284,6 +288,9 @@ export async function provisionClientInstance(
 export interface UpdateClientTemplateRefOptions {
   service: string;
   templateRef: string;
+  /** The ref the caller believes is currently set. A mismatch aborts the update. */
+  expectedCurrentRef: string;
+  setupUsername?: string;
   pollSeconds?: number;
   timeoutMinutes?: number;
 }
@@ -291,48 +298,145 @@ export interface UpdateClientTemplateRefOptions {
 export interface UpdateClientTemplateRefResult {
   serviceName: string;
   templateRef: string;
+  /** False when the service was already at this ref and nothing was redeployed. */
+  changed: boolean;
 }
 
 // LIVE-INSTANCE TIER: restart-or-redeploy-triggering
-// The variable write is unconditional -- nothing reads the current
-// OPENCLAW_TEMPLATE_REF first, so calling this with the value the service
-// already has still redeploys a healthy live instance -- and the
-// `redeploy` call hardcodes `--yes`, so no confirmation naming the target
-// service is ever required. Afterwards it polls deployment status only
-// (`pollServiceUntilSuccess`); unlike `provisionClientInstance` it does not
-// wait on the auth-gated `/setup/api/status`, so SUCCESS here proves the
-// deployment finished, not that the instance is answering authenticated
-// requests. Adding a compare-then-write and a confirmation naming the
-// service is a named follow-up.
+// Compare-and-swap, then redeploy, then an auth-gated readiness check.
+// Shared by both ref-update paths below, which differ only in which
+// variable they set.
 //
-// The "never touches any other service" guarantee below is enforced only
-// by `options.service` being a required parameter -- it is prose, not a
-// runtime assertion.
+// Three properties this exists to guarantee, each closing a prior gap
+// (docs/live-instance-operations.md, gap G1):
+//
+//  1. A no-op never redeploys. The current value is read first; if it
+//     already equals the requested ref, nothing is written and the live
+//     service is left alone. Previously a same-value call still restarted
+//     a healthy instance for no benefit.
+//  2. The caller must state what it believes is currently set. A mismatch
+//     throws instead of overwriting. That is both the confirmation the
+//     restart tier requires -- the operator has to know what they are
+//     replacing -- and protection against clobbering a change made in
+//     between by someone else.
+//  3. Deployment SUCCESS is not treated as "the instance works". After the
+//     redeploy this waits on the auth-gated /setup/api/status, the same
+//     signal provisionClientInstance uses, because a container can report
+//     a finished deployment while not yet answering authenticated requests.
+//
+// The redeploy still passes --yes: confirmation now happens at this
+// function boundary via expectedCurrentRef, so a second interactive prompt
+// would only break non-interactive callers without adding a check.
+//
+// The "never touches any other service" guarantee is still enforced only by
+// `service` being a required parameter -- prose, not a runtime assertion
+// (gap G6).
+async function updateClientRefVariable(
+  params: {
+    service: string;
+    variableName: "OPENCLAW_TEMPLATE_REF" | "OPENCLAW_GIT_REF";
+    nextRef: string;
+    expectedCurrentRef: string;
+    setupUsername?: string | undefined;
+    pollSeconds: number;
+    timeoutMinutes: number;
+  },
+  dependencies: InstallerDependencies
+): Promise<{ changed: boolean }> {
+  const current = await readRailwayVariable(params.variableName, params.service, dependencies);
+
+  if (current === undefined) {
+    throw new Error(
+      `Service '${params.service}' has no ${params.variableName} variable set. This path updates an ` +
+        `already-provisioned service; provision it first rather than setting the ref here.`
+    );
+  }
+
+  if (current === params.nextRef) {
+    // Already at the requested ref. Skipping the write also skips the
+    // redeploy, which is the point: a redeploy is live downtime.
+    return { changed: false };
+  }
+
+  if (current !== params.expectedCurrentRef) {
+    throw new Error(
+      `Refusing to update ${params.variableName} on '${params.service}': expected it to currently be ` +
+        `'${params.expectedCurrentRef}', but it is '${current}'. Something else changed it. Re-read the ` +
+        `current value and retry if the update is still intended.`
+    );
+  }
+
+  await writeRailwayVariable(
+    { name: params.variableName, value: params.nextRef, service: params.service, skipDeploys: true },
+    dependencies
+  );
+  await dependencies.runner.run(["redeploy", "--service", params.service, "--yes", "--json"]);
+  await pollServiceUntilSuccess(params.service, params.pollSeconds, params.timeoutMinutes, dependencies);
+
+  // Past this point the ref HAS changed and the redeploy HAS happened, so
+  // every throw below describes a live instance that was modified but is
+  // not confirmed healthy. The messages have to say that explicitly.
+  const setupPassword = await readRailwayVariable("SETUP_PASSWORD", params.service, dependencies);
+  if (!setupPassword) {
+    throw new Error(
+      `${params.variableName} on '${params.service}' was updated to '${params.nextRef}' and redeployed, but ` +
+        `readiness could not be verified: the service has no SETUP_PASSWORD to authenticate with. ` +
+        `Check the instance manually.`
+    );
+  }
+
+  const { domains } = await listDomains(params.service, dependencies.runner);
+  const domain = domains.find((candidate) => candidate.type === "service") ?? domains[0];
+  if (!domain) {
+    throw new Error(
+      `${params.variableName} on '${params.service}' was updated to '${params.nextRef}' and redeployed, but ` +
+        `readiness could not be verified: the service has no domain. Check the instance manually.`
+    );
+  }
+
+  await waitForSetupReady(
+    `https://${domain.domain}/setup/api/status`,
+    { username: params.setupUsername ?? DEFAULT_SETUP_USERNAME, password: setupPassword },
+    params.pollSeconds,
+    params.timeoutMinutes,
+    dependencies
+  );
+
+  return { changed: true };
+}
+
 /**
  * Updates one already-provisioned client service to a new
- * OPENCLAW_TEMPLATE_REF and redeploys it. Never touches any other
- * service, control-plane's own main, or railway.toml.
+ * OPENCLAW_TEMPLATE_REF and redeploys it, then waits for it to answer
+ * authenticated requests. No-ops when already at the requested ref.
+ * Never touches any other service, control-plane's own main, or railway.toml.
  */
 export async function updateClientTemplateRef(
   options: UpdateClientTemplateRefOptions,
   dependencies: InstallerDependencies
 ): Promise<UpdateClientTemplateRefResult> {
-  const pollSeconds = options.pollSeconds ?? 15;
-  const timeoutMinutes = options.timeoutMinutes ?? 25;
-
-  await writeRailwayVariable(
-    { name: "OPENCLAW_TEMPLATE_REF", value: options.templateRef, service: options.service, skipDeploys: true },
+  const { changed } = await updateClientRefVariable(
+    {
+      service: options.service,
+      variableName: "OPENCLAW_TEMPLATE_REF",
+      nextRef: options.templateRef,
+      expectedCurrentRef: options.expectedCurrentRef,
+      setupUsername: options.setupUsername,
+      pollSeconds: options.pollSeconds ?? 15,
+      timeoutMinutes: options.timeoutMinutes ?? 25
+    },
     dependencies
   );
-  await dependencies.runner.run(["redeploy", "--service", options.service, "--yes", "--json"]);
-  await pollServiceUntilSuccess(options.service, pollSeconds, timeoutMinutes, dependencies);
 
-  return { serviceName: options.service, templateRef: options.templateRef };
+  return { serviceName: options.service, templateRef: options.templateRef, changed };
 }
 
 export interface UpdateClientOpenClawRefOptions {
   service: string;
   openclawRef: string;
+  /** The ref the caller believes is currently set. A mismatch aborts the update. */
+  expectedCurrentRef: string;
+  setupUsername?: string;
   pollSeconds?: number;
   timeoutMinutes?: number;
 }
@@ -340,36 +444,37 @@ export interface UpdateClientOpenClawRefOptions {
 export interface UpdateClientOpenClawRefResult {
   serviceName: string;
   openclawRef: string;
+  /** False when the service was already at this ref and nothing was redeployed. */
+  changed: boolean;
 }
 
-// LIVE-INSTANCE TIER: restart-or-redeploy-triggering
-// Same shape and same gaps as `updateClientTemplateRef` above:
-// unconditional variable write, `redeploy --yes` with no confirmation
-// naming the service, and a deployment-status poll rather than an
-// auth-gated readiness check. Bumping the pinned application version is
-// the higher-risk of the two, since it changes what the live instance
-// actually runs.
 /**
  * Updates one already-provisioned client service to a new OPENCLAW_GIT_REF
  * (the pinned openclaw/openclaw application version, not the
- * OPENCLAW_TEMPLATE_REF wrapper pin) and redeploys it. Never touches any
- * other service, control-plane's own main, or railway.toml.
+ * OPENCLAW_TEMPLATE_REF wrapper pin) and redeploys it, then waits for it to
+ * answer authenticated requests. Bumping the pinned application version is
+ * the higher-risk of the two, since it changes what the live instance
+ * actually runs -- which is why the readiness check matters most here.
+ * Never touches any other service, control-plane's own main, or railway.toml.
  */
 export async function updateClientOpenClawRef(
   options: UpdateClientOpenClawRefOptions,
   dependencies: InstallerDependencies
 ): Promise<UpdateClientOpenClawRefResult> {
-  const pollSeconds = options.pollSeconds ?? 15;
-  const timeoutMinutes = options.timeoutMinutes ?? 25;
-
-  await writeRailwayVariable(
-    { name: "OPENCLAW_GIT_REF", value: options.openclawRef, service: options.service, skipDeploys: true },
+  const { changed } = await updateClientRefVariable(
+    {
+      service: options.service,
+      variableName: "OPENCLAW_GIT_REF",
+      nextRef: options.openclawRef,
+      expectedCurrentRef: options.expectedCurrentRef,
+      setupUsername: options.setupUsername,
+      pollSeconds: options.pollSeconds ?? 15,
+      timeoutMinutes: options.timeoutMinutes ?? 25
+    },
     dependencies
   );
-  await dependencies.runner.run(["redeploy", "--service", options.service, "--yes", "--json"]);
-  await pollServiceUntilSuccess(options.service, pollSeconds, timeoutMinutes, dependencies);
 
-  return { serviceName: options.service, openclawRef: options.openclawRef };
+  return { serviceName: options.service, openclawRef: options.openclawRef, changed };
 }
 
 async function resolveProvisionOptions(

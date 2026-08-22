@@ -3,6 +3,8 @@ param(
   [string]$Service,
   [Parameter(Mandatory = $true)]
   [string]$OpenClawRef,
+  [Parameter(Mandatory = $true)]
+  [string]$ExpectedCurrentRef,
   [int]$PollSeconds = 15,
   [int]$TimeoutMinutes = 25
 )
@@ -24,6 +26,8 @@ $argsList = @(
   $Service,
   "--openclaw-ref",
   $OpenClawRef,
+  "--expected-current-ref",
+  $ExpectedCurrentRef,
   "--poll-seconds",
   "$PollSeconds",
   "--timeout-minutes",

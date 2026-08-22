@@ -41,7 +41,11 @@ async function main(): Promise<void> {
     const options = parseUpdateRefArgs(rest);
     const result = await updateClientTemplateRef(options, { runner });
     console.log("");
-    console.log(`Service '${result.serviceName}' redeployed on template ref ${result.templateRef}.`);
+    console.log(
+      result.changed
+        ? `Service '${result.serviceName}' redeployed on template ref ${result.templateRef}.`
+        : `Service '${result.serviceName}' was already on template ref ${result.templateRef}; nothing redeployed.`
+    );
     return;
   }
 
@@ -49,7 +53,11 @@ async function main(): Promise<void> {
     const options = parseUpdateOpenClawRefArgs(rest);
     const result = await updateClientOpenClawRef(options, { runner });
     console.log("");
-    console.log(`Service '${result.serviceName}' redeployed on openclaw ref ${result.openclawRef}.`);
+    console.log(
+      result.changed
+        ? `Service '${result.serviceName}' redeployed on openclaw ref ${result.openclawRef}.`
+        : `Service '${result.serviceName}' was already on openclaw ref ${result.openclawRef}; nothing redeployed.`
+    );
     return;
   }
 
@@ -136,6 +144,10 @@ export function parseUpdateRefArgs(args: string[]): UpdateClientTemplateRefOptio
         options.templateRef = requireValue(arg, value);
         index += 1;
         break;
+      case "--expected-current-ref":
+        options.expectedCurrentRef = requireValue(arg, value);
+        index += 1;
+        break;
       case "--poll-seconds":
         options.pollSeconds = parseIntegerFlag(arg, value);
         index += 1;
@@ -155,6 +167,12 @@ export function parseUpdateRefArgs(args: string[]): UpdateClientTemplateRefOptio
   if (!options.templateRef) {
     throw new Error("Missing required --template-ref");
   }
+  if (!options.expectedCurrentRef) {
+    throw new Error(
+      "Missing required --expected-current-ref. State the ref you believe is currently set; " +
+        "the update aborts if it does not match, so a concurrent change cannot be silently overwritten."
+    );
+  }
 
   return options as UpdateClientTemplateRefOptions;
 }
@@ -167,6 +185,10 @@ export function parseUpdateOpenClawRefArgs(args: string[]): UpdateClientOpenClaw
     switch (arg) {
       case "--service":
         options.service = requireValue(arg, value);
+        index += 1;
+        break;
+      case "--expected-current-ref":
+        options.expectedCurrentRef = requireValue(arg, value);
         index += 1;
         break;
       case "--openclaw-ref":
@@ -191,6 +213,12 @@ export function parseUpdateOpenClawRefArgs(args: string[]): UpdateClientOpenClaw
   }
   if (!options.openclawRef) {
     throw new Error("Missing required --openclaw-ref");
+  }
+  if (!options.expectedCurrentRef) {
+    throw new Error(
+      "Missing required --expected-current-ref. State the ref you believe is currently set; " +
+        "the update aborts if it does not match, so a concurrent change cannot be silently overwritten."
+    );
   }
 
   return options as UpdateClientOpenClawRefOptions;
