@@ -20,6 +20,7 @@ import { approveOwnDevicePairing } from "./approve-own-device.js";
 import {
   createSecret,
   ensureDomainPort,
+  findTemplateService,
   listDomains,
   listServices,
   mergeEnv,
@@ -285,6 +286,13 @@ export async function provisionClientInstance(
   return { ...resultBase, wroteEnvLocal, wroteHandoff };
 }
 
+/**
+ * Expected-current-ref value meaning "I expect this variable to be unset".
+ * Needed because a freshly provisioned client has no application-ref
+ * variable until its first bump; see updateClientRefVariable.
+ */
+export const EXPECTED_REF_UNSET = "<unset>";
+
 export interface UpdateClientTemplateRefOptions {
   service: string;
   templateRef: string;
@@ -353,10 +361,27 @@ async function updateClientRefVariable(
 ): Promise<{ changed: boolean }> {
   const current = await readRailwayVariable(params.variableName, params.service, dependencies);
 
+  // A freshly provisioned client has no OPENCLAW_GIT_REF variable at all:
+  // provisionClientInstance writes the template ref and the runtime vars, but
+  // the application ref exists only as a Dockerfile build-time ARG default,
+  // never as a service variable. Refusing outright on "unset" would make the
+  // first application-version bump impossible on every client this package
+  // provisions. So "unset" is a legitimate expected state the caller can
+  // declare, rather than an error -- it just has to be declared, exactly like
+  // any other expected value.
   if (current === undefined) {
+    if (params.expectedCurrentRef !== EXPECTED_REF_UNSET) {
+      throw new Error(
+        `Refusing to update ${params.variableName} on '${params.service}': expected it to currently be ` +
+          `'${params.expectedCurrentRef}', but the variable is not set at all. If that is expected (a ` +
+          `freshly provisioned client has no ${params.variableName} until its first bump), pass ` +
+          `'${EXPECTED_REF_UNSET}' as the expected current ref.`
+      );
+    }
+  } else if (params.expectedCurrentRef === EXPECTED_REF_UNSET) {
     throw new Error(
-      `Service '${params.service}' has no ${params.variableName} variable set. This path updates an ` +
-        `already-provisioned service; provision it first rather than setting the ref here.`
+      `Refusing to update ${params.variableName} on '${params.service}': caller expected it to be unset, ` +
+        `but it is '${current}'. Re-read the current value and retry if the update is still intended.`
     );
   }
 
@@ -366,13 +391,16 @@ async function updateClientRefVariable(
     return { changed: false };
   }
 
-  if (current !== params.expectedCurrentRef) {
+  if (current !== undefined && current !== params.expectedCurrentRef) {
     throw new Error(
       `Refusing to update ${params.variableName} on '${params.service}': expected it to currently be ` +
         `'${params.expectedCurrentRef}', but it is '${current}'. Something else changed it. Re-read the ` +
         `current value and retry if the update is still intended.`
     );
   }
+
+  const priorDeploymentId = findTemplateService(await listServices(dependencies.runner), params.service)
+    ?.latestDeployment?.id;
 
   await writeRailwayVariable(
     { name: params.variableName, value: params.nextRef, service: params.service, skipDeploys: true },
@@ -389,7 +417,15 @@ async function updateClientRefVariable(
   // reads like nothing was touched.
   try {
     await dependencies.runner.run(["redeploy", "--service", params.service, "--yes", "--json"]);
-    await pollServiceUntilSuccess(params.service, params.pollSeconds, params.timeoutMinutes, dependencies);
+    // Pass the deployment observed before the redeploy so the poll cannot
+    // accept it as this redeploy's success (see pollServiceUntilSuccess).
+    await pollServiceUntilSuccess(
+      params.service,
+      params.pollSeconds,
+      params.timeoutMinutes,
+      dependencies,
+      priorDeploymentId
+    );
 
     const setupPassword = await readRailwayVariable("SETUP_PASSWORD", params.service, dependencies);
     if (!setupPassword) {

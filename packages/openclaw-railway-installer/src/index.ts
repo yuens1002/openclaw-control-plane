@@ -306,7 +306,7 @@ function resolveOptions(options: InstallerOptions): RequiredOptions {
   };
 }
 
-function findTemplateService(services: InstallerService[], serviceName: string): InstallerService | undefined {
+export function findTemplateService(services: InstallerService[], serviceName: string): InstallerService | undefined {
   return services.find((service) => service.name === serviceName);
 }
 
@@ -322,7 +322,18 @@ export async function pollServiceUntilSuccess(
   serviceName: string,
   pollSeconds: number,
   timeoutMinutes: number,
-  dependencies: InstallerDependencies
+  dependencies: InstallerDependencies,
+  /**
+   * Deployment id observed *before* triggering a new deployment. When given,
+   * a latest-deployment still reporting this id is treated as the platform
+   * not having rolled over yet, and polling continues.
+   *
+   * Without it this function accepts any SUCCESS as "done", which on a
+   * redeploy can match the deployment that was already there -- returning
+   * before the new build has been observed at all, so a readiness check
+   * afterwards can pass against the instance that is being replaced.
+   */
+  supersedesDeploymentId?: string
 ): Promise<InstallerService> {
   const deadline = Date.now() + timeoutMinutes * 60_000;
   do {
@@ -333,8 +344,15 @@ export async function pollServiceUntilSuccess(
     }
 
     const status = service.latestDeployment?.status;
-    if (status === "SUCCESS") {
+    const isSuperseded =
+      supersedesDeploymentId !== undefined && service.latestDeployment?.id === supersedesDeploymentId;
+    if (status === "SUCCESS" && !isSuperseded) {
       return service;
+    }
+    if (isSuperseded) {
+      // Still showing the pre-redeploy deployment; the new one has not
+      // surfaced yet. Keep waiting rather than accepting the old success.
+      continue;
     }
     if (status && terminalFailureStatuses.has(status)) {
       throw new Error(

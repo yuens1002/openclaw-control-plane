@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { updateClientOpenClawRef } from "@openclaw-control-plane/openclaw-railway-installer/provision-client";
+import {
+  EXPECTED_REF_UNSET,
+  updateClientOpenClawRef
+} from "@openclaw-control-plane/openclaw-railway-installer/provision-client";
 import { FakeRailwayRunner } from "./fixtures/fake-railway-runner.js";
 
 const SERVICE = "acme-openclaw";
@@ -8,8 +11,14 @@ const OLD_REF = "v2026.6.0-1";
 const NEW_REF = "v2026.7.1-2";
 
 function runnerWith(vars: Record<string, string>) {
+  // Two service-list responses, in order: the pre-redeploy read that captures
+  // the current deployment id, then the post-redeploy poll. They must differ,
+  // because the poll now refuses to accept the pre-redeploy deployment as
+  // this redeploy's success -- a fake that reports one unchanging id would
+  // model a platform that never rolls over.
   const runner = new FakeRailwayRunner([
-    [{ id: "svc_acme", name: SERVICE, latestDeployment: { id: "dep_new", status: "SUCCESS" } }]
+    [{ id: "svc_acme", name: SERVICE, latestDeployment: { id: "dep_before", status: "SUCCESS" } }],
+    [{ id: "svc_acme", name: SERVICE, latestDeployment: { id: "dep_after", status: "SUCCESS" } }]
   ]);
   runner.setVariableListResponse(vars);
   return runner;
@@ -85,7 +94,7 @@ describe("updateClientOpenClawRef", () => {
     expect(mutating(runner)).toHaveLength(0);
   });
 
-  it("refuses when the variable is not set at all, rather than treating it as a first write", async () => {
+  it("refuses when the variable is unset but the caller expected a concrete ref", async () => {
     const runner = runnerWith({ SETUP_PASSWORD: "setup-secret" });
 
     await expect(
@@ -93,7 +102,34 @@ describe("updateClientOpenClawRef", () => {
         { service: SERVICE, openclawRef: NEW_REF, expectedCurrentRef: OLD_REF, pollSeconds: 0 },
         { runner, ...READY }
       )
-    ).rejects.toThrow(/has no OPENCLAW_GIT_REF variable set/);
+    ).rejects.toThrow(/the variable is not set at all/);
+    expect(mutating(runner)).toHaveLength(0);
+  });
+
+  it("bootstraps a client that has no OPENCLAW_GIT_REF yet when the caller declares it unset", async () => {
+    // provisionClientInstance never writes this variable, so every freshly
+    // provisioned client starts here. Refusing outright would make the first
+    // version bump impossible.
+    const runner = runnerWith({ SETUP_PASSWORD: "setup-secret" });
+
+    const result = await updateClientOpenClawRef(
+      { service: SERVICE, openclawRef: NEW_REF, expectedCurrentRef: EXPECTED_REF_UNSET, pollSeconds: 0 },
+      { runner, ...READY }
+    );
+
+    expect(result.changed).toBe(true);
+    expect(mutating(runner)).toHaveLength(2);
+  });
+
+  it("refuses when the caller declared it unset but it actually has a value", async () => {
+    const runner = runnerWith({ OPENCLAW_GIT_REF: OLD_REF, SETUP_PASSWORD: "setup-secret" });
+
+    await expect(
+      updateClientOpenClawRef(
+        { service: SERVICE, openclawRef: NEW_REF, expectedCurrentRef: EXPECTED_REF_UNSET, pollSeconds: 0 },
+        { runner, ...READY }
+      )
+    ).rejects.toThrow(/caller expected it to be unset/);
     expect(mutating(runner)).toHaveLength(0);
   });
 

@@ -161,6 +161,15 @@ setup username; the readiness check authenticates with it, and would
 otherwise fail until timeout against a service that does not use the
 default.
 
+For a client's **first** OpenClaw version bump, pass `-ExpectedCurrentRef
+'<unset>'`. Provisioning writes `OPENCLAW_TEMPLATE_REF` but not
+`OPENCLAW_GIT_REF` — the application ref exists only as a Dockerfile
+build-time default until the first bump sets it as a service variable — so
+a freshly provisioned client genuinely has no current value to state. The
+sentinel makes that an explicit declaration rather than a silent special
+case: passing it against a service that *does* have a value is refused,
+just like any other mismatch.
+
 `OPENCLAW_TEMPLATE_REF` is a **different** pin from `OPENCLAW_GIT_REF`: the
 template ref is the Railway wrapper/scaffold (`vignesh07/clawdbot-railway-template`)
 that serves `/setup` and proxies to OpenClaw; `OPENCLAW_GIT_REF` is the

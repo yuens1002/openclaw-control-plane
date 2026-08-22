@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { updateClientTemplateRef } from "@openclaw-control-plane/openclaw-railway-installer/provision-client";
+import {
+  EXPECTED_REF_UNSET,
+  updateClientTemplateRef
+} from "@openclaw-control-plane/openclaw-railway-installer/provision-client";
 import { FakeRailwayRunner } from "./fixtures/fake-railway-runner.js";
 
 const SERVICE = "acme-openclaw";
@@ -8,8 +11,14 @@ const OLD_REF = "b9e2467189d02dfe51a80173c40bad650a58eaf2";
 const NEW_REF = "c1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4";
 
 function runnerWith(vars: Record<string, string>) {
+  // Two service-list responses, in order: the pre-redeploy read that captures
+  // the current deployment id, then the post-redeploy poll. They must differ,
+  // because the poll now refuses to accept the pre-redeploy deployment as
+  // this redeploy's success -- a fake that reports one unchanging id would
+  // model a platform that never rolls over.
   const runner = new FakeRailwayRunner([
-    [{ id: "svc_acme", name: SERVICE, latestDeployment: { id: "dep_new", status: "SUCCESS" } }]
+    [{ id: "svc_acme", name: SERVICE, latestDeployment: { id: "dep_before", status: "SUCCESS" } }],
+    [{ id: "svc_acme", name: SERVICE, latestDeployment: { id: "dep_after", status: "SUCCESS" } }]
   ]);
   runner.setVariableListResponse(vars);
   return runner;
@@ -85,7 +94,7 @@ describe("updateClientTemplateRef", () => {
     expect(mutating(runner)).toHaveLength(0);
   });
 
-  it("refuses when the variable is not set at all, rather than treating it as a first write", async () => {
+  it("refuses when the variable is unset but the caller expected a concrete ref", async () => {
     const runner = runnerWith({ SETUP_PASSWORD: "setup-secret" });
 
     await expect(
@@ -93,7 +102,34 @@ describe("updateClientTemplateRef", () => {
         { service: SERVICE, templateRef: NEW_REF, expectedCurrentRef: OLD_REF, pollSeconds: 0 },
         { runner, ...READY }
       )
-    ).rejects.toThrow(/has no OPENCLAW_TEMPLATE_REF variable set/);
+    ).rejects.toThrow(/the variable is not set at all/);
+    expect(mutating(runner)).toHaveLength(0);
+  });
+
+  it("bootstraps a client that has no OPENCLAW_TEMPLATE_REF yet when the caller declares it unset", async () => {
+    // provisionClientInstance never writes this variable, so every freshly
+    // provisioned client starts here. Refusing outright would make the first
+    // version bump impossible.
+    const runner = runnerWith({ SETUP_PASSWORD: "setup-secret" });
+
+    const result = await updateClientTemplateRef(
+      { service: SERVICE, templateRef: NEW_REF, expectedCurrentRef: EXPECTED_REF_UNSET, pollSeconds: 0 },
+      { runner, ...READY }
+    );
+
+    expect(result.changed).toBe(true);
+    expect(mutating(runner)).toHaveLength(2);
+  });
+
+  it("refuses when the caller declared it unset but it actually has a value", async () => {
+    const runner = runnerWith({ OPENCLAW_TEMPLATE_REF: OLD_REF, SETUP_PASSWORD: "setup-secret" });
+
+    await expect(
+      updateClientTemplateRef(
+        { service: SERVICE, templateRef: NEW_REF, expectedCurrentRef: EXPECTED_REF_UNSET, pollSeconds: 0 },
+        { runner, ...READY }
+      )
+    ).rejects.toThrow(/caller expected it to be unset/);
     expect(mutating(runner)).toHaveLength(0);
   });
 
