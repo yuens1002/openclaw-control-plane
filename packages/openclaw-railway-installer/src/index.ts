@@ -359,10 +359,23 @@ export async function pollServiceUntilSuccess(
       continue;
     }
     if (status && terminalFailureStatuses.has(status)) {
-      throw new Error(
-        `Deployment ended in terminal state '${status}'. ` +
-          `Check logs with: railway logs --service ${serviceName} --lines 200`
-      );
+      // In guarded mode the same id check applies to failures, not just to
+      // successes. A client that was already in a terminal state when the
+      // redeploy was triggered would otherwise fail here on the *old*
+      // deployment before the new one ever appears -- which would make it
+      // impossible to recover a broken client by updating its ref, exactly
+      // the case an operator is most likely to be in.
+      const observedId = service.latestDeployment?.id;
+      const isPriorDeployment =
+        supersedesDeploymentId !== undefined &&
+        (observedId === undefined || observedId === supersedesDeploymentId);
+      if (!isPriorDeployment) {
+        throw new Error(
+          `Deployment ended in terminal state '${status}'. ` +
+            `Check logs with: railway logs --service ${serviceName} --lines 200`
+        );
+      }
+      continue;
     }
   } while (Date.now() < deadline);
 

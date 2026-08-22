@@ -113,6 +113,44 @@ describe("updateClientOpenClawRef", () => {
     expect(mutating(runner).some((c) => c.args[0] === "redeploy")).toBe(true);
   });
 
+  it("the documented recovery invocation succeeds: force plus the already-written ref as expected", async () => {
+    // Mirrors the README exactly. A previous attempt wrote NEW_REF and then
+    // failed, so the live value is already the target.
+    const runner = runnerWith({ OPENCLAW_GIT_REF: NEW_REF, SETUP_PASSWORD: "setup-secret" });
+
+    const result = await updateClientOpenClawRef(
+      {
+        service: SERVICE,
+        openclawRef: NEW_REF,
+        expectedCurrentRef: NEW_REF,
+        forceRedeploy: true,
+        pollSeconds: 0
+      },
+      { runner, ...READY }
+    );
+
+    expect(result.changed).toBe(true);
+  });
+
+  it("force does not disable the expected-ref check", async () => {
+    // Passing the pre-failure value with force must still be refused -- the
+    // variable now holds the target, so that expectation is simply false.
+    const runner = runnerWith({ OPENCLAW_GIT_REF: NEW_REF, SETUP_PASSWORD: "setup-secret" });
+
+    await expect(
+      updateClientOpenClawRef(
+        {
+          service: SERVICE,
+          openclawRef: NEW_REF,
+          expectedCurrentRef: OLD_REF,
+          forceRedeploy: true,
+          pollSeconds: 0
+        },
+        { runner, ...READY }
+      )
+    ).rejects.toThrow(/expected it to currently be/);
+  });
+
   it("refuses to overwrite when the current ref is not what the caller expected", async () => {
     const runner = runnerWith({ OPENCLAW_GIT_REF: "v-something-else", SETUP_PASSWORD: "setup-secret" });
 

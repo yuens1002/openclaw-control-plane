@@ -174,8 +174,21 @@ If an update fails *after* the variable was written — the error says the ref
 "WAS updated" but the instance is not confirmed healthy — a plain retry will
 not fix it. The variable already matches, so there is nothing to change, and
 the update declines to report that as success while the instance is
-unhealthy. Re-run with `-ForceRedeploy` to redeploy the already-written ref
-and re-verify.
+unhealthy.
+
+To recover, re-run with **both** `-ForceRedeploy` **and** `-ExpectedCurrentRef`
+set to the ref that was already written (the target, not the value it held
+before the failed attempt):
+
+```powershell
+.\deploy\openclaw-railway\update-client-openclaw-ref.ps1 -Service acme-openclaw `
+  -OpenClawRef v2026.7.1-2 -ExpectedCurrentRef v2026.7.1-2 -ForceRedeploy
+```
+
+Passing the *old* value on that retry fails, and correctly so: the variable
+now holds the target, so claiming to expect the old one is a false statement
+about live state. `-ForceRedeploy` only bypasses the already-up-to-date
+short-circuit; it does not disable the expected-ref check.
 
 `OPENCLAW_TEMPLATE_REF` is a **different** pin from `OPENCLAW_GIT_REF`: the
 template ref is the Railway wrapper/scaffold (`vignesh07/clawdbot-railway-template`)
