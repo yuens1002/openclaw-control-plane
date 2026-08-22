@@ -399,8 +399,20 @@ async function updateClientRefVariable(
     );
   }
 
+  // Captured before the write so the post-redeploy poll can reject the
+  // deployment that was already there. If it is unavailable the guard cannot
+  // work at all, and silently continuing would fall back to accepting the
+  // first SUCCESS seen -- possibly the pre-redeploy one, which is the race
+  // this exists to close. Refuse now, while nothing has been changed yet.
   const priorDeploymentId = findTemplateService(await listServices(dependencies.runner), params.service)
     ?.latestDeployment?.id;
+  if (priorDeploymentId === undefined) {
+    throw new Error(
+      `Refusing to update ${params.variableName} on '${params.service}': its current deployment id could not ` +
+        `be read, so a redeploy could not be distinguished from the deployment already running. Nothing has ` +
+        `been changed. Confirm the service exists and has a deployment, then retry.`
+    );
+  }
 
   await writeRailwayVariable(
     { name: params.variableName, value: params.nextRef, service: params.service, skipDeploys: true },
@@ -445,6 +457,18 @@ async function updateClientRefVariable(
       params.timeoutMinutes,
       dependencies
     );
+
+    // Post-write verification, the second half the protocol's own
+    // idempotent-write rule requires. A healthy instance is not proof it is
+    // healthy on the ref that was asked for: the write could have been
+    // accepted and not applied, or another writer could have replaced it in
+    // the meantime, and readiness would still answer 200 either way.
+    const applied = await readRailwayVariable(params.variableName, params.service, dependencies);
+    if (applied !== params.nextRef) {
+      throw new Error(
+        `readiness passed but ${params.variableName} reads back as '${applied ?? "unset"}', not '${params.nextRef}'`
+      );
+    }
   } catch (cause) {
     throw new Error(
       `${params.variableName} on '${params.service}' WAS updated to '${params.nextRef}', but the instance is ` +

@@ -150,6 +150,42 @@ describe("updateClientTemplateRef", () => {
     expect(mutating(runner)).toHaveLength(2);
   });
 
+  it("refuses before writing when the current deployment id cannot be read", async () => {
+    // Without it the poll cannot tell this redeploy apart from the one
+    // already running, so it would accept the old deployment's success.
+    const runner = new FakeRailwayRunner([[{ id: "svc_acme", name: SERVICE }]]);
+    runner.setVariableListResponse({ OPENCLAW_TEMPLATE_REF: OLD_REF, SETUP_PASSWORD: "setup-secret" });
+
+    await expect(
+      updateClientTemplateRef(
+        { service: SERVICE, templateRef: NEW_REF, expectedCurrentRef: OLD_REF, pollSeconds: 0 },
+        { runner, ...READY }
+      )
+    ).rejects.toThrow(/current deployment id could not be read/);
+    // Crucially: nothing was changed before refusing.
+    expect(mutating(runner)).toHaveLength(0);
+  });
+
+  it("fails when readiness passes but the ref did not actually land", async () => {
+    const runner = runnerWith({ OPENCLAW_TEMPLATE_REF: OLD_REF, SETUP_PASSWORD: "setup-secret" });
+    const inner = runner.run.bind(runner);
+    // Accept the write, but never let it take effect -- a healthy instance
+    // running the wrong ref must not be reported as a successful update.
+    runner.run = async (args: string[], stdin?: string) => {
+      if (args[0] === "variable" && args[1] === "set") {
+        return { stdout: "[]" };
+      }
+      return inner(args, stdin);
+    };
+
+    await expect(
+      updateClientTemplateRef(
+        { service: SERVICE, templateRef: NEW_REF, expectedCurrentRef: OLD_REF, pollSeconds: 0 },
+        { runner, ...READY }
+      )
+    ).rejects.toThrow(/reads back as '.*', not '.*'/);
+  });
+
   it("still reports the change as live when the redeploy itself fails", async () => {
     const runner = runnerWith({ OPENCLAW_TEMPLATE_REF: OLD_REF, SETUP_PASSWORD: "setup-secret" });
     const inner = runner.run.bind(runner);
