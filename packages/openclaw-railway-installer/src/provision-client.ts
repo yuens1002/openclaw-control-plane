@@ -314,6 +314,14 @@ export interface UpdateClientTemplateRefResult {
   templateRef: string;
   /** False when the service was already at this ref and nothing was redeployed. */
   changed: boolean;
+  /**
+   * True only when this call observed a new deployment reach SUCCESS and then
+   * answer authenticated requests. False on the no-op path: the variable
+   * matching plus a healthy instance does not prove the *running build* was
+   * made from this ref, and nothing reachable here exposes that. Callers must
+   * not report "this ref is running" on a false value.
+   */
+  refRunningVerified: boolean;
 }
 
 // LIVE-INSTANCE TIER: restart-or-redeploy-triggering
@@ -414,7 +422,7 @@ async function updateClientRefVariable(
     timeoutMinutes: number;
   },
   dependencies: InstallerDependencies
-): Promise<{ changed: boolean }> {
+): Promise<{ changed: boolean; refRunningVerified: boolean }> {
   const current = await readRailwayVariable(params.variableName, params.service, dependencies);
 
   // A freshly provisioned client has no OPENCLAW_GIT_REF variable at all:
@@ -470,7 +478,7 @@ async function updateClientRefVariable(
     // made -- if you need certainty after a failed attempt, use forceRedeploy
     // and let the deployment-rollover guard prove a new deployment landed.
     await assertInstanceReady(params, dependencies, `${params.variableName} already reads as '${params.nextRef}'`);
-    return { changed: false };
+    return { changed: false, refRunningVerified: false };
   }
 
   if (current !== undefined && current !== params.expectedCurrentRef) {
@@ -543,7 +551,7 @@ async function updateClientRefVariable(
     );
   }
 
-  return { changed: true };
+  return { changed: true, refRunningVerified: true };
 }
 
 /**
@@ -556,7 +564,7 @@ export async function updateClientTemplateRef(
   options: UpdateClientTemplateRefOptions,
   dependencies: InstallerDependencies
 ): Promise<UpdateClientTemplateRefResult> {
-  const { changed } = await updateClientRefVariable(
+  const { changed, refRunningVerified } = await updateClientRefVariable(
     {
       service: options.service,
       variableName: "OPENCLAW_TEMPLATE_REF",
@@ -570,7 +578,7 @@ export async function updateClientTemplateRef(
     dependencies
   );
 
-  return { serviceName: options.service, templateRef: options.templateRef, changed };
+  return { serviceName: options.service, templateRef: options.templateRef, changed, refRunningVerified };
 }
 
 export interface UpdateClientOpenClawRefOptions {
@@ -594,6 +602,14 @@ export interface UpdateClientOpenClawRefResult {
   openclawRef: string;
   /** False when the service was already at this ref and nothing was redeployed. */
   changed: boolean;
+  /**
+   * True only when this call observed a new deployment reach SUCCESS and then
+   * answer authenticated requests. False on the no-op path: the variable
+   * matching plus a healthy instance does not prove the *running build* was
+   * made from this ref, and nothing reachable here exposes that. Callers must
+   * not report "this ref is running" on a false value.
+   */
+  refRunningVerified: boolean;
 }
 
 /**
@@ -609,7 +625,7 @@ export async function updateClientOpenClawRef(
   options: UpdateClientOpenClawRefOptions,
   dependencies: InstallerDependencies
 ): Promise<UpdateClientOpenClawRefResult> {
-  const { changed } = await updateClientRefVariable(
+  const { changed, refRunningVerified } = await updateClientRefVariable(
     {
       service: options.service,
       variableName: "OPENCLAW_GIT_REF",
@@ -623,7 +639,7 @@ export async function updateClientOpenClawRef(
     dependencies
   );
 
-  return { serviceName: options.service, openclawRef: options.openclawRef, changed };
+  return { serviceName: options.service, openclawRef: options.openclawRef, changed, refRunningVerified };
 }
 
 async function resolveProvisionOptions(
@@ -761,9 +777,11 @@ control-plane's main.
 
 The expected-current-ref argument is required: the update reads the live
 value first and refuses if it is not what you said, so a client cannot be
-redeployed by someone working from a stale assumption. This service was
-provisioned on template ref ${result.templateRef}, so that is the expected
-current value for its first wrapper-version bump.
+redeployed by someone working from a stale assumption. Read the service's
+current OPENCLAW_TEMPLATE_REF before bumping it rather than assuming the ref
+recorded here -- on a rerun that reused an existing service, the live value
+can differ from this document's, and a stale expectation is refused by
+design.
 
 The application ref (OPENCLAW_GIT_REF) is a separate pin and is not set as a
 service variable at provisioning time — it exists only as a build-time

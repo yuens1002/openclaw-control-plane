@@ -52,7 +52,14 @@ describe("updateClientOpenClawRef", () => {
       { runner, ...READY }
     );
 
-    expect(result).toEqual({ serviceName: SERVICE, openclawRef: NEW_REF, changed: true });
+    expect(result).toEqual({
+      serviceName: SERVICE,
+      openclawRef: NEW_REF,
+      changed: true,
+      // A new deployment was observed reaching SUCCESS and then serving,
+      // so this call can honestly claim the ref is running.
+      refRunningVerified: true
+    });
 
     const calls = mutating(runner);
     expect(calls).toHaveLength(2);
@@ -88,6 +95,9 @@ describe("updateClientOpenClawRef", () => {
 
     // A redeploy is live downtime; a no-op must not buy one.
     expect(result.changed).toBe(false);
+    // ...but it must also not claim the running build is on this ref, which
+    // it has no way to observe.
+    expect(result.refRunningVerified).toBe(false);
     expect(mutating(runner)).toHaveLength(0);
   });
 

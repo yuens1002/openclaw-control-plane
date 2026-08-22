@@ -44,7 +44,9 @@ async function main(): Promise<void> {
     console.log(
       result.changed
         ? `Service '${result.serviceName}' redeployed on template ref ${result.templateRef}.`
-        : `Service '${result.serviceName}' was already on template ref ${result.templateRef}; nothing redeployed.`
+        : `Service '${result.serviceName}' already has template ref ${result.templateRef} set and is answering requests; ` +
+            `nothing redeployed. The running build was not verified to be this ref -- if a previous attempt ` +
+            `failed after writing it, re-run with --force-redeploy.`
     );
     return;
   }
@@ -56,7 +58,9 @@ async function main(): Promise<void> {
     console.log(
       result.changed
         ? `Service '${result.serviceName}' redeployed on openclaw ref ${result.openclawRef}.`
-        : `Service '${result.serviceName}' was already on openclaw ref ${result.openclawRef}; nothing redeployed.`
+        : `Service '${result.serviceName}' already has openclaw ref ${result.openclawRef} set and is answering requests; ` +
+            `nothing redeployed. The running build was not verified to be this ref -- if a previous attempt ` +
+            `failed after writing it, re-run with --force-redeploy.`
     );
     return;
   }
