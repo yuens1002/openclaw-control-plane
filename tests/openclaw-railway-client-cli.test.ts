@@ -88,15 +88,56 @@ describe("client-cli runCommand — real subprocess, no fake runner", () => {
 
 describe("client-cli update-ref arg parsing", () => {
   it("parses documented flags", () => {
-    expect(parseUpdateRefArgs(["--service", "acme-openclaw", "--template-ref", "def456"])).toEqual({
+    expect(
+      parseUpdateRefArgs([
+        "--service",
+        "acme-openclaw",
+        "--template-ref",
+        "def456",
+        "--expected-current-ref",
+        "abc123"
+      ])
+    ).toEqual({
       service: "acme-openclaw",
-      templateRef: "def456"
+      templateRef: "def456",
+      expectedCurrentRef: "abc123"
     });
   });
 
   it("requires --service and --template-ref", () => {
     expect(() => parseUpdateRefArgs(["--template-ref", "def456"])).toThrow("Missing required --service");
     expect(() => parseUpdateRefArgs(["--service", "acme-openclaw"])).toThrow("Missing required --template-ref");
+  });
+
+
+  it("parses --setup-username and --force-redeploy", () => {
+    // Library-level tests never touch the parser, so a missing case here
+    // would leave custom-auth clients and the documented recovery path
+    // unusable while every other test still passed.
+    expect(
+      parseUpdateRefArgs([
+        "--service",
+        "acme-openclaw",
+        "--template-ref",
+        "def456",
+        "--expected-current-ref",
+        "abc123",
+        "--setup-username",
+        "custom-admin",
+        "--force-redeploy"
+      ])
+    ).toEqual({
+      service: "acme-openclaw",
+      templateRef: "def456",
+      expectedCurrentRef: "abc123",
+      setupUsername: "custom-admin",
+      forceRedeploy: true
+    });
+  });
+  it("requires --expected-current-ref so an update cannot run without stating what it replaces", () => {
+    expect(() => parseUpdateRefArgs(["--service", "acme-openclaw", "--template-ref", "def456"])).toThrow(
+      "Missing required --expected-current-ref"
+    );
   });
 
   it("rejects unknown flags", () => {
@@ -108,10 +149,48 @@ describe("client-cli update-ref arg parsing", () => {
 
 describe("client-cli update-openclaw-ref arg parsing", () => {
   it("parses documented flags", () => {
-    expect(parseUpdateOpenClawRefArgs(["--service", "acme-openclaw", "--openclaw-ref", "v2026.7.1-2"])).toEqual({
+    expect(
+      parseUpdateOpenClawRefArgs([
+        "--service",
+        "acme-openclaw",
+        "--openclaw-ref",
+        "v2026.7.1-2",
+        "--expected-current-ref",
+        "v2026.6.0-1"
+      ])
+    ).toEqual({
       service: "acme-openclaw",
-      openclawRef: "v2026.7.1-2"
+      openclawRef: "v2026.7.1-2",
+      expectedCurrentRef: "v2026.6.0-1"
     });
+  });
+
+
+  it("parses --setup-username and --force-redeploy", () => {
+    expect(
+      parseUpdateOpenClawRefArgs([
+        "--service",
+        "acme-openclaw",
+        "--openclaw-ref",
+        "v2026.7.1-2",
+        "--expected-current-ref",
+        "v2026.6.0-1",
+        "--setup-username",
+        "custom-admin",
+        "--force-redeploy"
+      ])
+    ).toEqual({
+      service: "acme-openclaw",
+      openclawRef: "v2026.7.1-2",
+      expectedCurrentRef: "v2026.6.0-1",
+      setupUsername: "custom-admin",
+      forceRedeploy: true
+    });
+  });
+  it("requires --expected-current-ref so an update cannot run without stating what it replaces", () => {
+    expect(() =>
+      parseUpdateOpenClawRefArgs(["--service", "acme-openclaw", "--openclaw-ref", "v2026.7.1-2"])
+    ).toThrow("Missing required --expected-current-ref");
   });
 
   it("requires --service and --openclaw-ref", () => {

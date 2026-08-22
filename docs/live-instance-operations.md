@@ -124,8 +124,8 @@ an in-repo path that does not.
 | read | neither | Allowed ad hoc. Declare the target (§4) and proceed. | Exemplar: `packages/openclaw-setup-applier/src/apply-profile.ts`'s `waitForHealthy` polls `/setup/healthz`, which `packages/openclaw-railway-installer/src/index.ts` documents as unauthenticated — it sends no credential and returns none. Note the near miss: `setup-api-client.ts`'s `getStatus()` looks like this row but is **not** — every `/setup/api/*` route requires Basic auth, so it belongs to the `requires a secret` row below. Reads are not credential-free by default; check which endpoint is actually being called. |
 | read | **returns** a secret | Allowed only with an explicit acknowledgement that the output will contain secrets, and only when scoped to a named target. Never pipe the output into a log, a file, or a transcript. | Exemplar: `guard-cli.ts`'s `checkGuard` requires `--i-know-this-prints-secrets` before a variable listing runs, and never spawns the underlying CLI when the check fails. Counter-example: `packages/openclaw-railway-installer/src/railway-variables.ts`'s `listRailwayVariables`/`readRailwayVariable` reach the same CLI programmatically without that gate (gap G4, §7). |
 | read | **requires** a secret | Allowed **only** if the secret reaches the process by stdin or environment. Forbidden if it is interpolated into the argument string — §2.4, no exceptions. | Exemplar: `setup-api-client.ts`'s `createSetupApiClient` builds the auth header inside the process from a value never placed on a command line. Counter-example: the Manual Install block in `deploy/openclaw-railway/README.md` passes `SETUP_PASSWORD` as an inline `-v "NAME=VALUE"` argument. |
-| idempotent-write | any | Allowed through tested library code. Requires **both** halves: compare-then-write *and* post-write verification (§5). Ad hoc use is not permitted where a library path exists. | Exemplar (both halves): `packages/openclaw-setup-applier/src/apply-profile.ts`'s `applyProfile` skips the mutating call when its opening `getStatus()` already reports configured, then re-reads status after the write and throws if it did not take. Second exemplar: `patch-allowed-origins.ts`'s `patchAllowedOrigins` compares before writing, skipping the POST (and therefore a live gateway restart) when the origin is already present, then re-reads the config and throws if the origin is absent after the write reported success. |
-| unconditional-write | any | Not permitted ad hoc. In library code, requires an explicit stated reason why a pre-read comparison is impossible, plus post-write verification. Otherwise it must be converted to idempotent-write. | Counter-examples: `provision-client.ts`'s `updateClientTemplateRef` and `updateClientOpenClawRef` write the variable without reading the current value first; `import-workspace-files.ts`'s `importWorkspaceFiles` POSTs without a pre-read comparison (gaps G1 and G3, §7). Note on `importWorkspaceFiles`: the missing pre-read is why it appears here, but its **effective tier is the row below** — `docs/plans/workspace-identity-transport/ACs.md`'s AC-XPORT-003 states that calling the import endpoint stops the gateway as a side effect. That statement is second-hand in this repo: it is asserted in the AC's premise and is the stated reason the module never retries, but the independent upstream re-confirmation recorded in that plan attaches to AC-XPORT-005 (response shape), not to the gateway stop. Classified at the higher tier because over-classifying under unresolved provenance is the safe direction; the module's own marker carries the same word. |
+| idempotent-write | any | Allowed through tested library code. Requires **both** halves: compare-then-write *and* post-write verification (§5). Ad hoc use is not permitted where a library path exists. | Exemplar (both halves): `packages/openclaw-setup-applier/src/apply-profile.ts`'s `applyProfile` skips the mutating call when its opening `getStatus()` already reports configured, then re-reads status after the write and throws if it did not take. Second exemplar: `patch-allowed-origins.ts`'s `patchAllowedOrigins` compares before writing, skipping the POST (and therefore a live gateway restart) when the origin is already present, then re-reads the config and throws if the origin is absent after the write reported success. Also, **for the compare/post-write properties only, not for its tier**: `provision-client.ts`'s `updateClientTemplateRef` and `updateClientOpenClawRef` read the current ref, no-op without redeploying when it already matches, refuse a mismatch, and verify after writing. Those functions are classified `restart-or-redeploy-triggering` (per §2.1's take-the-highest-tier rule, since they redeploy), and that row's stricter procedure is the one that governs them -- they appear here only as an illustration of the two required halves (gap G1, §7). |
+| unconditional-write | any | Not permitted ad hoc. In library code, requires an explicit stated reason why a pre-read comparison is impossible, plus post-write verification. Otherwise it must be converted to idempotent-write. | Counter-example: `import-workspace-files.ts`'s `importWorkspaceFiles` POSTs without a pre-read comparison (gap G3, §7). Note on `importWorkspaceFiles`: the missing pre-read is why it appears here, but its **effective tier is the row below** — `docs/plans/workspace-identity-transport/ACs.md`'s AC-XPORT-003 states that calling the import endpoint stops the gateway as a side effect. That statement is second-hand in this repo: it is asserted in the AC's premise and is the stated reason the module never retries, but the independent upstream re-confirmation recorded in that plan attaches to AC-XPORT-005 (response shape), not to the gateway stop. Classified at the higher tier because over-classifying under unresolved provenance is the safe direction; the module's own marker carries the same word. |
 | restart-or-redeploy-triggering | any | Never ad hoc. Requires an explicit confirmation naming the target, and a post-change readiness check against the live target — not merely a "the write succeeded" result. | Exemplar: `railway-variables.ts`'s `WriteRailwayVariableOptions.skipDeploys` defaults to `--skip-deploys` and makes triggering a redeploy an opt-in the caller states deliberately. `applyProfile`'s `waitForHealthy` call waits for the instance to come back healthy after a redeploy-triggering write. Writing the raw-config endpoint belongs in this tier, not in plain-write: per `docs/plans/post-deploy-readiness/plan.md`'s Item 4 (recorded from the upstream wrapper's source, second-hand in this repo), a POST there restarts the gateway whenever the instance is already configured — which is why `patchAllowedOrigins` compares first and skips. |
 | destructive | any | **Forbidden.** Not gated, not confirmed — not available. A destructive capability with no caller should be deleted rather than fenced. | Worked example: `setup-api-client.ts` used to expose a `reset()` wrapping the setup API's config-delete endpoint, with zero production callers and no gate. It was deleted rather than fenced (gap G2, §7). The endpoint still exists on the instance; this repo no longer offers a way to reach it. |
 | deploy | any | **Forbidden ad hoc.** A deploy to a live target requires the full prod-state change procedure (§5): a written proposal, human approval naming the target, and post-deploy verification. Local working-tree state must never be the source. | `provisionClientInstance`'s `railway up` call performs the one-shot snapshot upload its module header describes. Nothing currently gates it (gap G9, §7 — this document is that gate). |
@@ -390,21 +390,39 @@ fix:* compare the document read during verification against what was
 written, and fail loudly on divergence rather than assuming this
 process was the only writer.
 
-**G1 — the client-ref update functions perform an unconditional
-variable write with a hardcoded auto-confirmed redeploy.**
-`provision-client.ts`'s `updateClientTemplateRef` and
-`updateClientOpenClawRef` write the ref variable without reading the
-current value first, then run a redeploy with the confirmation flag
-hardcoded. A call that sets the same value the
-service already has still redeploys a healthy live service. They *do*
-poll for platform deployment success afterwards
-(`pollServiceUntilSuccess`), but not for auth-gated application
-readiness the way the provisioning path does via `waitForSetupReady`.
-*Recommended fix:* read the current variable first and return a no-op
-result when it already matches (the compare-then-write shape
-`patchAllowedOrigins` already uses); require an explicit
-confirmation naming the target service rather than hardcoding it; and
-add the auth-gated readiness poll after the redeploy.
+**G1 — CLOSED.** The client-ref update functions performed an
+unconditional variable write with a hardcoded auto-confirmed redeploy,
+and afterwards checked only platform deployment success, not whether the
+instance actually served authenticated requests.
+
+Closed by converting both `provision-client.ts` update paths to
+compare-and-swap. They read the current ref first and return a no-op
+without redeploying when it already matches -- a redeploy is live
+downtime, so a same-value call must not buy one. They require the caller
+to state the ref it believes is currently set and refuse on mismatch,
+which is the confirmation this tier requires: the operator has to know
+what they are replacing.
+
+That check is **not** an atomic compare-and-swap, and this entry does not
+claim concurrency safety. The read and the write are separate calls, so
+two invocations can both read the same value, both pass the check, and
+both write -- last one wins. What it reliably catches is drift that
+already existed at read time, which is the common case. Genuine
+serialization would need a provider-side conditional write (the Railway
+CLI exposes none) or a lock shared by every writer; that remains open,
+alongside the same unresolved concurrency question on the CORS patch in
+G5. And they now wait on the
+auth-gated `/setup/api/status` after the redeploy -- the same signal the
+provisioning path uses -- because a container can report a finished
+deployment while not yet answering authenticated requests. That last part
+matters most for the application-version bump, which changes what the
+instance actually runs.
+
+The redeploy still passes its auto-confirm flag, deliberately:
+confirmation now happens at the function boundary via the expected-ref
+argument, so a second interactive prompt would only break
+non-interactive callers without adding a real check. This closes the
+*write* half only -- the service-scoping invariant remains prose (G6).
 
 **G3 — the workspace-file-import function does an unconditional POST
 with no pre-read comparison.** `import-workspace-files.ts`'s
