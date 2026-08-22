@@ -114,6 +114,24 @@ describe("updateClientTemplateRef", () => {
     expect(mutating(runner)).toHaveLength(2);
   });
 
+  it("still reports the change as live when the redeploy itself fails", async () => {
+    const runner = runnerWith({ OPENCLAW_TEMPLATE_REF: OLD_REF, SETUP_PASSWORD: "setup-secret" });
+    const inner = runner.run.bind(runner);
+    runner.run = async (args: string[], stdin?: string) => {
+      if (args[0] === "redeploy") {
+        throw new Error("railway exploded");
+      }
+      return inner(args, stdin);
+    };
+
+    await expect(
+      updateClientTemplateRef(
+        { service: SERVICE, templateRef: NEW_REF, expectedCurrentRef: OLD_REF, pollSeconds: 0 },
+        { runner, ...READY }
+      )
+    ).rejects.toThrow(/WAS updated to '.*', but the instance is not confirmed healthy.*railway exploded/s);
+  });
+
   it("reports the change but flags unverifiable readiness when the service has no SETUP_PASSWORD", async () => {
     const runner = runnerWith({ OPENCLAW_TEMPLATE_REF: OLD_REF });
 
@@ -122,6 +140,6 @@ describe("updateClientTemplateRef", () => {
         { service: SERVICE, templateRef: NEW_REF, expectedCurrentRef: OLD_REF, pollSeconds: 0 },
         { runner, ...READY }
       )
-    ).rejects.toThrow(/was updated to '.*' and redeployed, but readiness could not be verified/);
+    ).rejects.toThrow(/WAS updated to '.*', but the instance is not confirmed healthy/);
   });
 });

@@ -5,6 +5,7 @@ param(
   [string]$OpenClawRef,
   [Parameter(Mandatory = $true)]
   [string]$ExpectedCurrentRef,
+  [string]$SetupUsername,
   [int]$PollSeconds = 15,
   [int]$TimeoutMinutes = 25
 )
@@ -33,6 +34,10 @@ $argsList = @(
   "--timeout-minutes",
   "$TimeoutMinutes"
 )
+
+if ($SetupUsername) {
+  $argsList += @("--setup-username", $SetupUsername)
+}
 
 & $npm.Source @argsList
 if ($LASTEXITCODE -ne 0) {

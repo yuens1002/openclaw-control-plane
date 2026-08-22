@@ -148,6 +148,10 @@ export function parseUpdateRefArgs(args: string[]): UpdateClientTemplateRefOptio
         options.expectedCurrentRef = requireValue(arg, value);
         index += 1;
         break;
+      case "--setup-username":
+        options.setupUsername = requireValue(arg, value);
+        index += 1;
+        break;
       case "--poll-seconds":
         options.pollSeconds = parseIntegerFlag(arg, value);
         index += 1;
@@ -169,8 +173,9 @@ export function parseUpdateRefArgs(args: string[]): UpdateClientTemplateRefOptio
   }
   if (!options.expectedCurrentRef) {
     throw new Error(
-      "Missing required --expected-current-ref. State the ref you believe is currently set; " +
-        "the update aborts if it does not match, so a concurrent change cannot be silently overwritten."
+      "Missing required --expected-current-ref. State the ref you believe is currently set; the update " +
+        "reads the live value first and aborts if it does not match, so you cannot redeploy a client " +
+        "without knowing what you are replacing."
     );
   }
 
@@ -189,6 +194,10 @@ export function parseUpdateOpenClawRefArgs(args: string[]): UpdateClientOpenClaw
         break;
       case "--expected-current-ref":
         options.expectedCurrentRef = requireValue(arg, value);
+        index += 1;
+        break;
+      case "--setup-username":
+        options.setupUsername = requireValue(arg, value);
         index += 1;
         break;
       case "--openclaw-ref":
@@ -216,8 +225,9 @@ export function parseUpdateOpenClawRefArgs(args: string[]): UpdateClientOpenClaw
   }
   if (!options.expectedCurrentRef) {
     throw new Error(
-      "Missing required --expected-current-ref. State the ref you believe is currently set; " +
-        "the update aborts if it does not match, so a concurrent change cannot be silently overwritten."
+      "Missing required --expected-current-ref. State the ref you believe is currently set; the update " +
+        "reads the live value first and aborts if it does not match, so you cannot redeploy a client " +
+        "without knowing what you are replacing."
     );
   }
 

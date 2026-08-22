@@ -400,9 +400,18 @@ compare-and-swap. They read the current ref first and return a no-op
 without redeploying when it already matches -- a redeploy is live
 downtime, so a same-value call must not buy one. They require the caller
 to state the ref it believes is currently set and refuse on mismatch,
-which is simultaneously the confirmation this tier requires (the operator
-has to know what they are replacing) and protection against clobbering a
-change made in between by someone else. And they now wait on the
+which is the confirmation this tier requires: the operator has to know
+what they are replacing.
+
+That check is **not** an atomic compare-and-swap, and this entry does not
+claim concurrency safety. The read and the write are separate calls, so
+two invocations can both read the same value, both pass the check, and
+both write -- last one wins. What it reliably catches is drift that
+already existed at read time, which is the common case. Genuine
+serialization would need a provider-side conditional write (the Railway
+CLI exposes none) or a lock shared by every writer; that remains open,
+alongside the same unresolved concurrency question on the CORS patch in
+G5. And they now wait on the
 auth-gated `/setup/api/status` after the redeploy -- the same signal the
 provisioning path uses -- because a container can report a finished
 deployment while not yet answering authenticated requests. That last part

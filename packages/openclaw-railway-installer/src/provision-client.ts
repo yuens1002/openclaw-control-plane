@@ -315,10 +315,18 @@ export interface UpdateClientTemplateRefResult {
 //     service is left alone. Previously a same-value call still restarted
 //     a healthy instance for no benefit.
 //  2. The caller must state what it believes is currently set. A mismatch
-//     throws instead of overwriting. That is both the confirmation the
-//     restart tier requires -- the operator has to know what they are
-//     replacing -- and protection against clobbering a change made in
-//     between by someone else.
+//     throws instead of overwriting, which is the confirmation the restart
+//     tier requires: the operator has to know what they are replacing.
+//     This is NOT an atomic compare-and-swap and does not make concurrent
+//     updates safe. The read and the write are separate calls, so two
+//     invocations can both read the same current value, both pass this
+//     check, and both write -- last one wins. What it does catch is drift
+//     that already existed at read time (someone changed the ref earlier
+//     and the caller is working from a stale assumption), which is the
+//     common case. Real serialization would need a provider-side
+//     conditional write, which the Railway CLI does not expose, or a lock
+//     shared by every writer. Tracked as the still-open concurrency half
+//     of gap G1.
 //  3. Deployment SUCCESS is not treated as "the instance works". After the
 //     redeploy this waits on the auth-gated /setup/api/status, the same
 //     signal provisionClientInstance uses, because a container can report
@@ -370,37 +378,45 @@ async function updateClientRefVariable(
     { name: params.variableName, value: params.nextRef, service: params.service, skipDeploys: true },
     dependencies
   );
-  await dependencies.runner.run(["redeploy", "--service", params.service, "--yes", "--json"]);
-  await pollServiceUntilSuccess(params.service, params.pollSeconds, params.timeoutMinutes, dependencies);
 
-  // Past this point the ref HAS changed and the redeploy HAS happened, so
-  // every throw below describes a live instance that was modified but is
-  // not confirmed healthy. The messages have to say that explicitly.
-  const setupPassword = await readRailwayVariable("SETUP_PASSWORD", params.service, dependencies);
-  if (!setupPassword) {
+  // Everything from here on runs *after* the variable has already changed on
+  // the live service. Any failure below therefore leaves a modified,
+  // unverified instance -- a materially different situation from "the update
+  // did not happen". Every path out of here has to say which one it is, so
+  // the whole tail is wrapped rather than relying on each individual check
+  // to remember: a runner failure, a terminal deployment state, or a
+  // readiness timeout would otherwise surface as a bare platform error that
+  // reads like nothing was touched.
+  try {
+    await dependencies.runner.run(["redeploy", "--service", params.service, "--yes", "--json"]);
+    await pollServiceUntilSuccess(params.service, params.pollSeconds, params.timeoutMinutes, dependencies);
+
+    const setupPassword = await readRailwayVariable("SETUP_PASSWORD", params.service, dependencies);
+    if (!setupPassword) {
+      throw new Error("the service has no SETUP_PASSWORD to authenticate with");
+    }
+
+    const { domains } = await listDomains(params.service, dependencies.runner);
+    const domain = domains.find((candidate) => candidate.type === "service") ?? domains[0];
+    if (!domain) {
+      throw new Error("the service has no domain");
+    }
+
+    await waitForSetupReady(
+      `https://${domain.domain}/setup/api/status`,
+      { username: params.setupUsername ?? DEFAULT_SETUP_USERNAME, password: setupPassword },
+      params.pollSeconds,
+      params.timeoutMinutes,
+      dependencies
+    );
+  } catch (cause) {
     throw new Error(
-      `${params.variableName} on '${params.service}' was updated to '${params.nextRef}' and redeployed, but ` +
-        `readiness could not be verified: the service has no SETUP_PASSWORD to authenticate with. ` +
-        `Check the instance manually.`
+      `${params.variableName} on '${params.service}' WAS updated to '${params.nextRef}', but the instance is ` +
+        `not confirmed healthy afterwards: ${cause instanceof Error ? cause.message : String(cause)}. ` +
+        `The change is live and unverified -- check the instance before retrying.`,
+      { cause }
     );
   }
-
-  const { domains } = await listDomains(params.service, dependencies.runner);
-  const domain = domains.find((candidate) => candidate.type === "service") ?? domains[0];
-  if (!domain) {
-    throw new Error(
-      `${params.variableName} on '${params.service}' was updated to '${params.nextRef}' and redeployed, but ` +
-        `readiness could not be verified: the service has no domain. Check the instance manually.`
-    );
-  }
-
-  await waitForSetupReady(
-    `https://${domain.domain}/setup/api/status`,
-    { username: params.setupUsername ?? DEFAULT_SETUP_USERNAME, password: setupPassword },
-    params.pollSeconds,
-    params.timeoutMinutes,
-    dependencies
-  );
 
   return { changed: true };
 }
@@ -489,7 +505,7 @@ async function resolveProvisionOptions(
     ...(options.workspace ? { workspace: options.workspace } : {}),
     targetPort: options.targetPort ?? 8080,
     templateRef,
-    setupUsername: options.setupUsername ?? "openclaw-admin",
+    setupUsername: options.setupUsername ?? DEFAULT_SETUP_USERNAME,
     setupPassword: options.setupPassword ?? createSecret(24, "oc-"),
     gatewayToken: options.gatewayToken ?? createSecret(32),
     pollSeconds: options.pollSeconds ?? 15,

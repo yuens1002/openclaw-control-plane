@@ -149,10 +149,17 @@ believe the service is currently on: the update reads the live value first,
 does nothing at all when it already equals the ref you asked for (a redeploy
 is downtime, so a no-op must not cause one), and aborts without writing when
 the live value is neither the expected one nor the target. That makes it
-impossible to redeploy a client without knowing what you are replacing, and
-stops a concurrent change from being silently overwritten. After the
-redeploy both scripts wait for the instance to answer an *authenticated*
-request, not merely for the platform to report a finished deployment.
+impossible to redeploy a client without knowing what you are replacing. It
+is a read-then-write check, not an atomic compare-and-swap, so it catches
+drift that already existed rather than serialising two updates racing each
+other. After the redeploy both scripts wait for the instance to answer an
+*authenticated* request, not merely for the platform to report a finished
+deployment.
+
+Pass `-SetupUsername` if the client was provisioned with a non-default
+setup username; the readiness check authenticates with it, and would
+otherwise fail until timeout against a service that does not use the
+default.
 
 `OPENCLAW_TEMPLATE_REF` is a **different** pin from `OPENCLAW_GIT_REF`: the
 template ref is the Railway wrapper/scaffold (`vignesh07/clawdbot-railway-template`)
