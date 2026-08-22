@@ -26,9 +26,20 @@ function runnerWith(vars: Record<string, string>) {
 
 const READY = { sleep: async () => {}, checkSetupStatus: async () => 200 };
 
+// Counts calls that change live state. Only the exact read-only shapes are
+// excluded -- notably `domain list` rather than every `domain` command, so a
+// regression that mutated domain routing (`domain update`, domain generation)
+// still shows up in the "zero mutating calls" assertions instead of being
+// filtered away with the reads.
+const READ_ONLY_CALLS = [
+  ["service", "list"],
+  ["variable", "list"],
+  ["domain", "list"]
+];
+
 function mutating(runner: FakeRailwayRunner) {
   return runner.calls.filter(
-    (c) => !(c.args[0] === "service" && c.args[1] === "list") && !(c.args[0] === "variable" && c.args[1] === "list") && c.args[0] !== "domain"
+    (c) => !READ_ONLY_CALLS.some(([a, b]) => c.args[0] === a && c.args[1] === b)
   );
 }
 
@@ -149,6 +160,53 @@ describe("updateClientOpenClawRef", () => {
         { runner, ...READY }
       )
     ).rejects.toThrow(/expected it to currently be/);
+  });
+
+  it("recovers a client whose existing deployment is already in a terminal state", async () => {
+    // The guard must ignore a terminal status on the *pre-redeploy*
+    // deployment, or a broken client could never be fixed by bumping its ref.
+    const runner = new FakeRailwayRunner([
+      [{ id: "svc_acme", name: SERVICE, latestDeployment: { id: "dep_before", status: "CRASHED" } }],
+      [{ id: "svc_acme", name: SERVICE, latestDeployment: { id: "dep_after", status: "SUCCESS" } }]
+    ]);
+    runner.setVariableListResponse({ OPENCLAW_GIT_REF: OLD_REF, SETUP_PASSWORD: "setup-secret" });
+
+    const result = await updateClientOpenClawRef(
+      { service: SERVICE, openclawRef: NEW_REF, expectedCurrentRef: OLD_REF, pollSeconds: 0 },
+      { runner, ...READY }
+    );
+
+    expect(result.changed).toBe(true);
+  });
+
+  it("still surfaces a terminal failure on the new deployment", async () => {
+    // The recovery allowance must not swallow a genuine new-build failure.
+    const runner = new FakeRailwayRunner([
+      [{ id: "svc_acme", name: SERVICE, latestDeployment: { id: "dep_before", status: "SUCCESS" } }],
+      [{ id: "svc_acme", name: SERVICE, latestDeployment: { id: "dep_after", status: "CRASHED" } }]
+    ]);
+    runner.setVariableListResponse({ OPENCLAW_GIT_REF: OLD_REF, SETUP_PASSWORD: "setup-secret" });
+
+    await expect(
+      updateClientOpenClawRef(
+        { service: SERVICE, openclawRef: NEW_REF, expectedCurrentRef: OLD_REF, pollSeconds: 0 },
+        { runner, ...READY }
+      )
+    ).rejects.toThrow(/terminal state 'CRASHED'/);
+  });
+
+  it("refuses a no-op when the caller's expected ref is stale, even though the value already matches", async () => {
+    // Reaching the already-up-to-date branch with a wrong expectation must
+    // not report success -- the README's recovery guidance depends on this.
+    const runner = runnerWith({ OPENCLAW_GIT_REF: NEW_REF, SETUP_PASSWORD: "setup-secret" });
+
+    await expect(
+      updateClientOpenClawRef(
+        { service: SERVICE, openclawRef: NEW_REF, expectedCurrentRef: OLD_REF, pollSeconds: 0 },
+        { runner, ...READY }
+      )
+    ).rejects.toThrow(/already up to date.*caller expected/s);
+    expect(mutating(runner)).toHaveLength(0);
   });
 
   it("refuses to overwrite when the current ref is not what the caller expected", async () => {

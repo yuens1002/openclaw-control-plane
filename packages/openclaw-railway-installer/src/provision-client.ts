@@ -442,19 +442,33 @@ async function updateClientRefVariable(
   }
 
   if (current === params.nextRef && !params.forceRedeploy) {
-    // The variable already reads as the requested ref -- but the variable is
-    // written *before* the redeploy, and everything after that write can
-    // fail. So a matching variable is not proof the running deployment is on
-    // this ref: it is equally consistent with a previous attempt that wrote
-    // the value and then failed to redeploy or failed readiness.
+    // The caller still has to have been right about the current value. This
+    // check has to happen here rather than only below, because reaching this
+    // branch with a stale expected value would otherwise report a successful
+    // no-op for a caller whose belief about live state was wrong -- and would
+    // contradict the recovery guidance, which says passing the pre-failure
+    // ref is refused.
+    if (params.expectedCurrentRef !== params.nextRef) {
+      throw new Error(
+        `Refusing to treat ${params.variableName} on '${params.service}' as already up to date: it reads as ` +
+          `'${current}', but the caller expected '${params.expectedCurrentRef}'. If a previous attempt wrote ` +
+          `this ref and then failed, retry with the written ref as the expected value (and forceRedeploy to ` +
+          `redeploy it).`
+      );
+    }
+
+    // The variable already reads as the requested ref -- but it is written
+    // *before* the redeploy, and everything after that write can fail. So a
+    // matching variable is not proof the running deployment is on this ref.
     //
-    // Returning `changed: false` on that basis alone would report success for
-    // an instance that may still be running the old build, and would directly
-    // contradict the "live and unverified -- check the instance" error a
-    // failed attempt raises. So confirm the instance is actually healthy
-    // before calling this a no-op. This costs a readiness check, not a
-    // redeploy, so the common already-up-to-date case still causes no
-    // downtime.
+    // Confirm the instance is at least answering authenticated requests
+    // before calling this a no-op, so a wedged instance is never reported as
+    // success. Be precise about what that does and does not establish: it
+    // proves *a* deployment is serving, not that the serving deployment was
+    // built from this ref. Nothing reachable from here exposes the ref a
+    // running deployment was built from, so that stronger claim cannot be
+    // made -- if you need certainty after a failed attempt, use forceRedeploy
+    // and let the deployment-rollover guard prove a new deployment landed.
     await assertInstanceReady(params, dependencies, `${params.variableName} already reads as '${params.nextRef}'`);
     return { changed: false };
   }
@@ -741,8 +755,21 @@ ${result.projectId ? `- Project ID: ${result.projectId}\n` : ""}- Template ref: 
 
 ## Updating the wrapper version later
 
-Run the update-ref path with this service name and a new ref — it only
-touches this one service, never any other client or control-plane's main.
+Run the update-ref path with this service name, the new ref, and the ref it
+is replacing — it only touches this one service, never any other client or
+control-plane's main.
+
+The expected-current-ref argument is required: the update reads the live
+value first and refuses if it is not what you said, so a client cannot be
+redeployed by someone working from a stale assumption. This service was
+provisioned on template ref ${result.templateRef}, so that is the expected
+current value for its first wrapper-version bump.
+
+The application ref (OPENCLAW_GIT_REF) is a separate pin and is not set as a
+service variable at provisioning time — it exists only as a build-time
+default until its first bump. For that first bump only, pass '<unset>' as
+the expected current ref. See deploy/openclaw-railway/README.md for both
+commands and for the recovery path if an update fails after writing.
 
 ## Next Steps
 
