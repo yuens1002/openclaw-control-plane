@@ -398,17 +398,24 @@ async function assertInstanceReady(
   dependencies: InstallerDependencies,
   contextForFailure?: string
 ): Promise<void> {
-  // NOTE (widens gap G4, docs/live-instance-operations.md §7): this reads one
-  // named variable, but the only mechanism available is `railway variable
-  // list --json`, whose response carries *every* variable on the service --
-  // OPENCLAW_GATEWAY_TOKEN included -- through this process. That is the
-  // programmatic secret-read path G4 records as bypassing the
-  // acknowledgement guard that covers direct human CLI use. Suppressing
+  // NOTE (adds a caller to gap G4, docs/live-instance-operations.md §7).
+  //
+  // This wants one named variable, but no targeted read exists: `railway
+  // variable --help` offers only `list`, `set`, and `delete`, and `list`
+  // returns every variable on the service -- OPENCLAW_GATEWAY_TOKEN included
+  // -- through this process. Verified against the CLI, not assumed, so nobody
+  // spends time looking for a narrower call that is not there. Suppressing
   // stdout in the CLI stops terminal echo; it does not narrow what is read.
   //
-  // Recorded rather than quietly inherited: adding readiness verification
-  // here put a second caller on that path, which is an argument for closing
-  // G4 (a targeted, guarded secret-read boundary) sooner rather than later.
+  // Scope of the change: this is an additional caller on an existing path,
+  // not a new class of exposure -- `provisionClientInstance` already reads
+  // SETUP_PASSWORD and OPENCLAW_GATEWAY_TOKEN through the same helper. The
+  // remedies available are both out of scope here: a guarded read at the
+  // process-spawn boundary (G4 proper, which changes every call site's error
+  // handling), or an upstream CLI that can fetch one variable.
+  //
+  // Recorded rather than quietly inherited, and used to raise G4's priority
+  // in §7, because closing G1 is what added the second caller.
   const setupPassword = await readRailwayVariable("SETUP_PASSWORD", params.service, dependencies);
   if (!setupPassword) {
     throw new Error("the service has no SETUP_PASSWORD to authenticate with");
@@ -434,10 +441,14 @@ async function assertInstanceReady(
     }
     throw new Error(
       `${contextForFailure}, but the instance is not answering authenticated requests, so it cannot be ` +
-        `confirmed to be running it -- most likely a previous attempt wrote the ref and then failed before ` +
-        `the redeploy completed. Re-run with the force-redeploy option to redeploy it: --force-redeploy on the ` +
-        `CLI, -ForceRedeploy on the PowerShell wrappers, or forceRedeploy: true when calling this library ` +
-        `directly. Pass the already-written ref as the expected current ref on that retry.`,
+        `confirmed to be running it. Two different causes look identical here, and they need different ` +
+        `fixes. If this client uses a non-default setup username, the check may be authenticating as ` +
+        `'${params.setupUsername ?? DEFAULT_SETUP_USERNAME}' and getting a 401 -- re-run with the correct ` +
+        `setup username (--setup-username / -SetupUsername) before anything else, because redeploying will ` +
+        `not fix a credential mismatch and costs another restart. If the credentials are known good, the ` +
+        `likely cause is a previous attempt that wrote the ref and failed before its redeploy completed: ` +
+        `re-run with the force-redeploy option (--force-redeploy, -ForceRedeploy, or forceRedeploy: true), ` +
+        `passing the already-written ref as the expected current ref.`,
       { cause }
     );
   }
@@ -583,7 +594,20 @@ async function updateClientRefVariable(
     // healthy on the ref that was asked for: the write could have been
     // accepted and not applied, or another writer could have replaced it in
     // the meantime, and readiness would still answer 200 either way.
-    const applied = await readRailwayVariable(params.variableName, params.service, dependencies);
+    let applied: string | undefined;
+    try {
+      applied = await readRailwayVariable(params.variableName, params.service, dependencies);
+    } catch (cause) {
+      // Readiness already passed, so this is not an unhealthy instance -- it
+      // is a failed *verification read*. Reporting it as a health problem
+      // would send the operator to the wrong recovery.
+      throw new RefVerificationError(
+        `${params.variableName} on '${params.service}' was updated to '${params.nextRef}' and the instance is ` +
+          `answering authenticated requests, but reading the variable back to confirm it failed: ` +
+          `${cause instanceof Error ? cause.message : String(cause)}. The instance is healthy; the ref was not ` +
+          `confirmed. Re-read the live value to check.`
+      );
+    }
     if (applied !== params.nextRef) {
       throw new RefVerificationError(
         `${params.variableName} on '${params.service}' reads back as '${applied ?? "unset"}', not the requested ` +
