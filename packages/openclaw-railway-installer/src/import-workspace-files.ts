@@ -28,8 +28,8 @@ import * as tar from "tar";
 
 import { basicAuthHeader, type SetupAuth } from "./setup-auth.js";
 
-// Issue #20 (transport half only -- content ownership lives in the private
-// openClaw-CoT-agency-profile repo). Confirmed live against
+// Issue #20 (transport half only -- content ownership lives in a private
+// client-profile repo). Confirmed live against
 // vignesh07/clawdbot-railway-template@main's src/server.js: POST
 // /setup/import extracts a gzip'd tar into /data (cwd), does not delete
 // existing files first, and returns plain text -- not the {ok: boolean}

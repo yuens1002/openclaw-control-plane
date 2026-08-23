@@ -418,10 +418,7 @@ pre-flight declaration required before any ad hoc command -- lives in
 Note that the guard covers direct human CLI invocation only: the
 programmatic variable read/write helpers in
 `packages/openclaw-railway-installer/src/railway-variables.ts` do not pass
-through it. That gap (G4) was closed by narrowing its scope rather than
-building a shared guard -- see that document's §7 for why the
-programmatic path already meets this row's actual requirements a
-different way.
+through it (tracked as gap G4 in that document).
 
 ## Manual Install
 
