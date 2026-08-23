@@ -3,7 +3,7 @@
 Plan: `docs/plans/durable-runtime-state/plan.md`
 
 Evidence notation: `pass` means the acceptance-specific test named by the
-executable condition passed in the final 239-test run. `QC 3704a47` records the
+executable condition passed in the final 285-test run. `QC 3704a47` records the
 independent implementation review of that exact SHA. The Reviewer column stays
 open for pull-request review.
 

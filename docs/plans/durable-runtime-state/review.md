@@ -18,7 +18,7 @@ documentation change replaces with executed results.
 | PostgreSQL repository tests | Repository, bootstrap, migration, and compatibility-store suites passed against PostgreSQL 16 | pass |
 | API compatibility tests | Event validation, inserted/duplicate compatibility, denial, and fail-closed startup tests passed | pass |
 | Typecheck and build | `npm run typecheck` and `npm run build` completed successfully | pass |
-| Full regression suite | 35 test files and 239 tests passed with `TEST_DATABASE_URL` configured | pass |
+| Full regression suite | 35 test files and 285 tests passed with `TEST_DATABASE_URL` configured | pass |
 | Static and supply-chain checks | `git diff --check` passed; production dependency audit reported zero vulnerabilities after updating `ajv` to 8.20.0 | pass |
 | Public-boundary audit | Added code and docs use generic runtime, principal, operation, and `example.*` vocabulary with no private consumer dependency | pass |
 | Independent implementation review | Exact SHA `3704a47b003606b3fb4c8013b52ee0996046a70b`; prior replay, trust, and operation-version blockers resolved; no new code blockers | pass |
