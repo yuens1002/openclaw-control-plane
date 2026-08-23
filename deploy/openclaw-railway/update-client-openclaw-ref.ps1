@@ -3,6 +3,10 @@ param(
   [string]$Service,
   [Parameter(Mandatory = $true)]
   [string]$OpenClawRef,
+  [Parameter(Mandatory = $true)]
+  [string]$ExpectedCurrentRef,
+  [string]$SetupUsername,
+  [switch]$ForceRedeploy,
   [int]$PollSeconds = 15,
   [int]$TimeoutMinutes = 25
 )
@@ -24,11 +28,21 @@ $argsList = @(
   $Service,
   "--openclaw-ref",
   $OpenClawRef,
+  "--expected-current-ref",
+  $ExpectedCurrentRef,
   "--poll-seconds",
   "$PollSeconds",
   "--timeout-minutes",
   "$TimeoutMinutes"
 )
+
+if ($SetupUsername) {
+  $argsList += @("--setup-username", $SetupUsername)
+}
+
+if ($ForceRedeploy) {
+  $argsList += @("--force-redeploy")
+}
 
 & $npm.Source @argsList
 if ($LASTEXITCODE -ne 0) {

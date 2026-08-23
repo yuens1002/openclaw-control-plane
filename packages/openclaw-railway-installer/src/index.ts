@@ -297,7 +297,7 @@ function resolveOptions(options: InstallerOptions): RequiredOptions {
     pollSeconds: options.pollSeconds ?? 15,
     timeoutMinutes: options.timeoutMinutes ?? 25,
     forceNew: options.forceNew ?? false,
-    setupUsername: options.setupUsername ?? "openclaw-admin",
+    setupUsername: options.setupUsername ?? DEFAULT_SETUP_USERNAME,
     setupPassword: options.setupPassword ?? createSecret(24, "oc-"),
     gatewayToken: options.gatewayToken ?? createSecret(32),
     envLocalPath: options.envLocalPath ?? ".env.local",
@@ -306,7 +306,7 @@ function resolveOptions(options: InstallerOptions): RequiredOptions {
   };
 }
 
-function findTemplateService(services: InstallerService[], serviceName: string): InstallerService | undefined {
+export function findTemplateService(services: InstallerService[], serviceName: string): InstallerService | undefined {
   return services.find((service) => service.name === serviceName);
 }
 
@@ -322,7 +322,18 @@ export async function pollServiceUntilSuccess(
   serviceName: string,
   pollSeconds: number,
   timeoutMinutes: number,
-  dependencies: InstallerDependencies
+  dependencies: InstallerDependencies,
+  /**
+   * Deployment id observed *before* triggering a new deployment. When given,
+   * a latest-deployment still reporting this id is treated as the platform
+   * not having rolled over yet, and polling continues.
+   *
+   * Without it this function accepts any SUCCESS as "done", which on a
+   * redeploy can match the deployment that was already there -- returning
+   * before the new build has been observed at all, so a readiness check
+   * afterwards can pass against the instance that is being replaced.
+   */
+  supersedesDeploymentId?: string
 ): Promise<InstallerService> {
   const deadline = Date.now() + timeoutMinutes * 60_000;
   do {
@@ -334,13 +345,37 @@ export async function pollServiceUntilSuccess(
 
     const status = service.latestDeployment?.status;
     if (status === "SUCCESS") {
-      return service;
+      if (supersedesDeploymentId === undefined) {
+        return service;
+      }
+      // Guarded mode: only a deployment we can positively identify as a
+      // *different* one counts. A missing id is not evidence of rollover --
+      // treating it as acceptable would let the guard pass without ever
+      // observing a new deployment, which is the whole thing it prevents.
+      const observedId = service.latestDeployment?.id;
+      if (observedId !== undefined && observedId !== supersedesDeploymentId) {
+        return service;
+      }
+      continue;
     }
     if (status && terminalFailureStatuses.has(status)) {
-      throw new Error(
-        `Deployment ended in terminal state '${status}'. ` +
-          `Check logs with: railway logs --service ${serviceName} --lines 200`
-      );
+      // In guarded mode the same id check applies to failures, not just to
+      // successes. A client that was already in a terminal state when the
+      // redeploy was triggered would otherwise fail here on the *old*
+      // deployment before the new one ever appears -- which would make it
+      // impossible to recover a broken client by updating its ref, exactly
+      // the case an operator is most likely to be in.
+      const observedId = service.latestDeployment?.id;
+      const isPriorDeployment =
+        supersedesDeploymentId !== undefined &&
+        (observedId === undefined || observedId === supersedesDeploymentId);
+      if (!isPriorDeployment) {
+        throw new Error(
+          `Deployment ended in terminal state '${status}'. ` +
+            `Check logs with: railway logs --service ${serviceName} --lines 200`
+        );
+      }
+      continue;
     }
   } while (Date.now() < deadline);
 
@@ -353,7 +388,10 @@ export async function listServices(runner: RailwayRunner): Promise<InstallerServ
   return JSON.parse(result.stdout) as InstallerService[];
 }
 
-async function listDomains(serviceName: string, runner: RailwayRunner): Promise<{ domains: RailwayDomain[] }> {
+/** Default Basic-auth username for the wrapper's /setup routes. */
+export const DEFAULT_SETUP_USERNAME = "openclaw-admin";
+
+export async function listDomains(serviceName: string, runner: RailwayRunner): Promise<{ domains: RailwayDomain[] }> {
   const result = await runner.run(["domain", "list", "--service", serviceName, "--json"]);
   return JSON.parse(result.stdout) as { domains: RailwayDomain[] };
 }

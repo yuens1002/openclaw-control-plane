@@ -182,8 +182,10 @@ every AC by a valid plan reference, is confirmed by read-through.
 Named, with the recommended fix stated, but not built here:
 
 - The client-ref update functions perform an unconditional variable write and
-  an unconfirmed redeploy. Recommend adding the compare-then-write the
-  CORS-patch function already has, plus confirmation naming the target service.
+  an unconfirmed redeploy. *(State at planning time. Closed since: both were
+  converted to compare-and-swap with a required expected-current-ref, a no-op
+  short-circuit, and an auth-gated readiness check after the redeploy. See gap
+  G1 in the protocol.)*
 - The workspace-file-import function performs an unconditional POST with no
   pre-read comparison. Recommend a compare step before it is ever wired into a
   provisioning path; low urgency while it has no callers.
