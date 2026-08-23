@@ -175,3 +175,18 @@ are the starting point, not a from-scratch investigation — see
 for the full writeup. It's also plausible OpenClaw ships native GitHub
 App support upstream before that scenario ever arises, which would
 obsolete this control-plane package entirely rather than just revive it.
+
+### 2026-08-22 — Decision (4), source-control: this ADR doesn't track which mechanism any tenant currently runs
+
+The entry above named which credential mechanism this agency's live CoT
+instance used at the time. That was a scope mistake for an architecture
+doc: this ADR records the general pattern, not any tenant's current
+operational state, which changes independently of the architecture and
+belongs in each tenant's own private profile repo, not here.
+
+For the record, going forward: GitHub access for a CoT can be provisioned
+either way under decision (4)'s general principle — a PAT (simpler,
+adequate for a single low-risk credential) or a GitHub App installation
+(least-privilege, short-lived minted tokens, appropriate once a genuine
+multi-tenant need exists). Which one any given tenant runs, and why, is
+operational detail this ADR does not track.
