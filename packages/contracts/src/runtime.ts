@@ -307,6 +307,8 @@ export const ApprovalAttributionSchema = z
       .min(13)
       .max(512)
       .regex(/^principal:\/\/[A-Za-z0-9][A-Za-z0-9._:@/-]*$/),
+    effective_approver: EffectiveActorSchema,
+    approver_authorization: AuthorizationEvidenceSchema,
     decision: z.enum(["approved", "rejected"]),
     decided_at: z.string().datetime()
   })

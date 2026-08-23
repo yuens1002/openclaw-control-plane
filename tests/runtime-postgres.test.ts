@@ -489,6 +489,14 @@ function lifecycleCommand(streamId: string, idempotencyKey: string): AppendRunti
           action_revision: 1,
           command_digest: `sha256:${"a".repeat(64)}`,
           approved_by_principal_ref: "principal://user/example-owner",
+          effective_approver: { type: "user", id: "example-owner" },
+          approver_authorization: {
+            decision_id: "approval-decision-001",
+            action: "runtime.command.approve",
+            result: "allowed",
+            policy_version: "policy-v1",
+            reason_codes: ["example.approval_allowed"]
+          },
           decision: "approved",
           decided_at: "2026-08-23T11:59:00.000Z"
         }

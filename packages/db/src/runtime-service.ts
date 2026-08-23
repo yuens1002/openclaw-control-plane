@@ -283,6 +283,8 @@ function validateApprovalEvidence(
     action_revision: evidence.action_revision,
     command_digest: evidence.command_digest,
     approved_by_principal_ref: evidence.approved_by_principal_ref,
+    effective_approver: approverContext.effective_actor,
+    approver_authorization: approverContext.authorization,
     decision: evidence.decision,
     decided_at: evidence.decided_at
   });
@@ -307,6 +309,9 @@ function validateApprovalEvidence(
   }
   if (approverContext.authorization.result !== "allowed") {
     throw new Error("Approver context must contain an allowed authorization decision.");
+  }
+  if (approverContext.authorization.action !== "runtime.command.approve") {
+    throw new Error("Approver authorization action must be runtime.command.approve.");
   }
 
   return { decided_at: payload.decided_at, payload };

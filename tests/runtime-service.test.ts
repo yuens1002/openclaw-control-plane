@@ -191,6 +191,19 @@ describe("principal-aware runtime service", () => {
     expect(repository.appendCommand).not.toHaveBeenCalled();
   });
 
+  it("binds approval authorization to the built-in approval action", async () => {
+    const repository = new FakeRepository();
+    const service = createService(repository, undefined, true);
+    const input = allowedInput();
+    const evidence = approvalEvidence(input.command_digest);
+    evidence.approver_context.authorization.action = "state.reconcile";
+
+    await expect(
+      service.execute({ ...input, approval_evidence: evidence })
+    ).rejects.toThrow(/runtime\.command\.approve/i);
+    expect(repository.appendCommand).not.toHaveBeenCalled();
+  });
+
   it("rejects unregistered, mismatched, and invalid declared effects", async () => {
     const repository = new FakeRepository();
     const service = createService(repository);
@@ -352,7 +365,7 @@ function approvalEvidence(approvedCommandDigest: string) {
       request_origin: "http" as const,
       authorization: {
         decision_id: "approver-authz-1",
-        action: "state.reconcile",
+        action: "runtime.command.approve",
         result: "allowed" as const,
         policy_version: "policy-v1",
         reason_codes: ["policy.approver_allowed"]
