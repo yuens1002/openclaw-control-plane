@@ -149,8 +149,8 @@ export async function importWorkspaceFiles(
 ## Non-Goals
 
 - No wiring into `installOpenClawOnRailway` or `provisionClientInstance` —
-  deferred until the private client-profile repo's own #3 defines real
-  identity-file content. Forcing a caller in now would mean threading
+  deferred until the private client-profile repo's own issue #3 defines
+  real identity-file content. Forcing a caller in now would mean threading
   placeholder content through production provisioning code for no
   functional benefit.
 - No live Railway/live-instance test of `/setup/import` in this session —
