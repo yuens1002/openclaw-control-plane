@@ -169,11 +169,12 @@ actually has its own org/repos the CoT needs scoped access to. At that
 point, the reverted transport code and the research trail behind this
 decision (installation vs. PAT tradeoffs; OpenClaw's own native MCP
 support, confirmed live from `openclaw/openclaw` source, not assumed)
-are the starting point, not a from-scratch investigation — see
-[`openClaw-CoT-agency-profile#6`](https://github.com/dev-yuen-agency/openclaw-cot-agency-profile/issues/6)
-for the full writeup. It's also plausible OpenClaw ships native GitHub
-App support upstream before that scenario ever arises, which would
-obsolete this control-plane package entirely rather than just revive it.
+are the starting point, not a from-scratch investigation — the full
+writeup lives in the relevant private client-profile repo's own issue
+tracker, not in this public repo. It's also plausible OpenClaw ships
+native GitHub App support upstream before that scenario ever arises,
+which would obsolete this control-plane package entirely rather than
+just revive it.
 
 ### 2026-08-22 — Decision (4), source-control: this ADR doesn't track which mechanism any tenant currently runs
 

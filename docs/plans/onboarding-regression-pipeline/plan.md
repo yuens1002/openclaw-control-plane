@@ -12,8 +12,8 @@ run and recorded manually rather than blocked mechanically). Follows
 Turn the now-automated client-onboarding chain (#16's `provisionClientInstance`
 + the applier's `applyProfile`) into a **reusable, schedulable regression
 pipeline** that proves the chain still works over time, without leaving any
-standing OpenRouter spend liability between runs. Session originates in the
-sibling private repo (`openClaw-CoT-agency-profile`)'s
+standing OpenRouter spend liability between runs. Session originates in a
+sibling private client-profile repo's
 `docs/plans/throwaway-client-onboarding-cycle/`, which is running a live
 dogfood cycle against a dedicated fixture and asked for this pipeline as
 part of that session — see that repo's plan for the cross-repo framing.

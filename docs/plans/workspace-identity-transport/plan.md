@@ -18,10 +18,10 @@ fetch-with-injectable-dependency pattern already used by
 
 ## Scope note — what this plan does NOT cover
 
-Issue #20 splits ownership explicitly: the **profile repo**
-(`openClaw-CoT-agency-profile`, private) owns the *content* — intake
-fields, and templating the actual `IDENTITY.md`/`USER.md`/`SOUL.md`
-markdown from those fields (tracked in that repo's own #3, not yet done).
+Issue #20 splits ownership explicitly: **a private client-profile repo**
+owns the *content* — intake fields, and templating the actual
+`IDENTITY.md`/`USER.md`/`SOUL.md` markdown from those fields (tracked in
+that repo's own #3, not yet done).
 **control-plane** owns the *transport* — building the archive and calling
 `/setup/import`. This plan is scoped to transport only:
 
@@ -149,7 +149,7 @@ export async function importWorkspaceFiles(
 ## Non-Goals
 
 - No wiring into `installOpenClawOnRailway` or `provisionClientInstance` —
-  deferred until profile-repo `openClaw-CoT-agency-profile#3` defines real
+  deferred until the private client-profile repo's own #3 defines real
   identity-file content. Forcing a caller in now would mean threading
   placeholder content through production provisioning code for no
   functional benefit.

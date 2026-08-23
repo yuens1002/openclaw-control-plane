@@ -7,6 +7,7 @@ and uses semantic versioning once releases begin.
 
 ## [Unreleased]
 
+- 2026-08-23 - docs(hygiene): drop private client-profile repo name from the ADR and four plan docs
 - 2026-08-23 - docs(adr): ADR 0001 no longer names which GitHub auth mechanism any tenant currently runs
 - 2026-08-23 - docs(ops): cross-link the gap register to its GitHub tracking issues
 - 2026-08-23 - docs(ops): correct the live-instance gap register (G3 trigger, G5 naming, G6 circular fix, G8 evidence)

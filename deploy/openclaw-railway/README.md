@@ -56,7 +56,7 @@ content half lives in the private client-profile repo.
 ### Workspace identity file transport (not yet wired in)
 
 [Issue #20](https://github.com/yuens1002/openclaw-control-plane/issues/20)
-splits ownership between the private `openClaw-CoT-agency-profile` repo
+splits ownership between the private client-profile repo
 (the *content* — intake fields and templating the actual
 `IDENTITY.md`/`USER.md`/`SOUL.md` markdown, tracked as that repo's own #3,
 not yet done) and this repo (the *transport*).
@@ -418,7 +418,10 @@ pre-flight declaration required before any ad hoc command -- lives in
 Note that the guard covers direct human CLI invocation only: the
 programmatic variable read/write helpers in
 `packages/openclaw-railway-installer/src/railway-variables.ts` do not pass
-through it (tracked as gap G4 in that document).
+through it. That gap (G4) was closed by narrowing its scope rather than
+building a shared guard -- see that document's §7 for why the
+programmatic path already meets this row's actual requirements a
+different way.
 
 ## Manual Install
 
