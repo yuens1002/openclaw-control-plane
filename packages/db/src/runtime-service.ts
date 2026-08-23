@@ -150,7 +150,8 @@ export class PrincipalAwareRuntimeService {
           subject: effect.target,
           payload: effect.payload,
           occurred_at: input.action.finished_at,
-          operation_type: command.operation_type
+          operation_type: command.operation_type,
+          operation_schema_version: command.operation_schema_version
         }) satisfies RuntimeRecordDraft
     );
     const actionAttribution = ActionAttributionSchema.parse({
@@ -188,7 +189,9 @@ export class PrincipalAwareRuntimeService {
       canonicalization_version: command.canonicalization_version,
       command_digest: computedDigest,
       command_arguments: command.arguments,
+      canonical_command: command,
       command_context: context,
+      ...(approval ? { approval_context: approval.context } : {}),
       records: [
         {
           record_id: actionRecordId,
@@ -199,7 +202,8 @@ export class PrincipalAwareRuntimeService {
           subject: command.target,
           payload: actionPayload as RuntimePayload,
           occurred_at: input.action.finished_at,
-          operation_type: command.operation_type
+          operation_type: command.operation_type,
+          operation_schema_version: command.operation_schema_version
         },
         ...(approval && approvalRecordId
           ? [
@@ -212,7 +216,8 @@ export class PrincipalAwareRuntimeService {
                 subject: command.target,
                 payload: approval.payload,
                 occurred_at: approval.decided_at,
-                operation_type: command.operation_type
+                operation_type: command.operation_type,
+                operation_schema_version: command.operation_schema_version
               }
             ]
           : []),
@@ -276,6 +281,7 @@ function validateApprovalEvidence(
 ): {
   decided_at: string;
   payload: RuntimePayload;
+  context: TrustedCommandContext;
 } {
   const approverContext = TrustedCommandContextSchema.parse(evidence.approver_context);
   const payload = ApprovalAttributionPayloadSchema.parse({
@@ -315,5 +321,5 @@ function validateApprovalEvidence(
     throw new Error("Approver authorization action must be runtime.command.approve.");
   }
 
-  return { decided_at: payload.decided_at, payload };
+  return { decided_at: payload.decided_at, payload, context: approverContext };
 }

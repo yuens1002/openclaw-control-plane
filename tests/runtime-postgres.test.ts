@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
 import { beforeAll, beforeEach, afterAll, describe, expect, it } from "vitest";
 
+import { commandDigest } from "../packages/db/src/canonical-command.js";
+
 import {
   IdempotencyConflictError,
   PostgresRuntimeRepository,
@@ -93,6 +95,7 @@ describePostgres("PostgreSQL durable runtime repository", () => {
     expect(event?.record_sequence).toBe(1);
     expect(attempt).toMatchObject({
       operation_type: "example.state.reconcile_with_approval",
+      operation_schema_version: 1,
       command_context: {
         authenticated_principal_ref: "principal://service/runtime-test",
         effective_actor: { type: "service", id: "runtime-test" },
@@ -115,7 +118,7 @@ describePostgres("PostgreSQL durable runtime repository", () => {
           { kind: "result", id: ids.result },
           { kind: "artifact", id: ids.artifact }
         ],
-        command_digest: `sha256:${"a".repeat(64)}`,
+        command_digest: command.command_digest,
         started_at: "2026-08-23T12:00:00.000Z",
         finished_at: "2026-08-23T12:00:01.000Z",
         outcome: "succeeded"
@@ -192,10 +195,16 @@ describePostgres("PostgreSQL durable runtime repository", () => {
     const repository = new PostgresRuntimeRepository(pool, registry);
     const command = lifecycleCommand("conflict-stream", "conflict-key-001");
     await repository.appendCommand(command);
-    const changedDigest = `sha256:${"b".repeat(64)}`;
+    const changedCanonicalCommand = {
+      ...command.canonical_command,
+      arguments: { desired: { ready: false } }
+    };
+    const changedDigest = commandDigest(changedCanonicalCommand);
     const conflicting = {
       ...command,
+      canonical_command: changedCanonicalCommand,
       command_digest: changedDigest,
+      command_arguments: changedCanonicalCommand.arguments,
       records: command.records.map((record) =>
         record.kind === "action_attempt" || record.kind === "approval"
           ? { ...record, payload: { ...record.payload, command_digest: changedDigest } }
@@ -481,6 +490,27 @@ describePostgres("PostgreSQL durable runtime repository", () => {
     );
     await expect(repository.appendCommand(wrongApproval)).rejects.toThrow(/approval record/i);
 
+    const fabricatedApproval = lifecycleCommand(
+      "fabricated-approval-stream",
+      "fabricated-approval-key-001"
+    );
+    fabricatedApproval.approval_context = {
+      ...trustedApprovalContext(),
+      authenticated_principal_ref: "principal://user/different-approver"
+    };
+    await expect(repository.appendCommand(fabricatedApproval)).rejects.toThrow(
+      /trusted approver context/i
+    );
+
+    const fabricatedDigest = lifecycleCommand(
+      "fabricated-digest-stream",
+      "fabricated-digest-key-001"
+    );
+    fabricatedDigest.command_digest = `sha256:${"f".repeat(64)}`;
+    await expect(repository.appendCommand(fabricatedDigest)).rejects.toThrow(
+      /canonical command envelope/i
+    );
+
     const invalidProducer = singleEventCommand(
       "producer-stream",
       "producer-key-001",
@@ -488,13 +518,16 @@ describePostgres("PostgreSQL durable runtime repository", () => {
     );
     invalidProducer.records = [
       ...invalidProducer.records,
-      record(
-        "00000000-0000-4000-8000-000000000402",
-        "result",
-        "example.reconciliation.delta",
-        "example://schemas/reconciliation-delta/v1",
-        { changed: true }
-      )
+      {
+        ...record(
+          "00000000-0000-4000-8000-000000000402",
+          "result",
+          "example.reconciliation.delta",
+          "example://schemas/reconciliation-delta/v1",
+          { changed: true }
+        ),
+        operation_type: "example.state.reconcile"
+      }
     ];
     invalidProducer.edges = [{
       from_record_id: invalidProducer.records[0]!.record_id,
@@ -566,6 +599,44 @@ describePostgres("PostgreSQL durable runtime repository", () => {
       })
     ).rejects.toThrow(/missing during replay/i);
 
+    const unrelatedMissingRegistry = new RuntimeTypeRegistry(
+      exampleTypeRegistrations.filter((item) => item.type !== "example.report"),
+      exampleOperationRegistrations
+    );
+    await expect(
+      new PostgresRuntimeRepository(pool, unrelatedMissingRegistry).rebuildProjection({
+        stream_id: "retirement-stream",
+        projection_type: "example.unrelated_missing_schema",
+        subject: { type: "example.environment", id: "production" },
+        projection_version: 1,
+        input_types: [
+          { kind: "event", type: "example.observation", schema_version: 1 }
+        ],
+        initial_state: { count: 0 },
+        reduce: (state) => ({ count: Number(state.count) + 1 })
+      })
+    ).resolves.toMatchObject({ state: { count: 1 }, last_record_sequence: 7 });
+
+    const missingOperationRegistry = new RuntimeTypeRegistry(
+      exampleTypeRegistrations,
+      exampleOperationRegistrations.filter(
+        (item) => item.operation_type !== "example.state.reconcile_with_approval"
+      )
+    );
+    await expect(
+      new PostgresRuntimeRepository(pool, missingOperationRegistry).rebuildProjection({
+        stream_id: "retirement-stream",
+        projection_type: "example.missing_operation",
+        subject: { type: "example.environment", id: "production" },
+        projection_version: 1,
+        input_types: [
+          { kind: "action_attempt", type: "runtime.action.attempt", schema_version: 1 }
+        ],
+        initial_state: {},
+        reduce: (state) => state
+      })
+    ).rejects.toThrow(/operation registration.*missing/i);
+
     await repository.synchronizeRegistry();
   });
 
@@ -586,15 +657,36 @@ const ids = {
 } as const;
 
 function lifecycleCommand(streamId: string, idempotencyKey: string): AppendRuntimeCommand {
+  const canonicalCommand = {
+    canonicalization_version: "jcs-rfc8785-v1" as const,
+    operation_type: "example.state.reconcile_with_approval",
+    operation_schema_version: 1,
+    work_item_id: ids.work,
+    action_revision: 1,
+    target: { type: "example.environment", id: "production" },
+    arguments: { desired: { ready: true } },
+    declared_effects: [
+      {
+        result_type: "example.reconciliation.delta",
+        schema_version: 1,
+        schema_ref: "example://schemas/reconciliation-delta/v1",
+        target: { type: "example.environment", id: "production" },
+        payload: { changed: true }
+      }
+    ]
+  };
+  const digest = commandDigest(canonicalCommand);
   return {
     stream_id: streamId,
     operation_type: "example.state.reconcile_with_approval",
     operation_schema_version: 1,
     idempotency_key: idempotencyKey,
     canonicalization_version: "jcs-rfc8785-v1",
-    command_digest: `sha256:${"a".repeat(64)}`,
+    command_digest: digest,
     command_arguments: { desired: { ready: true } },
+    canonical_command: canonicalCommand,
     command_context: trustedContext("allowed"),
+    approval_context: trustedApprovalContext(),
     records: [
       record(ids.event, "event", "example.observation", "example://schemas/observation/v1", {
         statement: "A state change was requested."
@@ -627,7 +719,7 @@ function lifecycleCommand(streamId: string, idempotencyKey: string): AppendRunti
             { kind: "artifact", id: ids.artifact }
           ],
           canonicalization_version: "jcs-rfc8785-v1",
-          command_digest: `sha256:${"a".repeat(64)}`,
+          command_digest: digest,
           started_at: "2026-08-23T12:00:00.000Z",
           finished_at: "2026-08-23T12:00:01.000Z",
           outcome: "succeeded"
@@ -642,7 +734,7 @@ function lifecycleCommand(streamId: string, idempotencyKey: string): AppendRunti
           work_item_id: ids.work,
           operation_type: "example.state.reconcile_with_approval",
           action_revision: 1,
-          command_digest: `sha256:${"a".repeat(64)}`,
+          command_digest: digest,
           approved_by_principal_ref: "principal://user/example-owner",
           effective_approver: { type: "user", id: "example-owner" },
           approver_authorization: {
@@ -690,9 +782,26 @@ function singleEventCommand(
   idempotencyKey: string,
   recordId: string
 ): AppendRuntimeCommand {
-  return {
-    ...lifecycleCommand(streamId, idempotencyKey),
+  const canonicalCommand = {
+    canonicalization_version: "jcs-rfc8785-v1" as const,
     operation_type: "example.state.reconcile",
+    operation_schema_version: 1,
+    work_item_id: ids.work,
+    action_revision: 1,
+    target: { type: "example.environment", id: "production" },
+    arguments: { desired: { ready: true } },
+    declared_effects: []
+  };
+  const { approval_context: _approvalContext, ...base } = lifecycleCommand(
+    streamId,
+    idempotencyKey
+  );
+  return {
+    ...base,
+    operation_type: "example.state.reconcile",
+    canonical_command: canonicalCommand,
+    command_digest: commandDigest(canonicalCommand),
+    command_arguments: canonicalCommand.arguments,
     records: [
       {
         ...record(recordId, "event", "example.observation", "example://schemas/observation/v1", {
@@ -722,7 +831,8 @@ function record(
     subject: { type: "example.environment", id: "production" },
     payload,
     occurred_at: "2026-08-23T12:00:00.000Z",
-    operation_type: "example.state.reconcile_with_approval"
+    operation_type: "example.state.reconcile_with_approval",
+    operation_schema_version: 1
   } as const;
 }
 
@@ -738,6 +848,21 @@ function trustedContext(result: "allowed" | "denied") {
       result,
       policy_version: "policy-v1",
       reason_codes: [result === "allowed" ? "example.policy.allowed" : "example.policy.denied"]
+    }
+  };
+}
+
+function trustedApprovalContext() {
+  return {
+    authenticated_principal_ref: "principal://user/example-owner",
+    effective_actor: { type: "user" as const, id: "example-owner" },
+    request_origin: "http" as const,
+    authorization: {
+      decision_id: "approval-decision-001",
+      action: "runtime.command.approve",
+      result: "allowed" as const,
+      policy_version: "policy-v1",
+      reason_codes: ["example.approval_allowed"]
     }
   };
 }

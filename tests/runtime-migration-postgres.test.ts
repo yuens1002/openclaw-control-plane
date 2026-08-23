@@ -16,6 +16,7 @@ import {
 import {
   PostgresRuntimeRepository,
   RuntimeTypeRegistry,
+  legacyOperationRegistrations,
   legacyTypeRegistrations,
   runSqlMigrations
 } from "@openclaw-control-plane/db";
@@ -121,12 +122,13 @@ describePostgres("M1 to durable runtime PostgreSQL migration", () => {
       kind: string;
       type: string;
       operation_type: string | null;
+      operation_schema_version: number | null;
       command_context: unknown;
       effective_actor: unknown;
       subject: unknown;
       payload: unknown;
     }>(`
-      SELECT record_id, stream_id, kind, type, operation_type, command_context,
+      SELECT record_id, stream_id, kind, type, operation_type, operation_schema_version, command_context,
              effective_actor, subject, payload
         FROM runtime_records
        ORDER BY stream_id, record_sequence
@@ -141,6 +143,9 @@ describePostgres("M1 to durable runtime PostgreSQL migration", () => {
       SafeNamespacedIdentifierSchema.parse(row.type);
       if (row.operation_type !== null) {
         SafeNamespacedIdentifierSchema.parse(row.operation_type);
+        expect(row.operation_schema_version).toBe(1);
+      } else {
+        expect(row.operation_schema_version).toBeNull();
       }
       const context = TrustedCommandContextSchema.parse(row.command_context);
       expect(context).toMatchObject({
@@ -168,7 +173,7 @@ describePostgres("M1 to durable runtime PostgreSQL migration", () => {
 
     const replayRepository = new PostgresRuntimeRepository(
       pool,
-      new RuntimeTypeRegistry(legacyTypeRegistrations)
+      new RuntimeTypeRegistry(legacyTypeRegistrations, legacyOperationRegistrations)
     );
     await expect(
       replayRepository.rebuildProjection({
@@ -176,11 +181,15 @@ describePostgres("M1 to durable runtime PostgreSQL migration", () => {
         projection_type: "legacy.replay_count",
         subject: { type: "legacy.domain", id: "migrated" },
         projection_version: 1,
-        input_types: [{ kind: "event", type: "legacy.event", schema_version: 1 }],
+        input_types: [
+          { kind: "event", type: "legacy.event", schema_version: 1 },
+          { kind: "action_attempt", type: "legacy.worker_run", schema_version: 1 },
+          { kind: "action_attempt", type: "legacy.tool.invoke", schema_version: 1 }
+        ],
         initial_state: { count: 0 },
         reduce: (state) => ({ count: Number(state.count) + 1 })
       })
-    ).resolves.toMatchObject({ state: { count: 1 }, last_record_sequence: 7 });
+    ).resolves.toMatchObject({ state: { count: 3 }, last_record_sequence: 7 });
   });
 });
 

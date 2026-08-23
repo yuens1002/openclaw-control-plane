@@ -4,6 +4,7 @@ import {
   ActionAttributionPayloadSchema,
   ApprovalAttributionPayloadSchema,
   AuthorizationDenialAuditPayloadSchema,
+  CanonicalCommandEnvelopeSchema,
   CommandDigestSchema,
   IdempotencyAbandonedAuditPayloadSchema,
   IdempotencyConflictAuditPayloadSchema,
@@ -13,6 +14,7 @@ import {
   RuntimeSubjectSchema,
   SafeNamespacedIdentifierSchema,
   TrustedCommandContextSchema,
+  type CanonicalCommandEnvelope,
   type RuntimeKind,
   type RuntimePayload,
   type RuntimeSubject,
@@ -20,7 +22,7 @@ import {
 } from "@openclaw-control-plane/contracts";
 import type { Pool, PoolClient } from "pg";
 
-import { compareIdempotencyCommand, jsonDigest } from "./canonical-command.js";
+import { commandDigest, compareIdempotencyCommand, jsonDigest } from "./canonical-command.js";
 import {
   RuntimeTypeRegistry,
   type RegisteredRuntimeKind
@@ -39,6 +41,7 @@ export interface RuntimeRecordDraft {
   payload: RuntimePayload;
   occurred_at: string;
   operation_type?: string;
+  operation_schema_version?: number;
 }
 
 export interface RuntimeRecord extends RuntimeRecordDraft {
@@ -94,7 +97,9 @@ export interface AppendRuntimeCommand {
   canonicalization_version: string;
   command_digest: string;
   command_arguments: RuntimePayload;
+  canonical_command: CanonicalCommandEnvelope;
   command_context: TrustedCommandContext;
+  approval_context?: TrustedCommandContext;
   records: readonly RuntimeRecordDraft[];
   edges?: readonly RuntimeEdgeDraft[];
   projection_updates?: readonly RuntimeProjectionUpdate[];
@@ -381,19 +386,28 @@ export class PostgresRuntimeRepository {
       throw new Error("Denied authorization action does not match the registered operation action.");
     }
     const auditId = randomUUID();
+    const canonicalCommand = CanonicalCommandEnvelopeSchema.parse({
+      canonicalization_version: "jcs-rfc8785-v1",
+      operation_type: input.operation_type,
+      operation_schema_version: input.operation_schema_version,
+      work_item_id: auditId,
+      action_revision: 1,
+      target: input.target,
+      arguments: {
+        request_id: input.request_id,
+        authorization_evidence: context.authorization
+      },
+      declared_effects: []
+    });
     return this.appendDeniedAudit({
       stream_id: input.stream_id,
       operation_type: input.operation_type,
       operation_schema_version: input.operation_schema_version,
       idempotency_key: `authorization:${context.authorization.decision_id}`,
-      canonicalization_version: "authorization-decision-v1",
-      command_digest: jsonDigest({
-        operation_type: input.operation_type,
-        target: input.target,
-        request_id: input.request_id,
-        authorization: context.authorization
-      }),
-      command_arguments: {},
+      canonicalization_version: canonicalCommand.canonicalization_version,
+      command_digest: commandDigest(canonicalCommand),
+      command_arguments: canonicalCommand.arguments,
+      canonical_command: canonicalCommand,
       command_context: context,
       records: [
         {
@@ -403,6 +417,7 @@ export class PostgresRuntimeRepository {
           schema_version: 1,
           schema_ref: "runtime://schemas/authorization-denied/v1",
           operation_type: input.operation_type,
+          operation_schema_version: input.operation_schema_version,
           subject: input.target,
           payload: {
             request_id: input.request_id,
@@ -419,7 +434,7 @@ export class PostgresRuntimeRepository {
   async getRecord(recordId: string): Promise<RuntimeRecord | null> {
     const result = await this.pool.query<RuntimeRecordRow>(
       `SELECT record_id, stream_id, record_sequence, kind, type, schema_version,
-              schema_ref, operation_type, command_context, subject, payload,
+              schema_ref, operation_type, operation_schema_version, command_context, subject, payload,
               occurred_at, recorded_at
        FROM runtime_records WHERE record_id = $1`,
       [recordId]
@@ -430,7 +445,7 @@ export class PostgresRuntimeRepository {
   async listStreamRecords(streamId: string): Promise<RuntimeRecord[]> {
     const result = await this.pool.query<RuntimeRecordRow>(
       `SELECT record_id, stream_id, record_sequence, kind, type, schema_version,
-              schema_ref, operation_type, command_context, subject, payload,
+              schema_ref, operation_type, operation_schema_version, command_context, subject, payload,
               occurred_at, recorded_at
        FROM runtime_records
        WHERE stream_id = $1
@@ -490,7 +505,7 @@ export class PostgresRuntimeRepository {
       await client.query("BEGIN");
       const result = await client.query<RuntimeRecordRow>(
         `SELECT record_id, stream_id, record_sequence, kind, type, schema_version,
-                schema_ref, operation_type, command_context, subject, payload,
+                schema_ref, operation_type, operation_schema_version, command_context, subject, payload,
                 occurred_at, recorded_at
          FROM runtime_records
          WHERE stream_id = $1
@@ -499,12 +514,13 @@ export class PostgresRuntimeRepository {
         [input.stream_id]
       );
       const records = result.rows.map(mapRuntimeRecord);
-      for (const record of records) {
+      const consumedRecords = records.filter((record) =>
+        projectionConsumes(record, input.input_types)
+      );
+      for (const record of consumedRecords) {
         validateHistoricalRecord(record, this.registry);
       }
-      const state = records
-        .filter((record) => projectionConsumes(record, input.input_types))
-        .reduce(input.reduce, input.initial_state);
+      const state = consumedRecords.reduce(input.reduce, input.initial_state);
       RuntimePayloadSchema.parse(state);
       const lastRecord = records.at(-1);
 
@@ -582,7 +598,7 @@ export class PostgresRuntimeRepository {
       RuntimePayloadSchema.parse(current.state);
       const recordsResult = await client.query<RuntimeRecordRow>(
         `SELECT record_id, stream_id, record_sequence, kind, type, schema_version,
-                schema_ref, operation_type, command_context, subject, payload,
+                schema_ref, operation_type, operation_schema_version, command_context, subject, payload,
                 occurred_at, recorded_at
          FROM runtime_records
          WHERE stream_id = $1 AND record_sequence > $2
@@ -591,10 +607,11 @@ export class PostgresRuntimeRepository {
         [input.stream_id, current.last_record_sequence]
       );
       const records = recordsResult.rows.map(mapRuntimeRecord);
-      for (const record of records) validateHistoricalRecord(record, this.registry);
-      const state = records
-        .filter((record) => projectionConsumes(record, input.input_types))
-        .reduce(input.reduce, current.state);
+      const consumedRecords = records.filter((record) =>
+        projectionConsumes(record, input.input_types)
+      );
+      for (const record of consumedRecords) validateHistoricalRecord(record, this.registry);
+      const state = consumedRecords.reduce(input.reduce, current.state);
       RuntimePayloadSchema.parse(state);
       const lastRecord = records.at(-1);
       const lastRecordSequence = lastRecord?.record_sequence ??
@@ -815,6 +832,7 @@ export class PostgresRuntimeRepository {
           schema_version: 1,
           schema_ref: "runtime://schemas/idempotency-abandoned/v1",
           operation_type: command.operation_type,
+          operation_schema_version: command.operation_schema_version,
           subject: { type: "runtime.operation", id: reservedOperationId },
           payload: {
             operation_type: command.operation_type,
@@ -992,12 +1010,12 @@ async function appendRecords(
     const result = await client.query<RuntimeRecordRow>(
       `INSERT INTO runtime_records
          (record_id, stream_id, record_sequence, kind, type, schema_version,
-          schema_ref, operation_type, command_context,
+          schema_ref, operation_type, operation_schema_version, command_context,
           authenticated_principal_ref, effective_actor, subject, payload, occurred_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11::jsonb,
-               $12::jsonb, $13::jsonb, $14::timestamptz)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12::jsonb,
+               $13::jsonb, $14::jsonb, $15::timestamptz)
        RETURNING record_id, stream_id, record_sequence, kind, type, schema_version,
-                 schema_ref, operation_type, command_context, subject, payload,
+                 schema_ref, operation_type, operation_schema_version, command_context, subject, payload,
                  occurred_at, recorded_at`,
       [
         draft.record_id,
@@ -1008,6 +1026,7 @@ async function appendRecords(
         draft.schema_version,
         draft.schema_ref,
         draft.operation_type ?? null,
+        draft.operation_schema_version ?? null,
         JSON.stringify(context),
         context.authenticated_principal_ref,
         JSON.stringify(context.effective_actor),
@@ -1131,6 +1150,7 @@ async function appendConflictAudit(
       schema_version: 1,
       schema_ref: "runtime://schemas/idempotency-conflict/v1",
       operation_type: command.operation_type,
+      operation_schema_version: command.operation_schema_version,
       subject: { type: "runtime.idempotency", id: command.idempotency_key },
       payload: { operation_type: command.operation_type },
       occurred_at: new Date().toISOString()
@@ -1144,6 +1164,18 @@ function validateAppendCommand(
 ): void {
   TrustedCommandContextSchema.parse(command.command_context);
   CommandDigestSchema.parse(command.command_digest);
+  const canonicalCommand = CanonicalCommandEnvelopeSchema.parse(command.canonical_command);
+  if (commandDigest(canonicalCommand) !== command.command_digest) {
+    throw new Error("Command digest does not match the canonical command envelope.");
+  }
+  if (
+    canonicalCommand.operation_type !== command.operation_type ||
+    canonicalCommand.operation_schema_version !== command.operation_schema_version ||
+    canonicalCommand.canonicalization_version !== command.canonicalization_version ||
+    jsonDigest(canonicalCommand.arguments) !== jsonDigest(command.command_arguments)
+  ) {
+    throw new Error("Canonical command identity does not match the append command.");
+  }
   SafeNamespacedIdentifierSchema.parse(command.operation_type);
   const operation = registry.requireOperation(
     command.operation_type,
@@ -1168,6 +1200,12 @@ function validateAppendCommand(
     RuntimePayloadSchema.parse(record.payload);
     if (ids.has(record.record_id)) throw new Error(`Duplicate runtime record ${record.record_id}.`);
     ids.add(record.record_id);
+    if (
+      record.operation_type !== command.operation_type ||
+      record.operation_schema_version !== command.operation_schema_version
+    ) {
+      throw new Error("Runtime record operation identity does not match its append command.");
+    }
     if (isRegisteredKind(record.kind)) {
       const registration = registry.requireType(record.kind, record.type, record.schema_version);
       if (registration.schema_ref !== record.schema_ref) {
@@ -1189,6 +1227,15 @@ function validateAppendCommand(
   }
   if (!operation.approval_required && approvals.length !== 0) {
     throw new Error(`Operation ${command.operation_type} does not accept approval records.`);
+  }
+  const approvalContext = command.approval_context
+    ? TrustedCommandContextSchema.parse(command.approval_context)
+    : undefined;
+  if (operation.approval_required && !approvalContext) {
+    throw new Error(`Operation ${command.operation_type} requires trusted approver context.`);
+  }
+  if (!operation.approval_required && approvalContext) {
+    throw new Error(`Operation ${command.operation_type} does not accept approver context.`);
   }
   const action = command.records.find((record) => record.kind === "action_attempt");
   if (action) {
@@ -1212,6 +1259,14 @@ function validateAppendCommand(
       throw new Error("Approval record is not authorized for this exact command.");
     }
     if (
+      !approvalContext ||
+      payload.approved_by_principal_ref !== approvalContext.authenticated_principal_ref ||
+      jsonDigest(payload.effective_approver) !== jsonDigest(approvalContext.effective_actor) ||
+      jsonDigest(payload.approver_authorization) !== jsonDigest(approvalContext.authorization)
+    ) {
+      throw new Error("Approval record does not match the trusted approver context.");
+    }
+    if (
       !action ||
       !(command.edges ?? []).some(
         (edge) =>
@@ -1233,6 +1288,12 @@ function validateHistoricalRecord(
   record: RuntimeRecord,
   registry: RuntimeTypeRegistry
 ): void {
+  if (record.operation_type) {
+    if (!record.operation_schema_version) {
+      throw new Error(`Historical record ${record.record_id} is missing its operation schema version.`);
+    }
+    registry.requireOperation(record.operation_type, record.operation_schema_version);
+  }
   if (isRegisteredKind(record.kind)) {
     registry.validateHistoricalPayload(
       record.kind,
@@ -1346,6 +1407,7 @@ interface RuntimeRecordRow {
   schema_version: number;
   schema_ref: string;
   operation_type: string | null;
+  operation_schema_version: number | null;
   command_context: TrustedCommandContext;
   subject: RuntimeSubject;
   payload: RuntimePayload;
@@ -1363,6 +1425,9 @@ function mapRuntimeRecord(row: RuntimeRecordRow): RuntimeRecord {
     schema_version: row.schema_version,
     schema_ref: row.schema_ref,
     ...(row.operation_type ? { operation_type: row.operation_type } : {}),
+    ...(row.operation_schema_version
+      ? { operation_schema_version: row.operation_schema_version }
+      : {}),
     command_context: TrustedCommandContextSchema.parse(row.command_context),
     subject: RuntimeSubjectSchema.parse(row.subject),
     payload: RuntimePayloadSchema.parse(row.payload),

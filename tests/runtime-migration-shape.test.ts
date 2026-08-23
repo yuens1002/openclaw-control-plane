@@ -68,6 +68,7 @@ describe("M2 durable runtime migration shape", () => {
       "schema_version",
       "schema_ref",
       "operation_type",
+      "operation_schema_version",
       "command_context",
       "authenticated_principal_ref",
       "effective_actor",

@@ -98,6 +98,7 @@ export const runtimeRecords = pgTable(
     schemaVersion: integer("schema_version").notNull(),
     schemaRef: text("schema_ref").notNull(),
     operationType: text("operation_type"),
+    operationSchemaVersion: integer("operation_schema_version"),
     commandContext: jsonb("command_context").notNull(),
     authenticatedPrincipalRef: text("authenticated_principal_ref").notNull(),
     effectiveActor: jsonb("effective_actor").notNull(),
