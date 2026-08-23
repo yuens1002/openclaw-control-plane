@@ -143,19 +143,19 @@ ALTER TABLE tool_invocations
 INSERT INTO type_registrations
   (kind, type, schema_version, schema_ref, schema_digest, payload_schema, status, owner, retired_at)
 VALUES
-  ('event', 'legacy.event', 1, 'legacy://schemas/event/v1', 'legacy-unvalidated', '{}'::jsonb, 'retired', 'platform', now()),
-  ('work_item', 'legacy.work_item', 1, 'legacy://schemas/work-item/v1', 'legacy-unvalidated', '{}'::jsonb, 'retired', 'platform', now()),
-  ('result', 'legacy.result', 1, 'legacy://schemas/result/v1', 'legacy-unvalidated', '{}'::jsonb, 'retired', 'platform', now()),
-  ('artifact', 'legacy.artifact', 1, 'legacy://schemas/artifact/v1', 'legacy-unvalidated', '{}'::jsonb, 'retired', 'platform', now());
+  ('event', 'legacy.event', 1, 'legacy://schemas/event/v1', '44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a', '{}'::jsonb, 'retired', 'platform', now()),
+  ('work_item', 'legacy.work_item', 1, 'legacy://schemas/work-item/v1', '44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a', '{}'::jsonb, 'retired', 'platform', now()),
+  ('result', 'legacy.result', 1, 'legacy://schemas/result/v1', '44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a', '{}'::jsonb, 'retired', 'platform', now()),
+  ('artifact', 'legacy.artifact', 1, 'legacy://schemas/artifact/v1', '44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a', '{}'::jsonb, 'retired', 'platform', now());
 
 INSERT INTO operation_registrations
   (operation_type, command_schema_version, command_schema_ref, command_schema_digest,
    command_schema, handler_id, handler_version, authorization_action, approval_required, status, retired_at)
 VALUES
-  ('legacy.worker_run', 1, 'legacy://schemas/worker-run-command/v1', 'legacy-unvalidated', '{}'::jsonb, 'legacy-handler', 1, 'legacy.execute', false, 'retired', now()),
-  ('legacy.approval.resolve', 1, 'legacy://schemas/approval-command/v1', 'legacy-unvalidated', '{}'::jsonb, 'legacy-handler', 1, 'legacy.approve', false, 'retired', now()),
-  ('legacy.audit', 1, 'legacy://schemas/audit-command/v1', 'legacy-unvalidated', '{}'::jsonb, 'legacy-handler', 1, 'legacy.audit', false, 'retired', now()),
-  ('legacy.tool.invoke', 1, 'legacy://schemas/tool-command/v1', 'legacy-unvalidated', '{}'::jsonb, 'legacy-handler', 1, 'legacy.tool.invoke', false, 'retired', now());
+  ('legacy.worker_run', 1, 'legacy://schemas/worker-run-command/v1', '44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a', '{}'::jsonb, 'legacy-handler', 1, 'legacy.execute', false, 'retired', now()),
+  ('legacy.approval.resolve', 1, 'legacy://schemas/approval-command/v1', '44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a', '{}'::jsonb, 'legacy-handler', 1, 'legacy.approve', false, 'retired', now()),
+  ('legacy.audit', 1, 'legacy://schemas/audit-command/v1', '44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a', '{}'::jsonb, 'legacy-handler', 1, 'legacy.audit', false, 'retired', now()),
+  ('legacy.tool.invoke', 1, 'legacy://schemas/tool-command/v1', '44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a', '{}'::jsonb, 'legacy-handler', 1, 'legacy.tool.invoke', false, 'retired', now());
 
 UPDATE events SET runtime_record_id = gen_random_uuid() WHERE runtime_record_id IS NULL;
 UPDATE work_items SET runtime_record_id = gen_random_uuid() WHERE runtime_record_id IS NULL;
@@ -398,6 +398,7 @@ CREATE TABLE idempotency_records (
   command_digest text NOT NULL,
   status text NOT NULL,
   reserved_operation_id uuid NOT NULL,
+  claim_expires_at timestamptz NOT NULL,
   operation_record_id uuid REFERENCES runtime_records(record_id),
   result_record_ids uuid[] NOT NULL DEFAULT '{}',
   created_at timestamptz NOT NULL DEFAULT now(),

@@ -337,6 +337,13 @@ export const IdempotencyConflictAuditPayloadSchema = z
   })
   .strict();
 
+export const IdempotencyAbandonedAuditPayloadSchema = z
+  .object({
+    operation_type: SafeNamespacedIdentifierSchema,
+    reason: z.literal("claim_lease_expired")
+  })
+  .strict();
+
 export const OperationAuditPayloadSchema = z
   .object({
     outcome: z.enum(["succeeded", "failed", "cancelled"]),

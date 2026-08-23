@@ -335,6 +335,7 @@ export const idempotencyRecords = pgTable(
     commandDigest: text("command_digest").notNull(),
     status: text("status").notNull(),
     reservedOperationId: uuid("reserved_operation_id").notNull(),
+    claimExpiresAt: timestamp("claim_expires_at", { withTimezone: true }).notNull(),
     operationRecordId: uuid("operation_record_id").references(() => runtimeRecords.recordId),
     resultRecordIds: uuid("result_record_ids").array().notNull().default([]),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

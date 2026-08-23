@@ -16,6 +16,7 @@ import {
 import {
   PostgresRuntimeRepository,
   RuntimeTypeRegistry,
+  legacyTypeRegistrations,
   runSqlMigrations
 } from "@openclaw-control-plane/db";
 
@@ -106,6 +107,13 @@ describePostgres("M1 to durable runtime PostgreSQL migration", () => {
       "SELECT count(*)::text AS count FROM runtime_records WHERE authenticated_principal_ref = 'principal://legacy/system'"
     );
     expect(Number(legacy.rows[0]!.count)).toBeGreaterThanOrEqual(7);
+    const invalidDigests = await pool.query<{ count: string }>(`
+      SELECT (
+        (SELECT count(*) FROM type_registrations WHERE schema_digest !~ '^[a-f0-9]{64}$') +
+        (SELECT count(*) FROM operation_registrations WHERE command_schema_digest !~ '^[a-f0-9]{64}$')
+      )::text AS count
+    `);
+    expect(invalidDigests.rows[0]!.count).toBe("0");
 
     const migrated = await pool.query<{
       record_id: string;
@@ -157,6 +165,21 @@ describePostgres("M1 to durable runtime PostgreSQL migration", () => {
     expect(JSON.stringify(migrated.rows.map((row) => row.payload))).not.toMatch(
       /"(actor|effective_actor|authenticated_principal_ref|on_behalf_of_principal_ref|authorization|command_context)"\s*:/
     );
+
+    const replayRepository = new PostgresRuntimeRepository(
+      pool,
+      new RuntimeTypeRegistry(legacyTypeRegistrations)
+    );
+    await expect(
+      replayRepository.rebuildProjection({
+        stream_id: migrated.rows[0]!.stream_id,
+        projection_type: "legacy.replay_count",
+        subject: { type: "legacy.domain", id: "migrated" },
+        projection_version: 1,
+        initial_state: { count: 0 },
+        reduce: (state) => ({ count: Number(state.count) + 1 })
+      })
+    ).resolves.toMatchObject({ state: { count: 7 }, last_record_sequence: 7 });
   });
 });
 

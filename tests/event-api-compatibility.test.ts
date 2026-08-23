@@ -9,7 +9,10 @@ import type {
 
 describe("POST /events compatibility", () => {
   it("preserves inserted and duplicate response behavior through the store boundary", async () => {
-    const app = createControlPlaneApp({ eventStore: new InMemoryEventStore() });
+    const app = createControlPlaneApp({
+      eventStore: new InMemoryEventStore(),
+      eventCommandContext: trustedEventContext
+    });
     const event = fixture();
 
     const inserted = await app.request("/events", {
@@ -50,6 +53,17 @@ describe("POST /events compatibility", () => {
     });
 
     expect(response.status).toBe(400);
+  });
+
+  it("fails closed when trusted event context is not configured", async () => {
+    const app = createControlPlaneApp({ eventStore: new InMemoryEventStore() });
+    const response = await app.request("/events", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(fixture())
+    });
+
+    expect(response.status).toBe(503);
   });
 
   it("injects server-derived HTTP command context into persistence", async () => {
@@ -101,5 +115,20 @@ function fixture() {
     sensitivity: "business",
     idempotency_key: "api-event-key-3001",
     payload: { name: "Example Lead" }
+  };
+}
+
+function trustedEventContext(): TrustedCommandContext {
+  return {
+    authenticated_principal_ref: "principal://service/api-test",
+    effective_actor: { type: "service", id: "api-test" },
+    request_origin: "http",
+    authorization: {
+      decision_id: "api-event-ingest-default",
+      action: "runtime.event.ingest",
+      result: "allowed",
+      policy_version: "test-policy-v1",
+      reason_codes: ["runtime.test_ingest"]
+    }
   };
 }

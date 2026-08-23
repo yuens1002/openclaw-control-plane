@@ -7,6 +7,8 @@ import { runSqlMigrations } from "./migrations.js";
 import {
   exampleOperationRegistrations,
   exampleTypeRegistrations,
+  legacyTypeRegistrations,
+  legacyOperationRegistrations,
   runtimeTypeRegistrations,
   RuntimeTypeRegistry
 } from "./runtime-registry.js";
@@ -29,8 +31,8 @@ export async function initializePostgresRuntime(
   if (!databaseUrl.trim()) throw new Error("DATABASE_URL must not be empty.");
   const pool = new Pool({ connectionString: databaseUrl });
   const registry = new RuntimeTypeRegistry(
-    [...runtimeTypeRegistrations, ...exampleTypeRegistrations],
-    exampleOperationRegistrations
+    [...runtimeTypeRegistrations, ...legacyTypeRegistrations, ...exampleTypeRegistrations],
+    [...legacyOperationRegistrations, ...exampleOperationRegistrations]
   );
   const repository = new PostgresRuntimeRepository(pool, registry);
 

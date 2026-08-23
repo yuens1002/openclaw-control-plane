@@ -5,6 +5,7 @@ import {
   ApprovalAttributionPayloadSchema,
   AuthorizationDenialAuditPayloadSchema,
   CommandDigestSchema,
+  IdempotencyAbandonedAuditPayloadSchema,
   IdempotencyConflictAuditPayloadSchema,
   OperationAuditPayloadSchema,
   RuntimeKindSchema,
@@ -269,6 +270,9 @@ export class PostgresRuntimeRepository {
       command.records[0]!.record_id;
     const claimed = await reserveIdempotency(this.pool, command, reservedOperationId);
     if (claimed.kind === "replay") return claimed.result;
+    if (claimed.kind === "expired") {
+      return this.recoverExpiredReservation(command, claimed.reservedOperationId);
+    }
     if (claimed.kind === "conflict") {
       await this.appendConflictAuditTransaction(command);
       throw new IdempotencyConflictError();
@@ -305,7 +309,7 @@ export class PostgresRuntimeRepository {
         .filter((record) => record.kind === "result" || record.kind === "artifact")
         .map((record) => record.record_id);
       const terminalStatus = command.terminal_status ?? "succeeded";
-      await client.query(
+      const finalized = await client.query(
         `UPDATE idempotency_records
          SET status = $4, operation_record_id = $5, result_record_ids = $6, updated_at = now()
          WHERE authenticated_principal_ref = $1 AND operation_type = $2 AND idempotency_key = $3
@@ -319,6 +323,9 @@ export class PostgresRuntimeRepository {
           resultRecordIds
         ]
       );
+      if (finalized.rowCount !== 1) {
+        throw new Error("Idempotency reservation expired before the operation committed.");
+      }
       await client.query("COMMIT");
       return {
         status: "inserted",
@@ -611,6 +618,9 @@ export class PostgresRuntimeRepository {
     const reservedOperationId = command.records[0]!.record_id;
     const claimed = await reserveIdempotency(this.pool, command, reservedOperationId);
     if (claimed.kind === "replay") return claimed.result;
+    if (claimed.kind === "expired") {
+      return this.recoverExpiredReservation(command, claimed.reservedOperationId);
+    }
     if (claimed.kind === "conflict") {
       await this.appendConflictAuditTransaction(command);
       throw new IdempotencyConflictError();
@@ -624,7 +634,7 @@ export class PostgresRuntimeRepository {
         command.command_context,
         command.records
       );
-      await client.query(
+      const finalized = await client.query(
         `UPDATE idempotency_records
          SET status = 'succeeded', operation_record_id = $4, result_record_ids = '{}', updated_at = now()
          WHERE authenticated_principal_ref = $1 AND operation_type = $2 AND idempotency_key = $3
@@ -636,6 +646,9 @@ export class PostgresRuntimeRepository {
           inserted[0]!.record_id
         ]
       );
+      if (finalized.rowCount !== 1) {
+        throw new Error("Idempotency reservation expired before the denial audit committed.");
+      }
       await client.query("COMMIT");
       return {
         status: "inserted",
@@ -665,11 +678,67 @@ export class PostgresRuntimeRepository {
       client.release();
     }
   }
+
+  private async recoverExpiredReservation(
+    command: AppendRuntimeCommand,
+    reservedOperationId: string
+  ): Promise<RuntimeOperationResult> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await appendRecords(client, command.stream_id, command.command_context, [
+        {
+          record_id: reservedOperationId,
+          kind: "audit_entry",
+          type: "runtime.idempotency.abandoned",
+          schema_version: 1,
+          schema_ref: "runtime://schemas/idempotency-abandoned/v1",
+          operation_type: command.operation_type,
+          subject: { type: "runtime.operation", id: reservedOperationId },
+          payload: {
+            operation_type: command.operation_type,
+            reason: "claim_lease_expired"
+          },
+          occurred_at: new Date().toISOString()
+        }
+      ]);
+      const finalized = await client.query(
+        `UPDATE idempotency_records
+         SET status = 'failed', operation_record_id = reserved_operation_id,
+             result_record_ids = '{}', updated_at = now()
+         WHERE authenticated_principal_ref = $1 AND operation_type = $2
+           AND idempotency_key = $3 AND reserved_operation_id = $4
+           AND status = 'in_progress'`,
+        [
+          command.command_context.authenticated_principal_ref,
+          command.operation_type,
+          command.idempotency_key,
+          reservedOperationId
+        ]
+      );
+      if (finalized.rowCount !== 1) {
+        throw new Error("Expired idempotency reservation was recovered concurrently.");
+      }
+      await client.query("COMMIT");
+      return {
+        status: "replayed",
+        terminal_status: "failed",
+        operation_record_id: reservedOperationId,
+        result_record_ids: []
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
 }
 
 type ClaimedIdempotency =
   | { kind: "new" }
   | { kind: "conflict" }
+  | { kind: "expired"; reservedOperationId: string }
   | { kind: "replay"; result: RuntimeOperationResult };
 
 async function reserveIdempotency(
@@ -680,8 +749,9 @@ async function reserveIdempotency(
   const inserted = await pool.query(
     `INSERT INTO idempotency_records
        (authenticated_principal_ref, operation_type, idempotency_key,
-        canonicalization_version, command_digest, status, reserved_operation_id)
-     VALUES ($1, $2, $3, $4, $5, 'in_progress', $6)
+        canonicalization_version, command_digest, status, reserved_operation_id,
+        claim_expires_at)
+     VALUES ($1, $2, $3, $4, $5, 'in_progress', $6, now() + interval '5 minutes')
      ON CONFLICT (authenticated_principal_ref, operation_type, idempotency_key) DO NOTHING`,
     [
       command.command_context.authenticated_principal_ref,
@@ -697,11 +767,12 @@ async function reserveIdempotency(
     command_digest: string;
     status: "in_progress" | RuntimeTerminalStatus;
     reserved_operation_id: string;
+    claim_expires_at: Date;
     operation_record_id: string | null;
     result_record_ids: string[];
   }>(
     `SELECT canonicalization_version, command_digest, status,
-            reserved_operation_id, operation_record_id, result_record_ids
+            reserved_operation_id, claim_expires_at, operation_record_id, result_record_ids
      FROM idempotency_records
      WHERE authenticated_principal_ref = $1 AND operation_type = $2 AND idempotency_key = $3
      `,
@@ -721,6 +792,24 @@ async function reserveIdempotency(
     return { kind: "conflict" };
   }
   if (inserted.rowCount === 1) return { kind: "new" };
+  if (row.status === "in_progress" && new Date(row.claim_expires_at).getTime() <= Date.now()) {
+    const recovered = await pool.query<{ reserved_operation_id: string }>(
+      `UPDATE idempotency_records
+       SET claim_expires_at = now() + interval '5 minutes', updated_at = now()
+       WHERE authenticated_principal_ref = $1 AND operation_type = $2
+         AND idempotency_key = $3 AND status = 'in_progress'
+         AND claim_expires_at <= now()
+       RETURNING reserved_operation_id`,
+      [
+        command.command_context.authenticated_principal_ref,
+        command.operation_type,
+        command.idempotency_key
+      ]
+    );
+    if (recovered.rows[0]) {
+      return { kind: "expired", reservedOperationId: recovered.rows[0].reserved_operation_id };
+    }
+  }
   return {
     kind: "replay",
     result: {
@@ -925,6 +1014,15 @@ function validateAppendCommand(
   TrustedCommandContextSchema.parse(command.command_context);
   CommandDigestSchema.parse(command.command_digest);
   SafeNamespacedIdentifierSchema.parse(command.operation_type);
+  const operation = registry.requireOperation(
+    command.operation_type,
+    command.operation_schema_version
+  );
+  if (
+    command.command_context.authorization.action !== operation.authorization_action
+  ) {
+    throw new Error("Authorization action does not match the registered operation action.");
+  }
   registry.validateCommand(
     command.operation_type,
     command.operation_schema_version,
@@ -952,6 +1050,46 @@ function validateAppendCommand(
   for (const edge of command.edges ?? []) {
     if (!ids.has(edge.from_record_id) && !ids.has(edge.to_record_id)) {
       throw new Error("At least one edge endpoint must be part of the current command.");
+    }
+  }
+  const approvals = command.records.filter((record) => record.kind === "approval");
+  if (operation.approval_required && approvals.length !== 1) {
+    throw new Error(`Operation ${command.operation_type} requires exactly one approval record.`);
+  }
+  if (!operation.approval_required && approvals.length !== 0) {
+    throw new Error(`Operation ${command.operation_type} does not accept approval records.`);
+  }
+  const action = command.records.find((record) => record.kind === "action_attempt");
+  if (action) {
+    const payload = ActionAttributionPayloadSchema.parse(action.payload);
+    if (
+      payload.operation_type !== command.operation_type ||
+      payload.command_digest !== command.command_digest
+    ) {
+      throw new Error("Action attribution does not match its command identity.");
+    }
+  }
+  if (approvals[0]) {
+    const payload = ApprovalAttributionPayloadSchema.parse(approvals[0].payload);
+    if (
+      payload.operation_type !== command.operation_type ||
+      payload.command_digest !== command.command_digest ||
+      payload.decision !== "approved" ||
+      payload.approver_authorization.result !== "allowed" ||
+      payload.approver_authorization.action !== "runtime.command.approve"
+    ) {
+      throw new Error("Approval record is not authorized for this exact command.");
+    }
+    if (
+      !action ||
+      !(command.edges ?? []).some(
+        (edge) =>
+          edge.relation === "approved_by" &&
+          edge.from_record_id === action.record_id &&
+          edge.to_record_id === approvals[0]!.record_id
+      )
+    ) {
+      throw new Error("Approved commands require an approved_by edge from the action attempt.");
     }
   }
 }
@@ -1016,6 +1154,10 @@ function validateBuiltInRecord(
       "runtime.idempotency.conflict": {
         schema: IdempotencyConflictAuditPayloadSchema,
         schemaRef: "runtime://schemas/idempotency-conflict/v1"
+      },
+      "runtime.idempotency.abandoned": {
+        schema: IdempotencyAbandonedAuditPayloadSchema,
+        schemaRef: "runtime://schemas/idempotency-abandoned/v1"
       },
       "runtime.operation.audit": {
         schema: OperationAuditPayloadSchema,

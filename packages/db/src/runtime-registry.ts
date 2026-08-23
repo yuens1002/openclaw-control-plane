@@ -307,9 +307,40 @@ export const runtimeTypeRegistrations: readonly RuntimeTypeRegistration[] = [
   }
 ] as const;
 
+export const legacyTypeRegistrations: readonly RuntimeTypeRegistration[] = [
+  ["event", "legacy.event", "legacy://schemas/event/v1"],
+  ["work_item", "legacy.work_item", "legacy://schemas/work-item/v1"],
+  ["result", "legacy.result", "legacy://schemas/result/v1"],
+  ["artifact", "legacy.artifact", "legacy://schemas/artifact/v1"]
+].map(([kind, type, schemaRef]) => ({
+  kind: kind as RegisteredRuntimeKind,
+  type: type!,
+  schema_version: 1,
+  schema_ref: schemaRef!,
+  payload_schema: {},
+  status: "retired" as const,
+  owner: "platform"
+}));
+
 export const exampleOperationRegistrations: readonly RuntimeOperationRegistration[] = [
   {
     operation_type: "example.state.reconcile",
+    command_schema_version: 1,
+    command_schema_ref: "example://schemas/reconcile-command/v1",
+    command_schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: { desired: { type: "object" } }
+    },
+    allowed_result_types: ["example.reconciliation.delta"],
+    handler_id: "example-reconcile-handler",
+    handler_version: 1,
+    authorization_action: "state.reconcile",
+    approval_required: false,
+    status: "active"
+  },
+  {
+    operation_type: "example.state.reconcile_with_approval",
     command_schema_version: 1,
     command_schema_ref: "example://schemas/reconcile-command/v1",
     command_schema: {
@@ -325,6 +356,24 @@ export const exampleOperationRegistrations: readonly RuntimeOperationRegistratio
     status: "active"
   }
 ] as const;
+
+export const legacyOperationRegistrations: readonly RuntimeOperationRegistration[] = [
+  ["legacy.worker_run", "legacy://schemas/worker-run-command/v1", "legacy.execute"],
+  ["legacy.approval.resolve", "legacy://schemas/approval-command/v1", "legacy.approve"],
+  ["legacy.audit", "legacy://schemas/audit-command/v1", "legacy.audit"],
+  ["legacy.tool.invoke", "legacy://schemas/tool-command/v1", "legacy.tool.invoke"]
+].map(([operationType, schemaRef, authorizationAction]) => ({
+  operation_type: operationType!,
+  command_schema_version: 1,
+  command_schema_ref: schemaRef!,
+  command_schema: {},
+  allowed_result_types: [],
+  handler_id: "legacy-handler",
+  handler_version: 1,
+  authorization_action: authorizationAction!,
+  approval_required: false,
+  status: "retired" as const
+}));
 
 function typeKey(kind: RegisteredRuntimeKind, type: string, version: number): string {
   return `${kind}:${type}:${version}`;

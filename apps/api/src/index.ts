@@ -78,9 +78,12 @@ export function createControlPlaneApp(
       });
     }
 
-    const commandContext = dependencies.eventCommandContext
-      ? await dependencies.eventCommandContext()
-      : undefined;
+    if (!dependencies.eventCommandContext) {
+      throw new HTTPException(503, {
+        message: "Authenticated event ingestion is not configured."
+      });
+    }
+    const commandContext = await dependencies.eventCommandContext();
     const insertResult = await dependencies.eventStore.insertEventIfNew(
       parsedEvent.data,
       commandContext

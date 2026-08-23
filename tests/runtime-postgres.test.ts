@@ -92,7 +92,7 @@ describePostgres("PostgreSQL durable runtime repository", () => {
     expect(replayed).toEqual({ ...inserted, status: "replayed" });
     expect(event?.record_sequence).toBe(1);
     expect(attempt).toMatchObject({
-      operation_type: "example.state.reconcile",
+      operation_type: "example.state.reconcile_with_approval",
       command_context: {
         authenticated_principal_ref: "principal://service/runtime-test",
         effective_actor: { type: "service", id: "runtime-test" },
@@ -178,10 +178,20 @@ describePostgres("PostgreSQL durable runtime repository", () => {
     const repository = new PostgresRuntimeRepository(pool, registry);
     const command = lifecycleCommand("conflict-stream", "conflict-key-001");
     await repository.appendCommand(command);
+    const changedDigest = `sha256:${"b".repeat(64)}`;
+    const conflicting = {
+      ...command,
+      command_digest: changedDigest,
+      records: command.records.map((record) =>
+        record.kind === "action_attempt" || record.kind === "approval"
+          ? { ...record, payload: { ...record.payload, command_digest: changedDigest } }
+          : record
+      )
+    };
 
-    await expect(
-      repository.appendCommand({ ...command, command_digest: `sha256:${"b".repeat(64)}` })
-    ).rejects.toBeInstanceOf(IdempotencyConflictError);
+    await expect(repository.appendCommand(conflicting)).rejects.toBeInstanceOf(
+      IdempotencyConflictError
+    );
 
     const records = await pool.query<{ type: string }>(
       "SELECT type FROM runtime_records WHERE stream_id = 'conflict-stream' ORDER BY record_sequence"
@@ -222,6 +232,47 @@ describePostgres("PostgreSQL durable runtime repository", () => {
       "SELECT count(*)::text AS count FROM runtime_records WHERE stream_id = 'retry-stream'"
     );
     expect(count.rows[0]!.count).toBe("7");
+  });
+
+  it("recovers an expired crash reservation as a durable failed audit", async () => {
+    const repository = new PostgresRuntimeRepository(pool, registry);
+    const command = singleEventCommand(
+      "abandoned-stream",
+      "abandoned-key-001",
+      "00000000-0000-4000-8000-000000000502"
+    );
+    const reservedId = "00000000-0000-4000-8000-000000000501";
+    await pool.query(
+      `INSERT INTO idempotency_records
+         (authenticated_principal_ref, operation_type, idempotency_key,
+          canonicalization_version, command_digest, status,
+          reserved_operation_id, claim_expires_at)
+       VALUES ($1, $2, $3, $4, $5, 'in_progress', $6, now() - interval '1 minute')`,
+      [
+        command.command_context.authenticated_principal_ref,
+        command.operation_type,
+        command.idempotency_key,
+        command.canonicalization_version,
+        command.command_digest,
+        reservedId
+      ]
+    );
+
+    const recovered = await repository.appendCommand(command);
+    const replayed = await repository.appendCommand(command);
+    expect(recovered).toEqual({
+      status: "replayed",
+      terminal_status: "failed",
+      operation_record_id: reservedId,
+      result_record_ids: []
+    });
+    expect(replayed).toEqual(recovered);
+    const records = await pool.query<{ record_id: string; type: string }>(
+      "SELECT record_id, type FROM runtime_records WHERE stream_id = 'abandoned-stream'"
+    );
+    expect(records.rows).toEqual([
+      { record_id: reservedId, type: "runtime.idempotency.abandoned" }
+    ]);
   });
 
   it("rolls back records, stream allocation, and idempotency when a related write fails", async () => {
@@ -332,6 +383,39 @@ describePostgres("PostgreSQL durable runtime repository", () => {
     };
     await expect(repository.appendCommand(malformedAction)).rejects.toThrow();
 
+    await expect(
+      repository.appendCommand({
+        ...lifecycleCommand("wrong-auth-stream", "wrong-auth-key-001"),
+        command_context: {
+          ...trustedContext("allowed"),
+          authorization: {
+            ...trustedContext("allowed").authorization,
+            action: "runtime.unrelated_action"
+          }
+        }
+      })
+    ).rejects.toThrow(/authorization action/i);
+
+    const wrongApproval = lifecycleCommand("wrong-approval-stream", "wrong-approval-key-001");
+    wrongApproval.records = wrongApproval.records.map((record) =>
+      record.kind === "approval"
+        ? {
+            ...record,
+            payload: {
+              ...record.payload,
+              approver_authorization: {
+                decision_id: "approval-decision-001",
+                action: "runtime.unrelated_action",
+                result: "allowed",
+                policy_version: "policy-v1",
+                reason_codes: []
+              }
+            }
+          }
+        : record
+    );
+    await expect(repository.appendCommand(wrongApproval)).rejects.toThrow(/approval record/i);
+
     const invalidProducer = singleEventCommand(
       "producer-stream",
       "producer-key-001",
@@ -365,7 +449,7 @@ describePostgres("PostgreSQL durable runtime repository", () => {
       exampleOperationRegistrations
     );
     retiredRegistry.retireType("event", "example.observation", 1);
-    retiredRegistry.retireOperation("example.state.reconcile", 1);
+    retiredRegistry.retireOperation("example.state.reconcile_with_approval", 1);
     const retiredRepository = new PostgresRuntimeRepository(pool, retiredRegistry);
     await retiredRepository.synchronizeRegistry();
     const statuses = await pool.query<{ type_status: string; operation_status: string }>(`
@@ -373,7 +457,7 @@ describePostgres("PostgreSQL durable runtime repository", () => {
         (SELECT status FROM type_registrations
          WHERE kind = 'event' AND type = 'example.observation' AND schema_version = 1) AS type_status,
         (SELECT status FROM operation_registrations
-         WHERE operation_type = 'example.state.reconcile' AND command_schema_version = 1) AS operation_status
+         WHERE operation_type = 'example.state.reconcile_with_approval' AND command_schema_version = 1) AS operation_status
     `);
     expect(statuses.rows[0]).toEqual({ type_status: "retired", operation_status: "retired" });
     await expect(
@@ -433,7 +517,7 @@ const ids = {
 function lifecycleCommand(streamId: string, idempotencyKey: string): AppendRuntimeCommand {
   return {
     stream_id: streamId,
-    operation_type: "example.state.reconcile",
+    operation_type: "example.state.reconcile_with_approval",
     operation_schema_version: 1,
     idempotency_key: idempotencyKey,
     canonicalization_version: "jcs-rfc8785-v1",
@@ -454,7 +538,7 @@ function lifecycleCommand(streamId: string, idempotencyKey: string): AppendRunti
         "runtime://schemas/action-attribution/v1",
         {
           work_item_id: ids.work,
-          operation_type: "example.state.reconcile",
+          operation_type: "example.state.reconcile_with_approval",
           handler_id: "example-reconcile-handler",
           handler_version: 1,
           subject: { type: "example.environment", id: "production" },
@@ -485,7 +569,7 @@ function lifecycleCommand(streamId: string, idempotencyKey: string): AppendRunti
         "runtime://schemas/command-approval/v1",
         {
           work_item_id: ids.work,
-          operation_type: "example.state.reconcile",
+          operation_type: "example.state.reconcile_with_approval",
           action_revision: 1,
           command_digest: `sha256:${"a".repeat(64)}`,
           approved_by_principal_ref: "principal://user/example-owner",
@@ -537,10 +621,14 @@ function singleEventCommand(
 ): AppendRuntimeCommand {
   return {
     ...lifecycleCommand(streamId, idempotencyKey),
+    operation_type: "example.state.reconcile",
     records: [
-      record(recordId, "event", "example.observation", "example://schemas/observation/v1", {
-        statement: idempotencyKey
-      })
+      {
+        ...record(recordId, "event", "example.observation", "example://schemas/observation/v1", {
+          statement: idempotencyKey
+        }),
+        operation_type: "example.state.reconcile"
+      }
     ],
     edges: [],
     projection_updates: []
@@ -563,7 +651,7 @@ function record(
     subject: { type: "example.environment", id: "production" },
     payload,
     occurred_at: "2026-08-23T12:00:00.000Z",
-    operation_type: "example.state.reconcile"
+    operation_type: "example.state.reconcile_with_approval"
   } as const;
 }
 
@@ -575,7 +663,7 @@ function trustedContext(result: "allowed" | "denied") {
     request_origin: "internal" as const,
     authorization: {
       decision_id: result === "allowed" ? "decision-allowed-001" : "decision-denied-001",
-      action: "example.action.reconcile",
+      action: "state.reconcile",
       result,
       policy_version: "policy-v1",
       reason_codes: [result === "allowed" ? "example.policy.allowed" : "example.policy.denied"]
