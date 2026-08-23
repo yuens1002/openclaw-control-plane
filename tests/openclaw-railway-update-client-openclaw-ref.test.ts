@@ -177,7 +177,13 @@ describe("updateClientOpenClawRef", () => {
     // The guard must ignore a terminal status on the *pre-redeploy*
     // deployment, or a broken client could never be fixed by bumping its ref.
     const runner = new FakeRailwayRunner([
+      // 1st: consumed by the pre-redeploy listServices that captures the id.
       [{ id: "svc_acme", name: SERVICE, latestDeployment: { id: "dep_before", status: "CRASHED" } }],
+      // 2nd: the poll's first look -- still the stale CRASHED deployment.
+      // Without this the guarded terminal-status branch is never reached and
+      // the test passes without exercising what it claims to.
+      [{ id: "svc_acme", name: SERVICE, latestDeployment: { id: "dep_before", status: "CRASHED" } }],
+      // 3rd: the new deployment finally surfaces.
       [{ id: "svc_acme", name: SERVICE, latestDeployment: { id: "dep_after", status: "SUCCESS" } }]
     ]);
     runner.setVariableListResponse({ OPENCLAW_GIT_REF: OLD_REF, SETUP_PASSWORD: "setup-secret" });
