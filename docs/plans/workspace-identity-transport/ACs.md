@@ -1,7 +1,7 @@
 # Workspace Identity Transport ACs
 
 Source plan: `docs/plans/workspace-identity-transport/plan.md`. Delivers
-the transport half of issue #20 (content half lives in the private
+the transport half of issue #20 (content half is tracked in the private
 client-profile repo's own issue #3).
 
 Pass conditions are invariants over behavior (archive contents, auth
