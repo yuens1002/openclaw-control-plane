@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { createControlPlaneApp } from "@openclaw-control-plane/api";
 import { InMemoryEventStore } from "@openclaw-control-plane/db";
+import type {
+  EventEnvelope,
+  TrustedCommandContext
+} from "@openclaw-control-plane/contracts";
 
 describe("POST /events compatibility", () => {
   it("preserves inserted and duplicate response behavior through the store boundary", async () => {
@@ -46,6 +50,42 @@ describe("POST /events compatibility", () => {
     });
 
     expect(response.status).toBe(400);
+  });
+
+  it("injects server-derived HTTP command context into persistence", async () => {
+    let receivedContext: TrustedCommandContext | undefined;
+    const eventStore = {
+      insertEventIfNew: async (event: EventEnvelope, context?: TrustedCommandContext) => {
+        receivedContext = context;
+        return { status: "inserted" as const, event };
+      },
+      getEventByIdempotencyKey: async () => null
+    };
+    const commandContext: TrustedCommandContext = {
+      authenticated_principal_ref: "principal://service/api-test",
+      effective_actor: { type: "service", id: "api-test" },
+      request_origin: "http",
+      authorization: {
+        decision_id: "api-event-ingest-001",
+        action: "runtime.event.ingest",
+        result: "allowed",
+        policy_version: "test-policy-v1",
+        reason_codes: ["runtime.test_ingest"]
+      }
+    };
+    const app = createControlPlaneApp({
+      eventStore,
+      eventCommandContext: () => commandContext
+    });
+
+    const response = await app.request("/events", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(fixture())
+    });
+
+    expect(response.status).toBe(202);
+    expect(receivedContext).toEqual(commandContext);
   });
 });
 

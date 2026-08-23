@@ -35,6 +35,7 @@ export interface RuntimeOperationRegistration {
   handler_id: string;
   handler_version: number;
   authorization_action: string;
+  approval_required: boolean;
   status: RegistrationStatus;
   command_schema_digest?: string;
 }
@@ -64,7 +65,14 @@ export class RuntimeTypeRegistry {
 
   registerType(registration: RuntimeTypeRegistration): void {
     const key = typeKey(registration.kind, registration.type, registration.schema_version);
-    const digest = registration.schema_digest ?? digestJson(registration.payload_schema);
+    const computedDigest = digestJson(registration.payload_schema);
+    if (
+      registration.schema_digest !== undefined &&
+      registration.schema_digest !== computedDigest
+    ) {
+      throw new Error(`Type registration ${key} supplied an invalid schema digest.`);
+    }
+    const digest = computedDigest;
     const existing = this.types.get(key);
     if (existing) {
       if (
@@ -85,8 +93,14 @@ export class RuntimeTypeRegistry {
 
   registerOperation(registration: RuntimeOperationRegistration): void {
     const key = operationKey(registration.operation_type, registration.command_schema_version);
-    const digest =
-      registration.command_schema_digest ?? digestJson(registration.command_schema);
+    const computedDigest = digestJson(registration.command_schema);
+    if (
+      registration.command_schema_digest !== undefined &&
+      registration.command_schema_digest !== computedDigest
+    ) {
+      throw new Error(`Operation registration ${key} supplied an invalid schema digest.`);
+    }
+    const digest = computedDigest;
     const existing = this.operations.get(key);
     if (existing) {
       if (
@@ -95,6 +109,7 @@ export class RuntimeTypeRegistry {
         existing.handler_id !== registration.handler_id ||
         existing.handler_version !== registration.handler_version ||
         existing.authorization_action !== registration.authorization_action ||
+        existing.approval_required !== registration.approval_required ||
         !sameStrings(existing.allowed_result_types, registration.allowed_result_types)
       ) {
         throw new Error(`Operation registration ${key} conflicts with an existing schema.`);
@@ -142,6 +157,13 @@ export class RuntimeTypeRegistry {
     registration.status = "retired";
   }
 
+  retireOperation(operationType: string, schemaVersion: number): void {
+    const key = operationKey(operationType, schemaVersion);
+    const registration = this.operations.get(key);
+    if (!registration) throw new Error(`Operation registration ${key} is missing.`);
+    registration.status = "retired";
+  }
+
   validatePayload(
     kind: RegisteredRuntimeKind,
     type: string,
@@ -154,6 +176,26 @@ export class RuntimeTypeRegistry {
     if (registration.status !== "active") throw new Error(`Type registration ${key} is retired.`);
     if (!registration.validator(payload)) {
       throw new Error(`Payload failed ${key}: ${this.ajv.errorsText(registration.validator.errors)}.`);
+    }
+  }
+
+  validateHistoricalPayload(
+    kind: RegisteredRuntimeKind,
+    type: string,
+    schemaVersion: number,
+    schemaRef: string,
+    payload: unknown
+  ): void {
+    const key = typeKey(kind, type, schemaVersion);
+    const registration = this.types.get(key);
+    if (!registration) throw new Error(`Type registration ${key} is missing during replay.`);
+    if (registration.schema_ref !== schemaRef) {
+      throw new Error(`Schema reference for ${key} changed during replay.`);
+    }
+    if (!registration.validator(payload)) {
+      throw new Error(
+        `Historical payload failed ${key}: ${this.ajv.errorsText(registration.validator.errors)}.`
+      );
     }
   }
 
@@ -279,6 +321,7 @@ export const exampleOperationRegistrations: readonly RuntimeOperationRegistratio
     handler_id: "example-reconcile-handler",
     handler_version: 1,
     authorization_action: "state.reconcile",
+    approval_required: true,
     status: "active"
   }
 ] as const;

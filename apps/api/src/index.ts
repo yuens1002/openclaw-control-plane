@@ -5,7 +5,8 @@ import type { MiddlewareHandler } from "hono";
 import {
   EventEnvelopeSchema,
   DomainSchema,
-  type PipelineState
+  type PipelineState,
+  type TrustedCommandContext
 } from "@openclaw-control-plane/contracts";
 import {
   InMemoryEventStore,
@@ -16,6 +17,7 @@ import {
 export interface ControlPlaneDependencies {
   eventStore: EventStore;
   readiness?: () => Promise<RuntimeReadiness>;
+  eventCommandContext?: () => TrustedCommandContext | Promise<TrustedCommandContext>;
 }
 
 export function createControlPlaneApp(
@@ -76,7 +78,13 @@ export function createControlPlaneApp(
       });
     }
 
-    const insertResult = await dependencies.eventStore.insertEventIfNew(parsedEvent.data);
+    const commandContext = dependencies.eventCommandContext
+      ? await dependencies.eventCommandContext()
+      : undefined;
+    const insertResult = await dependencies.eventStore.insertEventIfNew(
+      parsedEvent.data,
+      commandContext
+    );
 
     return context.json(
       {

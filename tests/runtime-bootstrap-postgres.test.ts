@@ -53,7 +53,18 @@ describePostgres("PostgreSQL runtime bootstrap", () => {
       idempotency_key: "bootstrap-event-key-4001",
       payload: { statement: "ready" }
     });
-    await first.eventStore.insertEventIfNew(event);
+    await first.eventStore.insertEventIfNew(event, {
+      authenticated_principal_ref: "principal://service/bootstrap-test",
+      effective_actor: { type: "service", id: "bootstrap-test" },
+      request_origin: "internal",
+      authorization: {
+        decision_id: "bootstrap-ingest-4001",
+        action: "runtime.event.ingest",
+        result: "allowed",
+        policy_version: "test-policy-v1",
+        reason_codes: ["runtime.test_ingest"]
+      }
+    });
     await first.close();
 
     const restarted = await initializePostgresRuntime(

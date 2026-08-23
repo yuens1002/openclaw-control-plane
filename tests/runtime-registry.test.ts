@@ -47,6 +47,15 @@ describe("runtime type registry", () => {
     ).toThrow(/conflicts/i);
   });
 
+  it("recomputes rather than trusting supplied schema digests", () => {
+    const registration = exampleTypeRegistrations[0]!;
+    expect(() =>
+      new RuntimeTypeRegistry([
+        { ...registration, schema_digest: "0".repeat(64) }
+      ])
+    ).toThrow(/invalid schema digest/i);
+  });
+
   it("rejects operation behavior changes under an existing versioned key", () => {
     const registry = new RuntimeTypeRegistry([], exampleOperationRegistrations);
     const registration = exampleOperationRegistrations[0]!;
@@ -82,6 +91,15 @@ describe("runtime type registry", () => {
         { statement: "new write" }
       )
     ).toThrow(/retired/i);
+    expect(() =>
+      registry.validateHistoricalPayload(
+        registration.kind,
+        registration.type,
+        registration.schema_version,
+        registration.schema_ref,
+        { statement: "historical write" }
+      )
+    ).not.toThrow();
   });
 
   it("validates payloads with JSON Schema 2020-12", () => {

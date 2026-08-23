@@ -28,7 +28,15 @@ export function canonicalizeCommand(command: CanonicalCommand): string {
 }
 
 export function commandDigest(command: CanonicalCommand): string {
-  return `sha256:${createHash("sha256").update(canonicalizeCommand(command), "utf8").digest("hex")}`;
+  return jsonDigest(command);
+}
+
+export function jsonDigest(value: unknown): string {
+  const serialized = canonicalizeJson(value);
+  if (serialized === undefined) {
+    throw new TypeError("Value cannot be represented as canonical JSON.");
+  }
+  return `sha256:${createHash("sha256").update(serialized, "utf8").digest("hex")}`;
 }
 
 export function compareIdempotencyCommand(

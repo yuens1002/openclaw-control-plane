@@ -20,6 +20,7 @@ const workItemId = "00000000-0000-4000-8000-000000000010";
 const observationId = "00000000-0000-4000-8000-000000000011";
 const actionId = "00000000-0000-4000-8000-000000000012";
 const resultId = "00000000-0000-4000-8000-000000000013";
+const approvalId = "00000000-0000-4000-8000-000000000014";
 
 class FakeRepository implements RuntimeRepositoryBoundary {
   readonly appendCommand = vi.fn<(command: AppendRuntimeCommand) => Promise<RuntimeOperationResult>>(
@@ -92,16 +93,101 @@ describe("principal-aware runtime service", () => {
     expect(repository.appendCommand).not.toHaveBeenCalled();
   });
 
-  it("enforces an approved digest when one is supplied", async () => {
+  it("binds authorization evidence to the registered operation action", async () => {
     const repository = new FakeRepository();
     const service = createService(repository);
+    const input = allowedInput();
+    input.command_context.authorization.action = "state.read";
+
+    await expect(service.execute(input)).rejects.toThrow(/authorization action.*registered action/i);
+    expect(repository.appendCommand).not.toHaveBeenCalled();
+  });
+
+  it("requires evidence when the registered operation requires approval", async () => {
+    const repository = new FakeRepository();
+    const service = createService(repository, undefined, true);
+
+    await expect(service.execute(allowedInput())).rejects.toThrow(/requires approval evidence/i);
+    expect(repository.appendCommand).not.toHaveBeenCalled();
+  });
+
+  it("rejects approval evidence when operation metadata declares no approval", async () => {
+    const repository = new FakeRepository();
+    const service = createService(repository);
+    const input = allowedInput();
 
     await expect(
       service.execute({
-        ...allowedInput(),
-        approved_command_digest: `sha256:${"e".repeat(64)}`
+        ...input,
+        approval_evidence: approvalEvidence(input.command_digest)
       })
-    ).rejects.toThrow(/approved command digest/i);
+    ).rejects.toThrow(/does not accept approval evidence/i);
+    expect(repository.appendCommand).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["digest", { command_digest: `sha256:${"e".repeat(64)}` }, /approved command digest/i],
+    ["revision", { action_revision: 2 }, /approval action revision/i]
+  ])("rejects approval %s mismatch", async (_case, override, message) => {
+    const repository = new FakeRepository();
+    const service = createService(repository, undefined, true);
+    const input = allowedInput();
+
+    await expect(
+      service.execute({
+        ...input,
+        approval_evidence: { ...approvalEvidence(input.command_digest), ...override }
+      })
+    ).rejects.toThrow(message);
+    expect(repository.appendCommand).not.toHaveBeenCalled();
+  });
+
+  it("persists valid approval evidence and links the action with approved_by", async () => {
+    const repository = new FakeRepository();
+    const service = createService(repository, [actionId, approvalId, resultId], true);
+    const input = allowedInput();
+
+    await service.execute({
+      ...input,
+      approval_evidence: approvalEvidence(input.command_digest)
+    });
+
+    const append = repository.appendCommand.mock.calls[0]![0];
+    expect(append.records).toHaveLength(3);
+    expect(append.records[1]).toMatchObject({
+      record_id: approvalId,
+      kind: "approval",
+      type: "runtime.command.approval",
+      payload: {
+        work_item_id: workItemId,
+        action_revision: 1,
+        command_digest: input.command_digest,
+        approved_by_principal_ref: "principal://example/approver",
+        decision: "approved"
+      }
+    });
+    expect(append.edges).toContainEqual({
+      from_record_id: actionId,
+      relation: "approved_by",
+      to_record_id: approvalId,
+      ordinal: 0
+    });
+  });
+
+  it("binds the approval principal to trusted approver context", async () => {
+    const repository = new FakeRepository();
+    const service = createService(repository, undefined, true);
+    const input = allowedInput();
+
+    await expect(
+      service.execute({
+        ...input,
+        approval_evidence: {
+          ...approvalEvidence(input.command_digest),
+          approved_by_principal_ref: "principal://example/untrusted-approver"
+        }
+      })
+    ).rejects.toThrow(/approval principal.*trusted approver context/i);
     expect(repository.appendCommand).not.toHaveBeenCalled();
   });
 
@@ -179,11 +265,20 @@ describe("principal-aware runtime service", () => {
   });
 });
 
-function createService(repository: FakeRepository): PrincipalAwareRuntimeService {
-  const ids = [actionId, resultId];
+function createService(
+  repository: FakeRepository,
+  ids: string[] = [actionId, resultId],
+  approvalRequired = false
+): PrincipalAwareRuntimeService {
   return new PrincipalAwareRuntimeService(
     repository,
-    new RuntimeTypeRegistry(exampleTypeRegistrations, exampleOperationRegistrations),
+    new RuntimeTypeRegistry(
+      exampleTypeRegistrations,
+      exampleOperationRegistrations.map((registration) => ({
+        ...registration,
+        approval_required: approvalRequired
+      }))
+    ),
     { createId: () => ids.shift()! }
   );
 }
@@ -238,6 +333,30 @@ function allowedInput() {
       started_at: "2026-08-23T12:00:00.000Z",
       finished_at: "2026-08-23T12:00:01.000Z",
       outcome: "succeeded" as const
+    }
+  };
+}
+
+function approvalEvidence(approvedCommandDigest: string) {
+  return {
+    work_item_id: workItemId,
+    operation_type: "example.state.reconcile",
+    action_revision: 1,
+    command_digest: approvedCommandDigest,
+    approved_by_principal_ref: "principal://example/approver",
+    decision: "approved" as const,
+    decided_at: "2026-08-23T11:59:00.000Z",
+    approver_context: {
+      authenticated_principal_ref: "principal://example/approver",
+      effective_actor: { type: "user" as const, id: "example-approver" },
+      request_origin: "http" as const,
+      authorization: {
+        decision_id: "approver-authz-1",
+        action: "state.reconcile",
+        result: "allowed" as const,
+        policy_version: "policy-v1",
+        reason_codes: ["policy.approver_allowed"]
+      }
     }
   };
 }

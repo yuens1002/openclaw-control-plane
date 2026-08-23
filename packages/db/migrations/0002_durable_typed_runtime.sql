@@ -22,6 +22,7 @@ CREATE TABLE operation_registrations (
   handler_id text NOT NULL,
   handler_version integer NOT NULL CHECK (handler_version > 0),
   authorization_action text NOT NULL,
+  approval_required boolean NOT NULL DEFAULT false,
   status text NOT NULL CHECK (status IN ('active', 'retired')),
   created_at timestamptz NOT NULL DEFAULT now(),
   retired_at timestamptz,
@@ -149,12 +150,12 @@ VALUES
 
 INSERT INTO operation_registrations
   (operation_type, command_schema_version, command_schema_ref, command_schema_digest,
-   command_schema, handler_id, handler_version, authorization_action, status, retired_at)
+   command_schema, handler_id, handler_version, authorization_action, approval_required, status, retired_at)
 VALUES
-  ('legacy.worker_run', 1, 'legacy://schemas/worker-run-command/v1', 'legacy-unvalidated', '{}'::jsonb, 'legacy-handler', 1, 'legacy.execute', 'retired', now()),
-  ('legacy.approval.resolve', 1, 'legacy://schemas/approval-command/v1', 'legacy-unvalidated', '{}'::jsonb, 'legacy-handler', 1, 'legacy.approve', 'retired', now()),
-  ('legacy.audit', 1, 'legacy://schemas/audit-command/v1', 'legacy-unvalidated', '{}'::jsonb, 'legacy-handler', 1, 'legacy.audit', 'retired', now()),
-  ('legacy.tool.invoke', 1, 'legacy://schemas/tool-command/v1', 'legacy-unvalidated', '{}'::jsonb, 'legacy-handler', 1, 'legacy.tool.invoke', 'retired', now());
+  ('legacy.worker_run', 1, 'legacy://schemas/worker-run-command/v1', 'legacy-unvalidated', '{}'::jsonb, 'legacy-handler', 1, 'legacy.execute', false, 'retired', now()),
+  ('legacy.approval.resolve', 1, 'legacy://schemas/approval-command/v1', 'legacy-unvalidated', '{}'::jsonb, 'legacy-handler', 1, 'legacy.approve', false, 'retired', now()),
+  ('legacy.audit', 1, 'legacy://schemas/audit-command/v1', 'legacy-unvalidated', '{}'::jsonb, 'legacy-handler', 1, 'legacy.audit', false, 'retired', now()),
+  ('legacy.tool.invoke', 1, 'legacy://schemas/tool-command/v1', 'legacy-unvalidated', '{}'::jsonb, 'legacy-handler', 1, 'legacy.tool.invoke', false, 'retired', now());
 
 UPDATE events SET runtime_record_id = gen_random_uuid() WHERE runtime_record_id IS NULL;
 UPDATE work_items SET runtime_record_id = gen_random_uuid() WHERE runtime_record_id IS NULL;
@@ -167,7 +168,7 @@ UPDATE tool_invocations SET runtime_record_id = gen_random_uuid() WHERE runtime_
 CREATE TEMP TABLE legacy_runtime_record_stage AS
 SELECT
   e.runtime_record_id AS record_id,
-  'domain:' || e.domain AS stream_id,
+  'legacy-domain:' || encode(digest(e.domain, 'sha256'), 'hex') AS stream_id,
   'event'::text AS kind,
   e.registered_type AS type,
   e.schema_version,
@@ -175,46 +176,47 @@ SELECT
   NULL::text AS operation_type,
   jsonb_build_object(
     'authenticated_principal_ref', 'principal://legacy/system',
-    'effective_actor', e.actor,
+    'effective_actor', jsonb_build_object('type', 'system', 'id', 'legacy-migration'),
     'request_origin', 'internal',
     'authorization', jsonb_build_object('decision_id', 'legacy', 'action', 'legacy.ingest', 'result', 'allowed', 'policy_version', 'legacy')
   ) AS command_context,
   'principal://legacy/system'::text AS authenticated_principal_ref,
-  e.actor AS effective_actor,
-  e.subject,
-  e.payload,
+  jsonb_build_object('type', 'system', 'id', 'legacy-migration') AS effective_actor,
+  jsonb_build_object('type', 'legacy.event', 'id', e.event_id::text) AS subject,
+  (e.payload - ARRAY['actor', 'effective_actor', 'authenticated_principal_ref', 'on_behalf_of_principal_ref', 'authorization', 'command_context'])
+    || jsonb_build_object('legacy_subject', e.subject, 'legacy_caller', e.actor) AS payload,
   e.occurred_at,
   e.created_at AS recorded_at
 FROM events e
 UNION ALL
 SELECT
   w.runtime_record_id,
-  'domain:' || w.domain,
+  'legacy-domain:' || encode(digest(w.domain, 'sha256'), 'hex'),
   'work_item',
   w.work_type,
   w.schema_version,
   w.schema_ref,
   NULL::text,
-  jsonb_build_object('authenticated_principal_ref', 'principal://legacy/system', 'effective_actor', jsonb_build_object('type', 'system', 'id', 'legacy'), 'request_origin', 'internal', 'authorization', jsonb_build_object('decision_id', 'legacy', 'action', 'legacy.work', 'result', 'allowed', 'policy_version', 'legacy')),
+  jsonb_build_object('authenticated_principal_ref', 'principal://legacy/system', 'effective_actor', jsonb_build_object('type', 'system', 'id', 'legacy-migration'), 'request_origin', 'internal', 'authorization', jsonb_build_object('decision_id', 'legacy', 'action', 'legacy.work', 'result', 'allowed', 'policy_version', 'legacy')),
   'principal://legacy/system',
-  jsonb_build_object('type', 'system', 'id', 'legacy'),
-  jsonb_build_object('type', w.subject_type, 'id', w.subject_id),
-  jsonb_build_object('status', w.status, 'current_owner', w.current_owner, 'next_action', w.next_action, 'last_evidence', w.last_evidence),
+  jsonb_build_object('type', 'system', 'id', 'legacy-migration'),
+  jsonb_build_object('type', 'legacy.work_item', 'id', w.id::text),
+  jsonb_build_object('status', w.status, 'current_owner', w.current_owner, 'next_action', w.next_action, 'last_evidence', w.last_evidence, 'legacy_subject', jsonb_build_object('type', w.subject_type, 'id', w.subject_id)),
   w.created_at,
   w.created_at
 FROM work_items w
 UNION ALL
 SELECT
   wr.runtime_record_id,
-  'domain:' || w.domain,
+  'legacy-domain:' || encode(digest(w.domain, 'sha256'), 'hex'),
   'action_attempt',
   wr.operation_type,
   wr.operation_schema_version,
   'legacy://schemas/worker-run-command/v1',
   wr.operation_type,
-  jsonb_build_object('authenticated_principal_ref', wr.authenticated_principal_ref, 'effective_actor', jsonb_build_object('type', 'system', 'id', wr.worker_id), 'request_origin', 'worker', 'authorization', jsonb_build_object('decision_id', 'legacy', 'action', 'legacy.execute', 'result', 'allowed', 'policy_version', 'legacy')),
-  wr.authenticated_principal_ref,
-  jsonb_build_object('type', 'system', 'id', wr.worker_id),
+  jsonb_build_object('authenticated_principal_ref', 'principal://legacy/system', 'effective_actor', jsonb_build_object('type', 'system', 'id', 'legacy-migration'), 'request_origin', 'internal', 'authorization', jsonb_build_object('decision_id', 'legacy', 'action', 'legacy.execute', 'result', 'allowed', 'policy_version', 'legacy')),
+  'principal://legacy/system',
+  jsonb_build_object('type', 'system', 'id', 'legacy-migration'),
   jsonb_build_object('type', 'legacy.work_item', 'id', wr.work_item_id::text),
   jsonb_build_object('status', wr.status, 'attempt', wr.attempt, 'error_message', wr.error_message),
   COALESCE(wr.started_at, wr.finished_at, w.created_at),
@@ -224,15 +226,15 @@ JOIN work_items w ON w.id = wr.work_item_id
 UNION ALL
 SELECT
   ar.runtime_record_id,
-  'domain:' || w.domain,
+  'legacy-domain:' || encode(digest(w.domain, 'sha256'), 'hex'),
   'approval',
   ar.operation_type,
   1,
   'legacy://schemas/approval-command/v1',
   ar.operation_type,
-  jsonb_build_object('authenticated_principal_ref', ar.authenticated_principal_ref, 'effective_actor', jsonb_build_object('type', 'system', 'id', 'legacy'), 'request_origin', 'internal', 'authorization', jsonb_build_object('decision_id', 'legacy', 'action', 'legacy.approve', 'result', 'allowed', 'policy_version', 'legacy')),
-  ar.authenticated_principal_ref,
-  jsonb_build_object('type', 'system', 'id', 'legacy'),
+  jsonb_build_object('authenticated_principal_ref', 'principal://legacy/system', 'effective_actor', jsonb_build_object('type', 'system', 'id', 'legacy-migration'), 'request_origin', 'internal', 'authorization', jsonb_build_object('decision_id', 'legacy', 'action', 'legacy.approve', 'result', 'allowed', 'policy_version', 'legacy')),
+  'principal://legacy/system',
+  jsonb_build_object('type', 'system', 'id', 'legacy-migration'),
   jsonb_build_object('type', 'legacy.work_item', 'id', ar.work_item_id::text),
   jsonb_build_object('status', ar.status, 'reason', ar.reason, 'payload', ar.payload, 'canonicalization_version', ar.canonicalization_version, 'command_digest', ar.command_digest),
   COALESCE(ar.resolved_at, w.created_at),
@@ -242,15 +244,15 @@ JOIN work_items w ON w.id = ar.work_item_id
 UNION ALL
 SELECT
   a.runtime_record_id,
-  'domain:' || a.domain,
+  'legacy-domain:' || encode(digest(a.domain, 'sha256'), 'hex'),
   'artifact',
   a.registered_type,
   a.schema_version,
   a.schema_ref,
   NULL::text,
-  jsonb_build_object('authenticated_principal_ref', a.authenticated_principal_ref, 'effective_actor', jsonb_build_object('type', 'system', 'id', 'legacy'), 'request_origin', 'internal', 'authorization', jsonb_build_object('decision_id', 'legacy', 'action', 'legacy.artifact', 'result', 'allowed', 'policy_version', 'legacy')),
-  a.authenticated_principal_ref,
-  jsonb_build_object('type', 'system', 'id', 'legacy'),
+  jsonb_build_object('authenticated_principal_ref', 'principal://legacy/system', 'effective_actor', jsonb_build_object('type', 'system', 'id', 'legacy-migration'), 'request_origin', 'internal', 'authorization', jsonb_build_object('decision_id', 'legacy', 'action', 'legacy.artifact', 'result', 'allowed', 'policy_version', 'legacy')),
+  'principal://legacy/system',
+  jsonb_build_object('type', 'system', 'id', 'legacy-migration'),
   jsonb_build_object('type', 'legacy.artifact', 'id', a.artifact_id::text),
   jsonb_build_object('legacy_type', a.type, 'title', a.title, 'content_uri', a.content_uri, 'summary', a.summary, 'approval_state', a.approval_state),
   a.created_at,
@@ -259,34 +261,34 @@ FROM artifacts a
 UNION ALL
 SELECT
   al.runtime_record_id,
-  'domain:' || al.domain,
+  'legacy-domain:' || encode(digest(al.domain, 'sha256'), 'hex'),
   'audit_entry',
   al.operation_type,
   1,
   'legacy://schemas/audit-command/v1',
   al.operation_type,
-  jsonb_build_object('authenticated_principal_ref', al.authenticated_principal_ref, 'effective_actor', jsonb_build_object('type', 'system', 'id', 'legacy'), 'request_origin', 'internal', 'authorization', jsonb_build_object('decision_id', 'legacy', 'action', 'legacy.audit', 'result', 'allowed', 'policy_version', 'legacy')),
-  al.authenticated_principal_ref,
-  jsonb_build_object('type', 'system', 'id', 'legacy'),
-  al.target,
-  jsonb_build_object('actor', al.actor, 'action', al.action, 'summary', al.summary, 'diff', al.diff),
+  jsonb_build_object('authenticated_principal_ref', 'principal://legacy/system', 'effective_actor', jsonb_build_object('type', 'system', 'id', 'legacy-migration'), 'request_origin', 'internal', 'authorization', jsonb_build_object('decision_id', 'legacy', 'action', 'legacy.audit', 'result', 'allowed', 'policy_version', 'legacy')),
+  'principal://legacy/system',
+  jsonb_build_object('type', 'system', 'id', 'legacy-migration'),
+  jsonb_build_object('type', 'legacy.audit_entry', 'id', al.audit_id::text),
+  jsonb_build_object('legacy_caller', al.actor, 'action', al.action, 'summary', al.summary, 'diff', al.diff, 'legacy_target', al.target),
   al.occurred_at,
   al.occurred_at
 FROM audit_log al
 UNION ALL
 SELECT
   ti.runtime_record_id,
-  'domain:' || COALESCE(ti.domain, 'legacy-global'),
-  'tool_invocation',
+  'legacy-domain:' || encode(digest(COALESCE(ti.domain, 'legacy-global'), 'sha256'), 'hex'),
+  'action_attempt',
   ti.operation_type,
   1,
   'legacy://schemas/tool-command/v1',
   ti.operation_type,
-  jsonb_build_object('authenticated_principal_ref', ti.authenticated_principal_ref, 'effective_actor', jsonb_build_object('type', 'system', 'id', 'legacy'), 'request_origin', 'tool', 'authorization', jsonb_build_object('decision_id', 'legacy', 'action', 'legacy.tool.invoke', 'result', 'allowed', 'policy_version', 'legacy')),
-  ti.authenticated_principal_ref,
-  jsonb_build_object('type', 'system', 'id', 'legacy'),
-  jsonb_build_object('type', 'legacy.tool', 'id', ti.tool_name),
-  jsonb_build_object('input', ti.input, 'output', ti.output, 'status', ti.status, 'legacy_actor', ti.actor),
+  jsonb_build_object('authenticated_principal_ref', 'principal://legacy/system', 'effective_actor', jsonb_build_object('type', 'system', 'id', 'legacy-migration'), 'request_origin', 'internal', 'authorization', jsonb_build_object('decision_id', 'legacy', 'action', 'legacy.tool.invoke', 'result', 'allowed', 'policy_version', 'legacy')),
+  'principal://legacy/system',
+  jsonb_build_object('type', 'system', 'id', 'legacy-migration'),
+  jsonb_build_object('type', 'legacy.tool_invocation', 'id', ti.id::text),
+  jsonb_build_object('input', ti.input, 'output', ti.output, 'status', ti.status, 'legacy_caller', ti.actor, 'legacy_tool_name', ti.tool_name),
   ti.created_at,
   ti.created_at
 FROM tool_invocations ti;
@@ -395,6 +397,7 @@ CREATE TABLE idempotency_records (
   canonicalization_version text NOT NULL,
   command_digest text NOT NULL,
   status text NOT NULL,
+  reserved_operation_id uuid NOT NULL,
   operation_record_id uuid REFERENCES runtime_records(record_id),
   result_record_ids uuid[] NOT NULL DEFAULT '{}',
   created_at timestamptz NOT NULL DEFAULT now(),

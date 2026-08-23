@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  ActionAttributionPayloadSchema,
+  ApprovalAttributionPayloadSchema,
+  AuthorizationDenialAuditPayloadSchema,
   CommandDigestSchema,
+  IdempotencyConflictAuditPayloadSchema,
+  OperationAuditPayloadSchema,
   RuntimeKindSchema,
   RuntimePayloadSchema,
   RuntimeSubjectSchema,
@@ -14,13 +19,14 @@ import {
 } from "@openclaw-control-plane/contracts";
 import type { Pool, PoolClient } from "pg";
 
-import { compareIdempotencyCommand } from "./canonical-command.js";
+import { compareIdempotencyCommand, jsonDigest } from "./canonical-command.js";
 import {
   RuntimeTypeRegistry,
   type RegisteredRuntimeKind
 } from "./runtime-registry.js";
 
 export type RuntimeTerminalStatus = "succeeded" | "failed";
+export type RuntimeOperationStatus = "in_progress" | RuntimeTerminalStatus;
 
 export interface RuntimeRecordDraft {
   record_id: string;
@@ -87,7 +93,7 @@ export interface AppendRuntimeCommand {
 
 export interface RuntimeOperationResult {
   status: "inserted" | "replayed";
-  terminal_status: RuntimeTerminalStatus;
+  terminal_status: RuntimeOperationStatus;
   operation_record_id: string;
   result_record_ids: string[];
 }
@@ -116,7 +122,8 @@ export class IdempotencyConflictError extends Error {
 export class PostgresRuntimeRepository {
   constructor(
     private readonly pool: Pool,
-    private readonly registry: RuntimeTypeRegistry
+    private readonly registry: RuntimeTypeRegistry,
+    private readonly hooks: { afterIdempotencyReserved?: () => Promise<void> } = {}
   ) {}
 
   async synchronizeRegistry(): Promise<void> {
@@ -160,6 +167,18 @@ export class PostgresRuntimeRepository {
               `Persisted type registration ${registration.kind}:${registration.type}:${registration.schema_version} conflicts with startup registry.`
             );
           }
+          await client.query(
+            `UPDATE type_registrations
+             SET status = $4,
+                 retired_at = CASE WHEN $4 = 'retired' THEN COALESCE(retired_at, now()) ELSE NULL END
+             WHERE kind = $1 AND type = $2 AND schema_version = $3`,
+            [
+              registration.kind,
+              registration.type,
+              registration.schema_version,
+              registration.status
+            ]
+          );
         }
       }
 
@@ -168,8 +187,8 @@ export class PostgresRuntimeRepository {
           `INSERT INTO operation_registrations
              (operation_type, command_schema_version, command_schema_ref,
               command_schema_digest, command_schema, allowed_result_types,
-              handler_id, handler_version, authorization_action, status)
-           VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10)
+              handler_id, handler_version, authorization_action, approval_required, status)
+           VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11)
            ON CONFLICT (operation_type, command_schema_version) DO NOTHING
            RETURNING command_schema_digest, command_schema_ref`,
           [
@@ -182,6 +201,7 @@ export class PostgresRuntimeRepository {
             registration.handler_id,
             registration.handler_version,
             registration.authorization_action,
+            registration.approval_required,
             registration.status
           ]
         );
@@ -193,9 +213,11 @@ export class PostgresRuntimeRepository {
             handler_id: string;
             handler_version: number;
             authorization_action: string;
+            approval_required: boolean;
           }>(
             `SELECT command_schema_digest, command_schema_ref, allowed_result_types,
                     handler_id, handler_version, authorization_action
+                    , approval_required
              FROM operation_registrations
              WHERE operation_type = $1 AND command_schema_version = $2`,
             [registration.operation_type, registration.command_schema_version]
@@ -206,6 +228,7 @@ export class PostgresRuntimeRepository {
             existing.rows[0]?.handler_id !== registration.handler_id ||
             existing.rows[0]?.handler_version !== registration.handler_version ||
             existing.rows[0]?.authorization_action !== registration.authorization_action ||
+            existing.rows[0]?.approval_required !== registration.approval_required ||
             JSON.stringify(existing.rows[0]?.allowed_result_types) !==
               JSON.stringify(registration.allowed_result_types)
           ) {
@@ -213,6 +236,17 @@ export class PostgresRuntimeRepository {
               `Persisted operation registration ${registration.operation_type}:${registration.command_schema_version} conflicts with startup registry.`
             );
           }
+          await client.query(
+            `UPDATE operation_registrations
+             SET status = $3,
+                 retired_at = CASE WHEN $3 = 'retired' THEN COALESCE(retired_at, now()) ELSE NULL END
+             WHERE operation_type = $1 AND command_schema_version = $2`,
+            [
+              registration.operation_type,
+              registration.command_schema_version,
+              registration.status
+            ]
+          );
         }
       }
       await client.query("COMMIT");
@@ -230,20 +264,25 @@ export class PostgresRuntimeRepository {
       throw new Error("Denied command context may only use recordAuthorizationDecision.");
     }
 
+    const reservedOperationId =
+      command.records.find((record) => record.kind === "action_attempt")?.record_id ??
+      command.records[0]!.record_id;
+    const claimed = await reserveIdempotency(this.pool, command, reservedOperationId);
+    if (claimed.kind === "replay") return claimed.result;
+    if (claimed.kind === "conflict") {
+      await this.appendConflictAuditTransaction(command);
+      throw new IdempotencyConflictError();
+    }
+    try {
+      await this.hooks.afterIdempotencyReserved?.();
+    } catch (error) {
+      await releaseIdempotencyReservation(this.pool, command, reservedOperationId);
+      throw error;
+    }
+
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      const claimed = await claimIdempotency(client, command);
-      if (claimed.kind === "replay") {
-        await client.query("COMMIT");
-        return claimed.result;
-      }
-      if (claimed.kind === "conflict") {
-        await appendConflictAudit(client, command);
-        await client.query("COMMIT");
-        throw new IdempotencyConflictError();
-      }
-
       const inserted = await appendRecords(client, command.stream_id, command.command_context, command.records);
       await appendResultReceipts(
         client,
@@ -269,7 +308,8 @@ export class PostgresRuntimeRepository {
       await client.query(
         `UPDATE idempotency_records
          SET status = $4, operation_record_id = $5, result_record_ids = $6, updated_at = now()
-         WHERE authenticated_principal_ref = $1 AND operation_type = $2 AND idempotency_key = $3`,
+         WHERE authenticated_principal_ref = $1 AND operation_type = $2 AND idempotency_key = $3
+           AND reserved_operation_id = $5 AND status = 'in_progress'`,
         [
           command.command_context.authenticated_principal_ref,
           command.operation_type,
@@ -287,9 +327,8 @@ export class PostgresRuntimeRepository {
         result_record_ids: resultRecordIds
       };
     } catch (error) {
-      if (!(error instanceof IdempotencyConflictError)) {
-        await client.query("ROLLBACK");
-      }
+      await client.query("ROLLBACK");
+      await releaseIdempotencyReservation(this.pool, command, reservedOperationId);
       throw error;
     } finally {
       client.release();
@@ -308,7 +347,12 @@ export class PostgresRuntimeRepository {
       operation_schema_version: 1,
       idempotency_key: `authorization:${context.authorization.decision_id}`,
       canonicalization_version: "authorization-decision-v1",
-      command_digest: context.authorization.decision_id,
+      command_digest: jsonDigest({
+        operation_type: input.operation_type,
+        target: input.target,
+        request_id: input.request_id,
+        authorization: context.authorization
+      }),
       command_arguments: {},
       command_context: context,
       records: [
@@ -414,6 +458,9 @@ export class PostgresRuntimeRepository {
         [input.stream_id]
       );
       const records = result.rows.map(mapRuntimeRecord);
+      for (const record of records) {
+        validateHistoricalRecord(record, this.registry);
+      }
       const state = records.reduce(input.reduce, input.initial_state);
       RuntimePayloadSchema.parse(state);
       const lastRecord = records.at(-1);
@@ -512,11 +559,12 @@ export class PostgresRuntimeRepository {
       handler_id: string;
       handler_version: number;
       authorization_action: string;
+      approval_required: boolean;
       status: string;
     }>(
       `SELECT operation_type, command_schema_version, command_schema_ref,
               command_schema_digest, allowed_result_types, handler_id,
-              handler_version, authorization_action, status
+              handler_version, authorization_action, approval_required, status
        FROM operation_registrations`
     );
     const typeRows = new Map(
@@ -550,6 +598,7 @@ export class PostgresRuntimeRepository {
           row.handler_id === registration.handler_id &&
           row.handler_version === registration.handler_version &&
           row.authorization_action === registration.authorization_action &&
+          row.approval_required === registration.approval_required &&
           JSON.stringify(row.allowed_result_types) ===
             JSON.stringify(registration.allowed_result_types) &&
           row.status === registration.status
@@ -559,15 +608,16 @@ export class PostgresRuntimeRepository {
   }
 
   private async appendDeniedAudit(command: AppendRuntimeCommand): Promise<RuntimeOperationResult> {
+    const reservedOperationId = command.records[0]!.record_id;
+    const claimed = await reserveIdempotency(this.pool, command, reservedOperationId);
+    if (claimed.kind === "replay") return claimed.result;
+    if (claimed.kind === "conflict") {
+      await this.appendConflictAuditTransaction(command);
+      throw new IdempotencyConflictError();
+    }
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      const claimed = await claimIdempotency(client, command);
-      if (claimed.kind === "replay") {
-        await client.query("COMMIT");
-        return claimed.result;
-      }
-      if (claimed.kind === "conflict") throw new IdempotencyConflictError();
       const inserted = await appendRecords(
         client,
         command.stream_id,
@@ -577,7 +627,8 @@ export class PostgresRuntimeRepository {
       await client.query(
         `UPDATE idempotency_records
          SET status = 'succeeded', operation_record_id = $4, result_record_ids = '{}', updated_at = now()
-         WHERE authenticated_principal_ref = $1 AND operation_type = $2 AND idempotency_key = $3`,
+         WHERE authenticated_principal_ref = $1 AND operation_type = $2 AND idempotency_key = $3
+           AND reserved_operation_id = $4 AND status = 'in_progress'`,
         [
           command.command_context.authenticated_principal_ref,
           command.operation_type,
@@ -594,6 +645,21 @@ export class PostgresRuntimeRepository {
       };
     } catch (error) {
       await client.query("ROLLBACK");
+      await releaseIdempotencyReservation(this.pool, command, reservedOperationId);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  private async appendConflictAuditTransaction(command: AppendRuntimeCommand): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await appendConflictAudit(client, command);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
       throw error;
     } finally {
       client.release();
@@ -606,36 +672,39 @@ type ClaimedIdempotency =
   | { kind: "conflict" }
   | { kind: "replay"; result: RuntimeOperationResult };
 
-async function claimIdempotency(
-  client: PoolClient,
-  command: AppendRuntimeCommand
+async function reserveIdempotency(
+  pool: Pool,
+  command: AppendRuntimeCommand,
+  reservedOperationId: string
 ): Promise<ClaimedIdempotency> {
-  const inserted = await client.query(
+  const inserted = await pool.query(
     `INSERT INTO idempotency_records
        (authenticated_principal_ref, operation_type, idempotency_key,
-        canonicalization_version, command_digest, status)
-     VALUES ($1, $2, $3, $4, $5, 'in_progress')
+        canonicalization_version, command_digest, status, reserved_operation_id)
+     VALUES ($1, $2, $3, $4, $5, 'in_progress', $6)
      ON CONFLICT (authenticated_principal_ref, operation_type, idempotency_key) DO NOTHING`,
     [
       command.command_context.authenticated_principal_ref,
       command.operation_type,
       command.idempotency_key,
       command.canonicalization_version,
-      command.command_digest
+      command.command_digest,
+      reservedOperationId
     ]
   );
-  const current = await client.query<{
+  const current = await pool.query<{
     canonicalization_version: string;
     command_digest: string;
     status: "in_progress" | RuntimeTerminalStatus;
+    reserved_operation_id: string;
     operation_record_id: string | null;
     result_record_ids: string[];
   }>(
     `SELECT canonicalization_version, command_digest, status,
-            operation_record_id, result_record_ids
+            reserved_operation_id, operation_record_id, result_record_ids
      FROM idempotency_records
      WHERE authenticated_principal_ref = $1 AND operation_type = $2 AND idempotency_key = $3
-     FOR UPDATE`,
+     `,
     [
       command.command_context.authenticated_principal_ref,
       command.operation_type,
@@ -652,18 +721,34 @@ async function claimIdempotency(
     return { kind: "conflict" };
   }
   if (inserted.rowCount === 1) return { kind: "new" };
-  if (!row.operation_record_id || row.status === "in_progress") {
-    throw new Error("Idempotency record remained in progress without an operation reference.");
-  }
   return {
     kind: "replay",
     result: {
       status: "replayed",
       terminal_status: row.status,
-      operation_record_id: row.operation_record_id,
+      operation_record_id: row.operation_record_id ?? row.reserved_operation_id,
       result_record_ids: row.result_record_ids
     }
   };
+}
+
+async function releaseIdempotencyReservation(
+  pool: Pool,
+  command: AppendRuntimeCommand,
+  reservedOperationId: string
+): Promise<void> {
+  await pool.query(
+    `DELETE FROM idempotency_records
+     WHERE authenticated_principal_ref = $1 AND operation_type = $2
+       AND idempotency_key = $3 AND reserved_operation_id = $4
+       AND status = 'in_progress'`,
+    [
+      command.command_context.authenticated_principal_ref,
+      command.operation_type,
+      command.idempotency_key,
+      reservedOperationId
+    ]
+  );
 }
 
 async function appendRecords(
@@ -744,6 +829,19 @@ async function appendResultReceipts(
     );
     if (!producer) {
       throw new Error(`Result record ${record.record_id} requires a producing action edge.`);
+    }
+    const currentProducer = records.find(
+      (candidate) => candidate.record_id === producer.from_record_id
+    );
+    const producerKind = currentProducer?.kind ??
+      (
+        await client.query<{ kind: RuntimeKind }>(
+          "SELECT kind FROM runtime_records WHERE record_id = $1",
+          [producer.from_record_id]
+        )
+      ).rows[0]?.kind;
+    if (producerKind !== "action_attempt") {
+      throw new Error(`Result record ${record.record_id} must be produced by an action attempt.`);
     }
     await client.query(
       `INSERT INTO results
@@ -847,6 +945,8 @@ function validateAppendCommand(
         throw new Error(`Schema reference for ${record.type} does not match its registration.`);
       }
       registry.validatePayload(record.kind, record.type, record.schema_version, record.payload);
+    } else {
+      validateBuiltInRecord(record);
     }
   }
   for (const edge of command.edges ?? []) {
@@ -858,6 +958,79 @@ function validateAppendCommand(
 
 function isRegisteredKind(kind: RuntimeKind): kind is RegisteredRuntimeKind {
   return kind === "event" || kind === "work_item" || kind === "result" || kind === "artifact";
+}
+
+function validateHistoricalRecord(
+  record: RuntimeRecord,
+  registry: RuntimeTypeRegistry
+): void {
+  if (isRegisteredKind(record.kind)) {
+    registry.validateHistoricalPayload(
+      record.kind,
+      record.type,
+      record.schema_version,
+      record.schema_ref,
+      record.payload
+    );
+    return;
+  }
+  if (record.type.startsWith("legacy.")) {
+    RuntimePayloadSchema.parse(record.payload);
+    return;
+  }
+  validateBuiltInRecord(record);
+}
+
+function validateBuiltInRecord(
+  record: Pick<RuntimeRecordDraft, "kind" | "type" | "schema_version" | "schema_ref" | "payload">
+): void {
+  if (record.schema_version !== 1) {
+    throw new Error(`Built-in runtime record ${record.type} requires schema version 1.`);
+  }
+  if (record.kind === "action_attempt") {
+    if (
+      record.type !== "runtime.action.attempt" ||
+      record.schema_ref !== "runtime://schemas/action-attribution/v1"
+    ) {
+      throw new Error("Action attempts must use the built-in action-attribution schema.");
+    }
+    ActionAttributionPayloadSchema.parse(record.payload);
+    return;
+  }
+  if (record.kind === "approval") {
+    if (
+      record.type !== "runtime.command.approval" ||
+      record.schema_ref !== "runtime://schemas/command-approval/v1"
+    ) {
+      throw new Error("Approvals must use the built-in command-approval schema.");
+    }
+    ApprovalAttributionPayloadSchema.parse(record.payload);
+    return;
+  }
+  if (record.kind === "audit_entry") {
+    const schemas = {
+      "runtime.authorization.denied": {
+        schema: AuthorizationDenialAuditPayloadSchema,
+        schemaRef: "runtime://schemas/authorization-denied/v1"
+      },
+      "runtime.idempotency.conflict": {
+        schema: IdempotencyConflictAuditPayloadSchema,
+        schemaRef: "runtime://schemas/idempotency-conflict/v1"
+      },
+      "runtime.operation.audit": {
+        schema: OperationAuditPayloadSchema,
+        schemaRef: "runtime://schemas/audit-entry/v1"
+      }
+    } as const;
+    const definition = schemas[record.type as keyof typeof schemas];
+    if (!definition) throw new Error(`Unknown built-in audit type ${record.type}.`);
+    if (record.schema_ref !== definition.schemaRef) {
+      throw new Error(`Audit record ${record.type} has an unexpected schema reference.`);
+    }
+    definition.schema.parse(record.payload);
+    return;
+  }
+  throw new Error(`Runtime kind ${record.kind} cannot be appended as a direct record.`);
 }
 
 interface RuntimeRecordRow {

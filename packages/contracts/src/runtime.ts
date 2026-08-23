@@ -195,6 +195,7 @@ export const OperationRegistrationSchema = z
     handler_id: SafeLocalIdentifierSchema,
     handler_version: z.number().int().positive(),
     authorization_action: SafeNamespacedIdentifierSchema,
+    approval_required: z.boolean(),
     status: z.enum(["active", "retired"])
   })
   .strict();
@@ -285,3 +286,59 @@ export const ActionAttributionSchema = z
   })
   .strict();
 export type ActionAttribution = z.infer<typeof ActionAttributionSchema>;
+
+export const ActionAttributionPayloadSchema = ActionAttributionSchema.omit({
+  id: true,
+  command_context: true
+});
+export type ActionAttributionPayload = z.infer<
+  typeof ActionAttributionPayloadSchema
+>;
+
+export const ApprovalAttributionSchema = z
+  .object({
+    id: z.string().uuid(),
+    work_item_id: z.string().uuid(),
+    operation_type: SafeNamespacedIdentifierSchema,
+    action_revision: z.number().int().positive(),
+    command_digest: CommandDigestSchema,
+    approved_by_principal_ref: z
+      .string()
+      .min(13)
+      .max(512)
+      .regex(/^principal:\/\/[A-Za-z0-9][A-Za-z0-9._:@/-]*$/),
+    decision: z.enum(["approved", "rejected"]),
+    decided_at: z.string().datetime()
+  })
+  .strict();
+export type ApprovalAttribution = z.infer<typeof ApprovalAttributionSchema>;
+
+export const ApprovalAttributionPayloadSchema = ApprovalAttributionSchema.omit({
+  id: true
+});
+export type ApprovalAttributionPayload = z.infer<
+  typeof ApprovalAttributionPayloadSchema
+>;
+
+export const AuthorizationDenialAuditPayloadSchema = z
+  .object({
+    request_id: SafeLocalIdentifierSchema,
+    decision_id: SafeLocalIdentifierSchema,
+    policy_version: SafeLocalIdentifierSchema,
+    reason_codes: z.array(SafeNamespacedIdentifierSchema)
+  })
+  .strict();
+
+export const IdempotencyConflictAuditPayloadSchema = z
+  .object({
+    operation_type: SafeNamespacedIdentifierSchema
+  })
+  .strict();
+
+export const OperationAuditPayloadSchema = z
+  .object({
+    outcome: z.enum(["succeeded", "failed", "cancelled"]),
+    authorization_decision_id: SafeLocalIdentifierSchema.optional(),
+    result_refs: z.array(RecordRefSchema).optional()
+  })
+  .strict();

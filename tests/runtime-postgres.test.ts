@@ -102,13 +102,19 @@ describePostgres("PostgreSQL durable runtime repository", () => {
       },
       payload: {
         work_item_id: ids.work,
-        trigger: { type: "event", record_id: ids.event },
-        causation_record_id: ids.work,
+        trigger: { type: "event", ref: { kind: "event", id: ids.event } },
+        causation_ref: { kind: "work_item", id: ids.work },
         correlation_id: "correlation-001",
         request_id: "request-allowed-001",
         tool_invocation_id: "tool-invocation-001",
-        input_record_ids: [ids.event, ids.work],
-        result_record_ids: [ids.result, ids.artifact],
+        input_refs: [
+          { kind: "event", id: ids.event },
+          { kind: "work_item", id: ids.work }
+        ],
+        result_refs: [
+          { kind: "result", id: ids.result },
+          { kind: "artifact", id: ids.artifact }
+        ],
         command_digest: `sha256:${"a".repeat(64)}`,
         started_at: "2026-08-23T12:00:00.000Z",
         finished_at: "2026-08-23T12:00:01.000Z",
@@ -185,18 +191,33 @@ describePostgres("PostgreSQL durable runtime repository", () => {
   });
 
   it("coalesces concurrent equal retries onto one durable operation", async () => {
-    const repository = new PostgresRuntimeRepository(pool, registry);
     const command = lifecycleCommand("retry-stream", "retry-key-001");
+    let releaseReservation!: () => void;
+    let signalReserved!: () => void;
+    const reserved = new Promise<void>((resolve) => { signalReserved = resolve; });
+    const release = new Promise<void>((resolve) => { releaseReservation = resolve; });
+    const firstRepository = new PostgresRuntimeRepository(pool, registry, {
+      afterIdempotencyReserved: async () => {
+        signalReserved();
+        await release;
+      }
+    });
+    const replayRepository = new PostgresRuntimeRepository(pool, registry);
 
-    const results = await Promise.all([
-      repository.appendCommand(command),
-      repository.appendCommand(command)
-    ]);
-
-    expect(results.map((result) => result.status).sort()).toEqual(["inserted", "replayed"]);
-    expect(new Set(results.map((result) => result.operation_record_id))).toEqual(
-      new Set([ids.attempt])
-    );
+    const firstPromise = firstRepository.appendCommand(command);
+    await reserved;
+    const inProgress = await replayRepository.appendCommand(command);
+    expect(inProgress).toEqual({
+      status: "replayed",
+      terminal_status: "in_progress",
+      operation_record_id: ids.attempt,
+      result_record_ids: []
+    });
+    releaseReservation();
+    const inserted = await firstPromise;
+    const terminal = await replayRepository.appendCommand(command);
+    expect(inserted.status).toBe("inserted");
+    expect(terminal).toEqual({ ...inserted, status: "replayed" });
     const count = await pool.query<{ count: string }>(
       "SELECT count(*)::text AS count FROM runtime_records WHERE stream_id = 'retry-stream'"
     );
@@ -272,6 +293,127 @@ describePostgres("PostgreSQL durable runtime repository", () => {
     ]);
   });
 
+  it("content-binds denial audit idempotency and audits changed evidence", async () => {
+    const repository = new PostgresRuntimeRepository(pool, registry);
+    const input = {
+      stream_id: "denial-conflict-stream",
+      operation_type: "example.state.reconcile",
+      target: { type: "example.environment", id: "production" },
+      request_id: "request-denied-001",
+      command_context: trustedContext("denied")
+    } as const;
+    await repository.recordAuthorizationDecision(input);
+    await expect(
+      repository.recordAuthorizationDecision({
+        ...input,
+        request_id: "request-denied-002"
+      })
+    ).rejects.toBeInstanceOf(IdempotencyConflictError);
+
+    const records = await pool.query<{ type: string }>(
+      "SELECT type FROM runtime_records WHERE stream_id = 'denial-conflict-stream' ORDER BY record_sequence"
+    );
+    expect(records.rows.map((row) => row.type)).toEqual([
+      "runtime.authorization.denied",
+      "runtime.idempotency.conflict"
+    ]);
+  });
+
+  it("rejects malformed built-in records and non-action result producers", async () => {
+    const repository = new PostgresRuntimeRepository(pool, registry);
+    const malformed = lifecycleCommand("malformed-stream", "malformed-key-001");
+    const malformedAction = {
+      ...malformed,
+      records: malformed.records.map((record) =>
+        record.record_id === ids.attempt
+          ? { ...record, payload: { outcome: "succeeded" } }
+          : record
+      )
+    };
+    await expect(repository.appendCommand(malformedAction)).rejects.toThrow();
+
+    const invalidProducer = singleEventCommand(
+      "producer-stream",
+      "producer-key-001",
+      "00000000-0000-4000-8000-000000000401"
+    );
+    invalidProducer.records = [
+      ...invalidProducer.records,
+      record(
+        "00000000-0000-4000-8000-000000000402",
+        "result",
+        "example.reconciliation.delta",
+        "example://schemas/reconciliation-delta/v1",
+        { changed: true }
+      )
+    ];
+    invalidProducer.edges = [{
+      from_record_id: invalidProducer.records[0]!.record_id,
+      relation: "produced",
+      to_record_id: invalidProducer.records[1]!.record_id,
+      ordinal: 0
+    }];
+    await expect(repository.appendCommand(invalidProducer)).rejects.toThrow(/action attempt/i);
+  });
+
+  it("persists retirement while preserving historical replay and failing missing-schema replay", async () => {
+    const repository = new PostgresRuntimeRepository(pool, registry);
+    await repository.appendCommand(lifecycleCommand("retirement-stream", "retirement-key-001"));
+
+    const retiredRegistry = new RuntimeTypeRegistry(
+      exampleTypeRegistrations,
+      exampleOperationRegistrations
+    );
+    retiredRegistry.retireType("event", "example.observation", 1);
+    retiredRegistry.retireOperation("example.state.reconcile", 1);
+    const retiredRepository = new PostgresRuntimeRepository(pool, retiredRegistry);
+    await retiredRepository.synchronizeRegistry();
+    const statuses = await pool.query<{ type_status: string; operation_status: string }>(`
+      SELECT
+        (SELECT status FROM type_registrations
+         WHERE kind = 'event' AND type = 'example.observation' AND schema_version = 1) AS type_status,
+        (SELECT status FROM operation_registrations
+         WHERE operation_type = 'example.state.reconcile' AND command_schema_version = 1) AS operation_status
+    `);
+    expect(statuses.rows[0]).toEqual({ type_status: "retired", operation_status: "retired" });
+    await expect(
+      retiredRepository.rebuildProjection({
+        stream_id: "retirement-stream",
+        projection_type: "example.retired_replay",
+        subject: { type: "example.environment", id: "production" },
+        projection_version: 1,
+        initial_state: { count: 0 },
+        reduce: (state) => ({ count: Number(state.count) + 1 })
+      })
+    ).resolves.toMatchObject({ last_record_sequence: 7 });
+    await expect(
+      retiredRepository.appendCommand(
+        singleEventCommand(
+          "retirement-stream",
+          "retirement-key-002",
+          "00000000-0000-4000-8000-000000000403"
+        )
+      )
+    ).rejects.toThrow(/retired/i);
+
+    const missingRegistry = new RuntimeTypeRegistry(
+      exampleTypeRegistrations.filter((item) => item.type !== "example.observation"),
+      exampleOperationRegistrations
+    );
+    await expect(
+      new PostgresRuntimeRepository(pool, missingRegistry).rebuildProjection({
+        stream_id: "retirement-stream",
+        projection_type: "example.missing_schema",
+        subject: { type: "example.environment", id: "production" },
+        projection_version: 1,
+        initial_state: {},
+        reduce: (state) => state
+      })
+    ).rejects.toThrow(/missing during replay/i);
+
+    await repository.synchronizeRegistry();
+  });
+
   it("reports database, migration, and registry readiness independently", async () => {
     const readiness = await new PostgresRuntimeRepository(pool, registry).readiness();
     expect(readiness).toEqual({ database: "ready", migrations: "ready", registry: "ready" });
@@ -308,19 +450,27 @@ function lifecycleCommand(streamId: string, idempotencyKey: string): AppendRunti
       record(
         ids.attempt,
         "action_attempt",
-        "example.action_attempt",
-        "runtime://schemas/action-attempt/v1",
+        "runtime.action.attempt",
+        "runtime://schemas/action-attribution/v1",
         {
           work_item_id: ids.work,
+          operation_type: "example.state.reconcile",
           handler_id: "example-reconcile-handler",
           handler_version: 1,
-          trigger: { type: "event", record_id: ids.event },
-          causation_record_id: ids.work,
+          subject: { type: "example.environment", id: "production" },
+          trigger: { type: "event", ref: { kind: "event", id: ids.event } },
+          causation_ref: { kind: "work_item", id: ids.work },
           correlation_id: "correlation-001",
           request_id: "request-allowed-001",
           tool_invocation_id: "tool-invocation-001",
-          input_record_ids: [ids.event, ids.work],
-          result_record_ids: [ids.result, ids.artifact],
+          input_refs: [
+            { kind: "event", id: ids.event },
+            { kind: "work_item", id: ids.work }
+          ],
+          result_refs: [
+            { kind: "result", id: ids.result },
+            { kind: "artifact", id: ids.artifact }
+          ],
           canonicalization_version: "jcs-rfc8785-v1",
           command_digest: `sha256:${"a".repeat(64)}`,
           started_at: "2026-08-23T12:00:00.000Z",
@@ -331,11 +481,16 @@ function lifecycleCommand(streamId: string, idempotencyKey: string): AppendRunti
       record(
         ids.approval,
         "approval",
-        "example.action.approval",
-        "runtime://schemas/approval/v1",
+        "runtime.command.approval",
+        "runtime://schemas/command-approval/v1",
         {
+          work_item_id: ids.work,
+          operation_type: "example.state.reconcile",
+          action_revision: 1,
+          command_digest: `sha256:${"a".repeat(64)}`,
+          approved_by_principal_ref: "principal://user/example-owner",
           decision: "approved",
-          approved_command_digest: `sha256:${"a".repeat(64)}`
+          decided_at: "2026-08-23T11:59:00.000Z"
         }
       ),
       record(ids.result, "result", "example.reconciliation.delta", "example://schemas/reconciliation-delta/v1", {
@@ -344,7 +499,7 @@ function lifecycleCommand(streamId: string, idempotencyKey: string): AppendRunti
       record(ids.artifact, "artifact", "example.report", "example://schemas/report/v1", {
         content_ref: "artifact://example/report-001"
       }),
-      record(ids.audit, "audit_entry", "example.operation.audited", "runtime://schemas/audit-entry/v1", {
+      record(ids.audit, "audit_entry", "runtime.operation.audit", "runtime://schemas/audit-entry/v1", {
         outcome: "succeeded"
       })
     ],

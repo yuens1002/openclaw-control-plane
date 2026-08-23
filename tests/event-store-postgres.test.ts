@@ -57,7 +57,7 @@ describePostgres("PostgresEventStore", () => {
     const store = new PostgresEventStore(pool);
     const event = fixture("00000000-0000-4000-8000-000000002001", "event-key-2001");
 
-    expect(await store.insertEventIfNew(event)).toEqual({ status: "inserted", event });
+    expect(await store.insertEventIfNew(event, trustedEventContext("2001"))).toEqual({ status: "inserted", event });
     expect(await store.getEventByIdempotencyKey(event.idempotency_key)).toEqual(event);
 
     const persisted = await pool.query<{
@@ -77,8 +77,8 @@ describePostgres("PostgresEventStore", () => {
       runtime_record_id: event.event_id,
       record_sequence: "1",
       type: "runtime.ingested_event",
-      authenticated_principal_ref: "principal://service/event-store",
-      effective_actor: { type: "service", id: "event-store" },
+      authenticated_principal_ref: "principal://service/api-test",
+      effective_actor: { type: "service", id: "api-test" },
       payload: { reported_actor: event.actor }
     });
   });
@@ -91,12 +91,13 @@ describePostgres("PostgresEventStore", () => {
       event_id: "00000000-0000-4000-8000-000000002003"
     };
 
-    const inserted = await store.insertEventIfNew(original);
+    const context = trustedEventContext("2002");
+    const inserted = await store.insertEventIfNew(original, context);
     const [first, second] = await Promise.all([
-      store.insertEventIfNew(retry),
-      store.insertEventIfNew(retry)
+      store.insertEventIfNew(retry, context),
+      store.insertEventIfNew(retry, context)
     ]);
-    const sequential = await store.insertEventIfNew(retry);
+    const sequential = await store.insertEventIfNew(retry, context);
 
     expect(inserted).toEqual({ status: "inserted", event: original });
     expect(first.status).toBe("duplicate");
@@ -119,8 +120,14 @@ describePostgres("PostgresEventStore", () => {
     const store = new PostgresEventStore(pool);
 
     await Promise.all([
-      store.insertEventIfNew(fixture("00000000-0000-4000-8000-000000002004", "event-key-2004")),
-      store.insertEventIfNew(fixture("00000000-0000-4000-8000-000000002005", "event-key-2005"))
+      store.insertEventIfNew(
+        fixture("00000000-0000-4000-8000-000000002004", "event-key-2004"),
+        trustedEventContext("2004")
+      ),
+      store.insertEventIfNew(
+        fixture("00000000-0000-4000-8000-000000002005", "event-key-2005"),
+        trustedEventContext("2005")
+      )
     ]);
 
     const records = await pool.query<{ record_sequence: string }>(
@@ -148,7 +155,9 @@ describePostgres("PostgresEventStore", () => {
     `);
 
     try {
-      await expect(store.insertEventIfNew(event)).rejects.toThrow("forced event insert failure");
+      await expect(
+        store.insertEventIfNew(event, trustedEventContext("2006"))
+      ).rejects.toThrow("forced event insert failure");
     } finally {
       await pool.query("DROP TRIGGER reject_test_event_insert ON events");
       await pool.query("DROP FUNCTION reject_test_event_insert() ");
@@ -177,4 +186,19 @@ function fixture(eventId: string, idempotencyKey: string): EventEnvelope {
     idempotency_key: idempotencyKey,
     payload: { name: "Example Lead" }
   });
+}
+
+function trustedEventContext(suffix: string) {
+  return {
+    authenticated_principal_ref: "principal://service/api-test",
+    effective_actor: { type: "service" as const, id: "api-test" },
+    request_origin: "http" as const,
+    authorization: {
+      decision_id: `event-ingest-${suffix}`,
+      action: "runtime.event.ingest",
+      result: "allowed" as const,
+      policy_version: "test-policy-v1",
+      reason_codes: ["runtime.test_ingest"]
+    }
+  };
 }

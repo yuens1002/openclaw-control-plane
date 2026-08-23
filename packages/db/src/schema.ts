@@ -70,6 +70,7 @@ export const operationRegistrations = pgTable(
     handlerId: text("handler_id").notNull(),
     handlerVersion: integer("handler_version").notNull(),
     authorizationAction: text("authorization_action").notNull(),
+    approvalRequired: boolean("approval_required").notNull().default(false),
     status: text("status").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     retiredAt: timestamp("retired_at", { withTimezone: true })
@@ -333,6 +334,7 @@ export const idempotencyRecords = pgTable(
     canonicalizationVersion: text("canonicalization_version").notNull(),
     commandDigest: text("command_digest").notNull(),
     status: text("status").notNull(),
+    reservedOperationId: uuid("reserved_operation_id").notNull(),
     operationRecordId: uuid("operation_record_id").references(() => runtimeRecords.recordId),
     resultRecordIds: uuid("result_record_ids").array().notNull().default([]),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

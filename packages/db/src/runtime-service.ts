@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  ActionAttributionPayloadSchema,
   ActionAttributionSchema,
+  ApprovalAttributionPayloadSchema,
   CanonicalCommandEnvelopeSchema,
   CommandDigestSchema,
-  RuntimePayloadSchema,
   TrustedCommandContextSchema,
   type ActionTrigger,
   type CanonicalCommandEnvelope,
@@ -45,10 +46,21 @@ export interface ExecuteRuntimeCommandInput {
   idempotency_key: string;
   command: unknown;
   command_digest: string;
-  approved_command_digest?: string;
+  approval_evidence?: RuntimeApprovalEvidence;
   command_context: unknown;
   action: RuntimeActionMetadata;
   projection_updates?: readonly RuntimeProjectionUpdate[];
+}
+
+export interface RuntimeApprovalEvidence {
+  work_item_id: string;
+  operation_type: string;
+  action_revision: number;
+  command_digest: string;
+  approved_by_principal_ref: string;
+  decision: "approved" | "rejected";
+  decided_at: string;
+  approver_context: unknown;
 }
 
 export interface RuntimeServiceOptions {
@@ -75,11 +87,12 @@ export class PrincipalAwareRuntimeService {
     if (suppliedDigest !== computedDigest) {
       throw new Error("Supplied command digest does not match the canonical command envelope.");
     }
-    if (
-      input.approved_command_digest !== undefined &&
-      CommandDigestSchema.parse(input.approved_command_digest) !== computedDigest
-    ) {
-      throw new Error("Approved command digest does not match the canonical command envelope.");
+
+    const operation = this.validateCommand(command);
+    if (context.authorization.action !== operation.authorization_action) {
+      throw new Error(
+        `Authorization action ${context.authorization.action} does not match registered action ${operation.authorization_action}.`
+      );
     }
 
     if (context.authorization.result === "denied") {
@@ -92,7 +105,15 @@ export class PrincipalAwareRuntimeService {
       });
     }
 
-    const operation = this.validateCommand(command);
+    if (operation.approval_required && input.approval_evidence === undefined) {
+      throw new Error(`Operation ${command.operation_type} requires approval evidence.`);
+    }
+    if (!operation.approval_required && input.approval_evidence !== undefined) {
+      throw new Error(`Operation ${command.operation_type} does not accept approval evidence.`);
+    }
+    const approval = input.approval_evidence
+      ? validateApprovalEvidence(input.approval_evidence, command, computedDigest)
+      : undefined;
     for (const effect of command.declared_effects) {
       if (!operation.allowed_result_types.includes(effect.result_type)) {
         throw new Error(
@@ -116,6 +137,7 @@ export class PrincipalAwareRuntimeService {
     }
 
     const actionRecordId = this.createId();
+    const approvalRecordId = approval ? this.createId() : undefined;
     const resultRecords = command.declared_effects.map(
       (effect) =>
         ({
@@ -153,8 +175,9 @@ export class PrincipalAwareRuntimeService {
       outcome: input.action.outcome,
       result_refs: resultRecords.map((record) => ({ kind: "result" as const, id: record.record_id }))
     });
-    const { command_context: _trustedContext, id: _id, ...actionPayload } = actionAttribution;
-    RuntimePayloadSchema.parse(actionPayload);
+    const { command_context: _trustedContext, id: _id, ...unvalidatedActionPayload } =
+      actionAttribution;
+    const actionPayload = ActionAttributionPayloadSchema.parse(unvalidatedActionPayload);
 
     return this.repository.appendCommand({
       stream_id: input.stream_id,
@@ -177,6 +200,21 @@ export class PrincipalAwareRuntimeService {
           occurred_at: input.action.finished_at,
           operation_type: command.operation_type
         },
+        ...(approval && approvalRecordId
+          ? [
+              {
+                record_id: approvalRecordId,
+                kind: "approval" as const,
+                type: "runtime.command.approval",
+                schema_version: 1,
+                schema_ref: "runtime://schemas/command-approval/v1",
+                subject: command.target,
+                payload: approval.payload,
+                occurred_at: approval.decided_at,
+                operation_type: command.operation_type
+              }
+            ]
+          : []),
         ...resultRecords
       ],
       edges: [
@@ -192,6 +230,16 @@ export class PrincipalAwareRuntimeService {
           to_record_id: ref.id,
           ordinal
         })),
+        ...(approvalRecordId
+          ? [
+              {
+                from_record_id: actionRecordId,
+                relation: "approved_by" as const,
+                to_record_id: approvalRecordId,
+                ordinal: 0
+              }
+            ]
+          : []),
         ...resultRecords.map((record, ordinal) => ({
           from_record_id: actionRecordId,
           relation: "produced" as const,
@@ -218,4 +266,48 @@ export class PrincipalAwareRuntimeService {
     );
     return operation;
   }
+}
+
+function validateApprovalEvidence(
+  evidence: RuntimeApprovalEvidence,
+  command: CanonicalCommandEnvelope,
+  computedDigest: string
+): {
+  decided_at: string;
+  payload: RuntimePayload;
+} {
+  const approverContext = TrustedCommandContextSchema.parse(evidence.approver_context);
+  const payload = ApprovalAttributionPayloadSchema.parse({
+    work_item_id: evidence.work_item_id,
+    operation_type: evidence.operation_type,
+    action_revision: evidence.action_revision,
+    command_digest: evidence.command_digest,
+    approved_by_principal_ref: evidence.approved_by_principal_ref,
+    decision: evidence.decision,
+    decided_at: evidence.decided_at
+  });
+
+  if (payload.work_item_id !== command.work_item_id) {
+    throw new Error("Approval work item does not match the canonical command envelope.");
+  }
+  if (payload.operation_type !== command.operation_type) {
+    throw new Error("Approval operation type does not match the canonical command envelope.");
+  }
+  if (payload.action_revision !== command.action_revision) {
+    throw new Error("Approval action revision does not match the canonical command envelope.");
+  }
+  if (payload.command_digest !== computedDigest) {
+    throw new Error("Approved command digest does not match the canonical command envelope.");
+  }
+  if (payload.decision !== "approved") {
+    throw new Error("Approval evidence must contain an approved decision.");
+  }
+  if (payload.approved_by_principal_ref !== approverContext.authenticated_principal_ref) {
+    throw new Error("Approval principal does not match the trusted approver context.");
+  }
+  if (approverContext.authorization.result !== "allowed") {
+    throw new Error("Approver context must contain an allowed authorization decision.");
+  }
+
+  return { decided_at: payload.decided_at, payload };
 }

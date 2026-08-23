@@ -1,4 +1,8 @@
-import type { EventEnvelope } from "@openclaw-control-plane/contracts";
+import {
+  TrustedCommandContextSchema,
+  type EventEnvelope,
+  type TrustedCommandContext
+} from "@openclaw-control-plane/contracts";
 import type { Pool, PoolClient } from "pg";
 
 export type EventInsertResult =
@@ -6,7 +10,10 @@ export type EventInsertResult =
   | { status: "duplicate"; event: EventEnvelope };
 
 export interface EventStore {
-  insertEventIfNew(eventEnvelope: EventEnvelope): Promise<EventInsertResult>;
+  insertEventIfNew(
+    eventEnvelope: EventEnvelope,
+    commandContext?: TrustedCommandContext
+  ): Promise<EventInsertResult>;
   getEventByIdempotencyKey(idempotencyKey: string): Promise<EventEnvelope | null>;
 }
 
@@ -44,12 +51,20 @@ interface StoredEventRow {
 
 const INGESTED_EVENT_TYPE = "runtime.ingested_event";
 const INGESTED_EVENT_SCHEMA_REF = "runtime://schemas/ingested-event/v1";
-const INTERNAL_PRINCIPAL = "principal://service/event-store";
-
 export class PostgresEventStore implements EventStore {
   constructor(private readonly pool: Pool) {}
 
-  async insertEventIfNew(eventEnvelope: EventEnvelope): Promise<EventInsertResult> {
+  async insertEventIfNew(
+    eventEnvelope: EventEnvelope,
+    commandContext?: TrustedCommandContext
+  ): Promise<EventInsertResult> {
+    const context = TrustedCommandContextSchema.parse(commandContext);
+    if (
+      context.authorization.result !== "allowed" ||
+      context.authorization.action !== "runtime.event.ingest"
+    ) {
+      throw new Error("Event ingestion requires an allowed runtime.event.ingest decision.");
+    }
     const client = await this.pool.connect();
 
     try {
@@ -104,9 +119,9 @@ export class PostgresEventStore implements EventStore {
           recordSequence,
           INGESTED_EVENT_TYPE,
           INGESTED_EVENT_SCHEMA_REF,
-          JSON.stringify(internalCommandContext(eventEnvelope.idempotency_key)),
-          INTERNAL_PRINCIPAL,
-          JSON.stringify({ type: "service", id: "event-store" }),
+          JSON.stringify(context),
+          context.authenticated_principal_ref,
+          JSON.stringify(context.effective_actor),
           JSON.stringify({
             type: "runtime.external_subject",
             id: eventEnvelope.subject.id ?? eventEnvelope.event_id
@@ -205,21 +220,6 @@ async function requireActiveRuntimeEventRegistration(client: PoolClient): Promis
   if (row?.status !== "active" || row.schema_ref !== INGESTED_EVENT_SCHEMA_REF) {
     throw new Error(`Active runtime registration ${INGESTED_EVENT_TYPE}:1 is required.`);
   }
-}
-
-function internalCommandContext(idempotencyKey: string) {
-  return {
-    authenticated_principal_ref: INTERNAL_PRINCIPAL,
-    effective_actor: { type: "service", id: "event-store" },
-    request_origin: "internal",
-    authorization: {
-      decision_id: `legacy-event:${idempotencyKey}`,
-      action: "legacy.event.ingest",
-      result: "allowed",
-      policy_version: "compatibility-v1",
-      reason_codes: ["compatibility.event_store"]
-    }
-  };
 }
 
 function toEventEnvelope(row: StoredEventRow): EventEnvelope {

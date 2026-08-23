@@ -12,7 +12,19 @@ if (!databaseUrl) {
 const runtime = await initializePostgresRuntime(databaseUrl);
 const app = createControlPlaneApp({
   eventStore: runtime.eventStore,
-  readiness: runtime.readiness
+  readiness: runtime.readiness,
+  eventCommandContext: () => ({
+    authenticated_principal_ref: "principal://service/control-plane-api",
+    effective_actor: { type: "service", id: "control-plane-api" },
+    request_origin: "http",
+    authorization: {
+      decision_id: `compatibility-${Date.now()}`,
+      action: "runtime.event.ingest",
+      result: "allowed",
+      policy_version: "m2-compatibility-v1",
+      reason_codes: ["runtime.compatibility_ingest"]
+    }
+  })
 });
 
 const server = serve({
