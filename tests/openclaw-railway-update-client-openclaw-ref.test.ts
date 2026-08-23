@@ -56,9 +56,10 @@ describe("updateClientOpenClawRef", () => {
       serviceName: SERVICE,
       openclawRef: NEW_REF,
       changed: true,
-      // A new deployment was observed reaching SUCCESS and then serving,
-      // so this call can honestly claim the ref is running.
-      refRunningVerified: true
+      // A new deployment was observed reaching SUCCESS, then serving, and
+      // the variable read back as the requested ref. That is all this flag
+      // claims -- not that the running build was made from it.
+      newDeploymentReady: true
     });
 
     const calls = mutating(runner);
@@ -95,9 +96,9 @@ describe("updateClientOpenClawRef", () => {
 
     // A redeploy is live downtime; a no-op must not buy one.
     expect(result.changed).toBe(false);
-    // ...but it must also not claim the running build is on this ref, which
-    // it has no way to observe.
-    expect(result.refRunningVerified).toBe(false);
+    // ...and must not claim a new deployment was verified, because none
+    // was: no redeploy happened on this path.
+    expect(result.newDeploymentReady).toBe(false);
     expect(mutating(runner)).toHaveLength(0);
   });
 
@@ -371,7 +372,28 @@ describe("updateClientOpenClawRef", () => {
         { service: SERVICE, openclawRef: NEW_REF, expectedCurrentRef: OLD_REF, pollSeconds: 0 },
         { runner, ...READY }
       )
-    ).rejects.toThrow(/reads back as '.*', not '.*'/);
+    ).rejects.toThrow(/reads back as '.*', not the requested '.*'/);
+  });
+
+  it("diagnoses a wrong ref as a ref problem, not as an unhealthy instance", async () => {
+    // Readiness passed here, so telling the operator the instance is "not
+    // confirmed healthy" would point them at entirely the wrong recovery.
+    const runner = runnerWith({ OPENCLAW_GIT_REF: OLD_REF, SETUP_PASSWORD: "setup-secret" });
+    const inner = runner.run.bind(runner);
+    runner.run = async (args: string[], stdin?: string) => {
+      if (args[0] === "variable" && args[1] === "set") {
+        return { stdout: "[]" };
+      }
+      return inner(args, stdin);
+    };
+
+    const error = await updateClientOpenClawRef(
+      { service: SERVICE, openclawRef: NEW_REF, expectedCurrentRef: OLD_REF, pollSeconds: 0 },
+      { runner, ...READY }
+    ).catch((caught: unknown) => caught);
+
+    expect(String(error)).toMatch(/it is the ref that is wrong/);
+    expect(String(error)).not.toMatch(/not confirmed healthy/);
   });
 
   it("still reports the change as live when the redeploy itself fails", async () => {

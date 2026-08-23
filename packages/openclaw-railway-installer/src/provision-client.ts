@@ -315,13 +315,16 @@ export interface UpdateClientTemplateRefResult {
   /** False when the service was already at this ref and nothing was redeployed. */
   changed: boolean;
   /**
-   * True only when this call observed a new deployment reach SUCCESS and then
-   * answer authenticated requests. False on the no-op path: the variable
-   * matching plus a healthy instance does not prove the *running build* was
-   * made from this ref, and nothing reachable here exposes that. Callers must
-   * not report "this ref is running" on a false value.
+   * True only when this call observed a *new* deployment reach SUCCESS, saw
+   * `/setup/api/status` answer afterwards, and read the variable back as the
+   * requested ref.
+   *
+   * Deliberately named for what those checks establish and no more. They do
+   * NOT establish that the running deployment was built from this ref --
+   * nothing reachable from here exposes the ref a running build came from.
+   * Callers must not turn this into "this ref is running".
    */
-  refRunningVerified: boolean;
+  newDeploymentReady: boolean;
 }
 
 // LIVE-INSTANCE TIER: restart-or-redeploy-triggering
@@ -373,6 +376,13 @@ export interface UpdateClientTemplateRefResult {
 // `service` being a required parameter -- prose, not a runtime assertion
 // (gap G6).
 /**
+ * Thrown when the instance is healthy but the variable does not read back as
+ * the ref that was requested. Distinct from a readiness failure because the
+ * two need different recovery actions.
+ */
+class RefVerificationError extends Error {}
+
+/**
  * Waits for the service to answer an authenticated request. Shared by the
  * post-redeploy path and the already-at-this-ref path, because "the variable
  * says the right thing" and "the instance is actually serving it" are
@@ -388,6 +398,17 @@ async function assertInstanceReady(
   dependencies: InstallerDependencies,
   contextForFailure?: string
 ): Promise<void> {
+  // NOTE (widens gap G4, docs/live-instance-operations.md §7): this reads one
+  // named variable, but the only mechanism available is `railway variable
+  // list --json`, whose response carries *every* variable on the service --
+  // OPENCLAW_GATEWAY_TOKEN included -- through this process. That is the
+  // programmatic secret-read path G4 records as bypassing the
+  // acknowledgement guard that covers direct human CLI use. Suppressing
+  // stdout in the CLI stops terminal echo; it does not narrow what is read.
+  //
+  // Recorded rather than quietly inherited: adding readiness verification
+  // here put a second caller on that path, which is an argument for closing
+  // G4 (a targeted, guarded secret-read boundary) sooner rather than later.
   const setupPassword = await readRailwayVariable("SETUP_PASSWORD", params.service, dependencies);
   if (!setupPassword) {
     throw new Error("the service has no SETUP_PASSWORD to authenticate with");
@@ -435,7 +456,7 @@ async function updateClientRefVariable(
     timeoutMinutes: number;
   },
   dependencies: InstallerDependencies
-): Promise<{ changed: boolean; refRunningVerified: boolean }> {
+): Promise<{ changed: boolean; newDeploymentReady: boolean }> {
   const current = await readRailwayVariable(params.variableName, params.service, dependencies);
 
   // A freshly provisioned client has no OPENCLAW_GIT_REF variable at all:
@@ -450,9 +471,10 @@ async function updateClientRefVariable(
     if (params.expectedCurrentRef !== EXPECTED_REF_UNSET) {
       throw new Error(
         `Refusing to update ${params.variableName} on '${params.service}': expected it to currently be ` +
-          `'${params.expectedCurrentRef}', but the variable is not set at all. If that is expected (a ` +
-          `freshly provisioned client has no ${params.variableName} until its first bump), pass ` +
-          `'${EXPECTED_REF_UNSET}' as the expected current ref.`
+          `'${params.expectedCurrentRef}', but the variable is not set at all. If that is expected -- ` +
+          `provisioning does not set OPENCLAW_GIT_REF, so a client has none until its first application-version ` +
+          `bump; OPENCLAW_TEMPLATE_REF *is* set at provisioning, so an unset one means an externally managed or ` +
+          `repaired service -- pass '${EXPECTED_REF_UNSET}' as the expected current ref.`
       );
     }
   } else if (params.expectedCurrentRef === EXPECTED_REF_UNSET) {
@@ -491,7 +513,7 @@ async function updateClientRefVariable(
     // made -- if you need certainty after a failed attempt, use forceRedeploy
     // and let the deployment-rollover guard prove a new deployment landed.
     await assertInstanceReady(params, dependencies, `${params.variableName} already reads as '${params.nextRef}'`);
-    return { changed: false, refRunningVerified: false };
+    return { changed: false, newDeploymentReady: false };
   }
 
   if (current !== undefined && current !== params.expectedCurrentRef) {
@@ -517,10 +539,22 @@ async function updateClientRefVariable(
     );
   }
 
-  await writeRailwayVariable(
-    { name: params.variableName, value: params.nextRef, service: params.service, skipDeploys: true },
-    dependencies
-  );
+  try {
+    await writeRailwayVariable(
+      { name: params.variableName, value: params.nextRef, service: params.service, skipDeploys: true },
+      dependencies
+    );
+  } catch (cause) {
+    // A transport-level failure can arrive *after* the service accepted the
+    // write, so this is not safely "nothing happened". Say so, rather than
+    // letting the caller retry as though the service were untouched.
+    throw new Error(
+      `Writing ${params.variableName}='${params.nextRef}' to '${params.service}' failed, and it is not certain ` +
+        `whether the value was applied before the failure: ` +
+        `${cause instanceof Error ? cause.message : String(cause)}. Re-read the live value before retrying.`,
+      { cause }
+    );
+  }
 
   // Everything from here on runs *after* the variable has already changed on
   // the live service. Any failure below therefore leaves a modified,
@@ -551,11 +585,21 @@ async function updateClientRefVariable(
     // the meantime, and readiness would still answer 200 either way.
     const applied = await readRailwayVariable(params.variableName, params.service, dependencies);
     if (applied !== params.nextRef) {
-      throw new Error(
-        `readiness passed but ${params.variableName} reads back as '${applied ?? "unset"}', not '${params.nextRef}'`
+      throw new RefVerificationError(
+        `${params.variableName} on '${params.service}' reads back as '${applied ?? "unset"}', not the requested ` +
+          `'${params.nextRef}', even though the instance is answering authenticated requests. The write was ` +
+          `accepted but did not take effect, or something else changed it. The instance is healthy; it is the ` +
+          `ref that is wrong. Re-read the live value and decide before retrying.`
       );
     }
   } catch (cause) {
+    // A ref-verification failure is a different diagnosis from a readiness
+    // failure -- one means the instance is fine but on the wrong ref, the
+    // other means the instance may be down. Reporting both as "not confirmed
+    // healthy" points the operator at the wrong recovery.
+    if (cause instanceof RefVerificationError) {
+      throw cause;
+    }
     throw new Error(
       `${params.variableName} on '${params.service}' WAS updated to '${params.nextRef}', but the instance is ` +
         `not confirmed healthy afterwards: ${cause instanceof Error ? cause.message : String(cause)}. ` +
@@ -564,7 +608,7 @@ async function updateClientRefVariable(
     );
   }
 
-  return { changed: true, refRunningVerified: true };
+  return { changed: true, newDeploymentReady: true };
 }
 
 /**
@@ -577,7 +621,7 @@ export async function updateClientTemplateRef(
   options: UpdateClientTemplateRefOptions,
   dependencies: InstallerDependencies
 ): Promise<UpdateClientTemplateRefResult> {
-  const { changed, refRunningVerified } = await updateClientRefVariable(
+  const { changed, newDeploymentReady } = await updateClientRefVariable(
     {
       service: options.service,
       variableName: "OPENCLAW_TEMPLATE_REF",
@@ -591,7 +635,7 @@ export async function updateClientTemplateRef(
     dependencies
   );
 
-  return { serviceName: options.service, templateRef: options.templateRef, changed, refRunningVerified };
+  return { serviceName: options.service, templateRef: options.templateRef, changed, newDeploymentReady };
 }
 
 export interface UpdateClientOpenClawRefOptions {
@@ -616,13 +660,16 @@ export interface UpdateClientOpenClawRefResult {
   /** False when the service was already at this ref and nothing was redeployed. */
   changed: boolean;
   /**
-   * True only when this call observed a new deployment reach SUCCESS and then
-   * answer authenticated requests. False on the no-op path: the variable
-   * matching plus a healthy instance does not prove the *running build* was
-   * made from this ref, and nothing reachable here exposes that. Callers must
-   * not report "this ref is running" on a false value.
+   * True only when this call observed a *new* deployment reach SUCCESS, saw
+   * `/setup/api/status` answer afterwards, and read the variable back as the
+   * requested ref.
+   *
+   * Deliberately named for what those checks establish and no more. They do
+   * NOT establish that the running deployment was built from this ref --
+   * nothing reachable from here exposes the ref a running build came from.
+   * Callers must not turn this into "this ref is running".
    */
-  refRunningVerified: boolean;
+  newDeploymentReady: boolean;
 }
 
 /**
@@ -638,7 +685,7 @@ export async function updateClientOpenClawRef(
   options: UpdateClientOpenClawRefOptions,
   dependencies: InstallerDependencies
 ): Promise<UpdateClientOpenClawRefResult> {
-  const { changed, refRunningVerified } = await updateClientRefVariable(
+  const { changed, newDeploymentReady } = await updateClientRefVariable(
     {
       service: options.service,
       variableName: "OPENCLAW_GIT_REF",
@@ -652,7 +699,7 @@ export async function updateClientOpenClawRef(
     dependencies
   );
 
-  return { serviceName: options.service, openclawRef: options.openclawRef, changed, refRunningVerified };
+  return { serviceName: options.service, openclawRef: options.openclawRef, changed, newDeploymentReady };
 }
 
 async function resolveProvisionOptions(

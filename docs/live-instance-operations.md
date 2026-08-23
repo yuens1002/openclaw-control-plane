@@ -460,7 +460,13 @@ neither protection. *Recommended fix:* move the check to the
 process-spawn boundary so every path — human and
 programmatic — passes through it. This is a real refactor of where the
 spawn happens, not a doc change, which is why it is a follow-up rather
-than in scope here.
+than in scope here. **Priority raised (2026-08-23):** the client-ref update paths now also
+depend on this mechanism, to read `SETUP_PASSWORD` for their post-redeploy
+readiness check. That is a second caller on the unguarded programmatic
+secret-read path, added while closing G1 -- recorded deliberately rather
+than inherited silently. Closing G4 (a targeted secret read that does not
+pull every variable through the process) is now the highest-value remaining
+gap.
 
 **G6 — the "never touches another service" invariant is prose, not
 code-enforced.** The doc comments on `provision-client.ts`'s
