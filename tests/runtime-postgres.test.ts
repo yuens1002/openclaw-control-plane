@@ -246,8 +246,9 @@ describePostgres("PostgreSQL durable runtime repository", () => {
       `INSERT INTO idempotency_records
          (authenticated_principal_ref, operation_type, idempotency_key,
           canonicalization_version, command_digest, status,
-          reserved_operation_id, claim_expires_at)
-       VALUES ($1, $2, $3, $4, $5, 'in_progress', $6, now() - interval '1 minute')`,
+          reserved_operation_id, claim_token, claim_expires_at)
+       VALUES ($1, $2, $3, $4, $5, 'in_progress', $6,
+               '00000000-0000-4000-8000-000000000599', now() - interval '1 minute')`,
       [
         command.command_context.authenticated_principal_ref,
         command.operation_type,
@@ -273,6 +274,36 @@ describePostgres("PostgreSQL durable runtime repository", () => {
     expect(records.rows).toEqual([
       { record_id: reservedId, type: "runtime.idempotency.abandoned" }
     ]);
+  });
+
+  it("prevents a late worker from committing after lease recovery", async () => {
+    const command = lifecycleCommand("lease-race-stream", "lease-race-key-001");
+    let releaseWorker!: () => void;
+    let signalReserved!: () => void;
+    const reserved = new Promise<void>((resolve) => { signalReserved = resolve; });
+    const release = new Promise<void>((resolve) => { releaseWorker = resolve; });
+    const original = new PostgresRuntimeRepository(pool, registry, {
+      afterIdempotencyReserved: async () => {
+        signalReserved();
+        await release;
+      }
+    });
+    const originalPromise = original.appendCommand(command);
+    await reserved;
+    await pool.query(
+      `UPDATE idempotency_records SET claim_expires_at = now() - interval '1 minute'
+       WHERE idempotency_key = 'lease-race-key-001'`
+    );
+
+    const recovery = await new PostgresRuntimeRepository(pool, registry).appendCommand(command);
+    expect(recovery.terminal_status).toBe("failed");
+    releaseWorker();
+    await expect(originalPromise).rejects.toThrow();
+
+    const records = await pool.query<{ type: string }>(
+      "SELECT type FROM runtime_records WHERE stream_id = 'lease-race-stream'"
+    );
+    expect(records.rows).toEqual([{ type: "runtime.idempotency.abandoned" }]);
   });
 
   it("rolls back records, stream allocation, and idempotency when a related write fails", async () => {

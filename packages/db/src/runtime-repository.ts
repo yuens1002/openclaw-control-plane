@@ -271,7 +271,11 @@ export class PostgresRuntimeRepository {
     const claimed = await reserveIdempotency(this.pool, command, reservedOperationId);
     if (claimed.kind === "replay") return claimed.result;
     if (claimed.kind === "expired") {
-      return this.recoverExpiredReservation(command, claimed.reservedOperationId);
+      return this.recoverExpiredReservation(
+        command,
+        claimed.reservedOperationId,
+        claimed.claimToken
+      );
     }
     if (claimed.kind === "conflict") {
       await this.appendConflictAuditTransaction(command);
@@ -280,7 +284,12 @@ export class PostgresRuntimeRepository {
     try {
       await this.hooks.afterIdempotencyReserved?.();
     } catch (error) {
-      await releaseIdempotencyReservation(this.pool, command, reservedOperationId);
+      await releaseIdempotencyReservation(
+        this.pool,
+        command,
+        reservedOperationId,
+        claimed.claimToken
+      );
       throw error;
     }
 
@@ -313,14 +322,16 @@ export class PostgresRuntimeRepository {
         `UPDATE idempotency_records
          SET status = $4, operation_record_id = $5, result_record_ids = $6, updated_at = now()
          WHERE authenticated_principal_ref = $1 AND operation_type = $2 AND idempotency_key = $3
-           AND reserved_operation_id = $5 AND status = 'in_progress'`,
+           AND reserved_operation_id = $5 AND claim_token = $7
+           AND status = 'in_progress'`,
         [
           command.command_context.authenticated_principal_ref,
           command.operation_type,
           command.idempotency_key,
           terminalStatus,
           operationRecordId,
-          resultRecordIds
+          resultRecordIds,
+          claimed.claimToken
         ]
       );
       if (finalized.rowCount !== 1) {
@@ -335,7 +346,12 @@ export class PostgresRuntimeRepository {
       };
     } catch (error) {
       await client.query("ROLLBACK");
-      await releaseIdempotencyReservation(this.pool, command, reservedOperationId);
+      await releaseIdempotencyReservation(
+        this.pool,
+        command,
+        reservedOperationId,
+        claimed.claimToken
+      );
       throw error;
     } finally {
       client.release();
@@ -619,7 +635,11 @@ export class PostgresRuntimeRepository {
     const claimed = await reserveIdempotency(this.pool, command, reservedOperationId);
     if (claimed.kind === "replay") return claimed.result;
     if (claimed.kind === "expired") {
-      return this.recoverExpiredReservation(command, claimed.reservedOperationId);
+      return this.recoverExpiredReservation(
+        command,
+        claimed.reservedOperationId,
+        claimed.claimToken
+      );
     }
     if (claimed.kind === "conflict") {
       await this.appendConflictAuditTransaction(command);
@@ -638,12 +658,14 @@ export class PostgresRuntimeRepository {
         `UPDATE idempotency_records
          SET status = 'succeeded', operation_record_id = $4, result_record_ids = '{}', updated_at = now()
          WHERE authenticated_principal_ref = $1 AND operation_type = $2 AND idempotency_key = $3
-           AND reserved_operation_id = $4 AND status = 'in_progress'`,
+           AND reserved_operation_id = $4 AND claim_token = $5
+           AND status = 'in_progress'`,
         [
           command.command_context.authenticated_principal_ref,
           command.operation_type,
           command.idempotency_key,
-          inserted[0]!.record_id
+          inserted[0]!.record_id,
+          claimed.claimToken
         ]
       );
       if (finalized.rowCount !== 1) {
@@ -658,7 +680,12 @@ export class PostgresRuntimeRepository {
       };
     } catch (error) {
       await client.query("ROLLBACK");
-      await releaseIdempotencyReservation(this.pool, command, reservedOperationId);
+      await releaseIdempotencyReservation(
+        this.pool,
+        command,
+        reservedOperationId,
+        claimed.claimToken
+      );
       throw error;
     } finally {
       client.release();
@@ -681,7 +708,8 @@ export class PostgresRuntimeRepository {
 
   private async recoverExpiredReservation(
     command: AppendRuntimeCommand,
-    reservedOperationId: string
+    reservedOperationId: string,
+    claimToken: string
   ): Promise<RuntimeOperationResult> {
     const client = await this.pool.connect();
     try {
@@ -708,12 +736,13 @@ export class PostgresRuntimeRepository {
              result_record_ids = '{}', updated_at = now()
          WHERE authenticated_principal_ref = $1 AND operation_type = $2
            AND idempotency_key = $3 AND reserved_operation_id = $4
-           AND status = 'in_progress'`,
+           AND claim_token = $5 AND status = 'in_progress'`,
         [
           command.command_context.authenticated_principal_ref,
           command.operation_type,
           command.idempotency_key,
-          reservedOperationId
+          reservedOperationId,
+          claimToken
         ]
       );
       if (finalized.rowCount !== 1) {
@@ -736,9 +765,9 @@ export class PostgresRuntimeRepository {
 }
 
 type ClaimedIdempotency =
-  | { kind: "new" }
+  | { kind: "new"; claimToken: string }
   | { kind: "conflict" }
-  | { kind: "expired"; reservedOperationId: string }
+  | { kind: "expired"; reservedOperationId: string; claimToken: string }
   | { kind: "replay"; result: RuntimeOperationResult };
 
 async function reserveIdempotency(
@@ -746,12 +775,13 @@ async function reserveIdempotency(
   command: AppendRuntimeCommand,
   reservedOperationId: string
 ): Promise<ClaimedIdempotency> {
+  const claimToken = randomUUID();
   const inserted = await pool.query(
     `INSERT INTO idempotency_records
        (authenticated_principal_ref, operation_type, idempotency_key,
         canonicalization_version, command_digest, status, reserved_operation_id,
-        claim_expires_at)
-     VALUES ($1, $2, $3, $4, $5, 'in_progress', $6, now() + interval '5 minutes')
+        claim_token, claim_expires_at)
+     VALUES ($1, $2, $3, $4, $5, 'in_progress', $6, $7, now() + interval '5 minutes')
      ON CONFLICT (authenticated_principal_ref, operation_type, idempotency_key) DO NOTHING`,
     [
       command.command_context.authenticated_principal_ref,
@@ -759,7 +789,8 @@ async function reserveIdempotency(
       command.idempotency_key,
       command.canonicalization_version,
       command.command_digest,
-      reservedOperationId
+      reservedOperationId,
+      claimToken
     ]
   );
   const current = await pool.query<{
@@ -791,11 +822,11 @@ async function reserveIdempotency(
   ) {
     return { kind: "conflict" };
   }
-  if (inserted.rowCount === 1) return { kind: "new" };
+  if (inserted.rowCount === 1) return { kind: "new", claimToken };
   if (row.status === "in_progress" && new Date(row.claim_expires_at).getTime() <= Date.now()) {
     const recovered = await pool.query<{ reserved_operation_id: string }>(
       `UPDATE idempotency_records
-       SET claim_expires_at = now() + interval '5 minutes', updated_at = now()
+       SET claim_token = $4, claim_expires_at = now() + interval '5 minutes', updated_at = now()
        WHERE authenticated_principal_ref = $1 AND operation_type = $2
          AND idempotency_key = $3 AND status = 'in_progress'
          AND claim_expires_at <= now()
@@ -803,11 +834,16 @@ async function reserveIdempotency(
       [
         command.command_context.authenticated_principal_ref,
         command.operation_type,
-        command.idempotency_key
+        command.idempotency_key,
+        claimToken
       ]
     );
     if (recovered.rows[0]) {
-      return { kind: "expired", reservedOperationId: recovered.rows[0].reserved_operation_id };
+      return {
+        kind: "expired",
+        reservedOperationId: recovered.rows[0].reserved_operation_id,
+        claimToken
+      };
     }
   }
   return {
@@ -824,18 +860,20 @@ async function reserveIdempotency(
 async function releaseIdempotencyReservation(
   pool: Pool,
   command: AppendRuntimeCommand,
-  reservedOperationId: string
+  reservedOperationId: string,
+  claimToken: string
 ): Promise<void> {
   await pool.query(
     `DELETE FROM idempotency_records
      WHERE authenticated_principal_ref = $1 AND operation_type = $2
        AND idempotency_key = $3 AND reserved_operation_id = $4
-       AND status = 'in_progress'`,
+       AND claim_token = $5 AND status = 'in_progress'`,
     [
       command.command_context.authenticated_principal_ref,
       command.operation_type,
       command.idempotency_key,
-      reservedOperationId
+      reservedOperationId,
+      claimToken
     ]
   );
 }

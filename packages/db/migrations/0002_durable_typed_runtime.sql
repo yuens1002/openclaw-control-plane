@@ -398,6 +398,7 @@ CREATE TABLE idempotency_records (
   command_digest text NOT NULL,
   status text NOT NULL,
   reserved_operation_id uuid NOT NULL,
+  claim_token uuid NOT NULL,
   claim_expires_at timestamptz NOT NULL,
   operation_record_id uuid REFERENCES runtime_records(record_id),
   result_record_ids uuid[] NOT NULL DEFAULT '{}',
