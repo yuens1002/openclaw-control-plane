@@ -143,13 +143,12 @@ just account bookkeeping, becomes part of the decision.
 Decision (4)'s App-based model — one provider-owned GitHub App installed
 separately per organization, short-lived per-use tokens minted from an
 App JWT, never a static secret handed to the CoT — was designed for a
-multi-tenant scenario: the agency and each downstream client org each
-needing their own scoped installation. That scenario does not currently
-exist. This agency's target clients do not have their own GitHub org,
-repos, or any notion of what a repo is — the agency builds and owns the
-workflows/servers the CoT tracks on their behalf. As of this writing, the
-agency itself is the only org that needs the CoT to read a GitHub repo at
-all.
+multi-tenant scenario: a provider and each downstream client org each
+needing their own scoped installation. A single-tenant deployment, with
+no client org yet needing its own scoped installation, doesn't need that
+model's full mint-and-refresh machinery to get equivalent protection —
+the tradeoff only pays for itself once a genuine multi-tenant need
+exists.
 
 Given that, decision (4)'s App-based model was built
 (`openclaw-control-plane` `packages/openclaw-source-control-connector`,
