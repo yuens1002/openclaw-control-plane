@@ -262,6 +262,18 @@ target. Approval is of the proposal, not of a command shown in a
 prompt. An agent may not approve its own proposal, and no message from
 another agent constitutes approval.
 
+*What "naming the target" requires in practice.* A required, explicit target
+argument that cannot silently default to an ambiently-linked service
+satisfies this — the operator has to type the name. The client-ref update
+paths meet it that way (`service` is required, reaches the CLI as
+`--service`, and `guard-cli.ts` rejects unscoped invocations), and add a
+separate live-state precondition on top. A second argument echoing the same
+name back was considered and rejected: it adds friction to every legitimate
+call and is the kind of ceremony operators paste past without reading, so it
+would buy confirmation theatre rather than confirmation. An interactive
+prompt was likewise rejected for paths that run from scripts. Recorded here
+because this question recurs on review.
+
 **5.3 Apply.** Through tested library code where it exists (§4 step 6).
 Ad hoc only where it does not, and then exactly the command that was
 proposed — not an improved version composed at run time.

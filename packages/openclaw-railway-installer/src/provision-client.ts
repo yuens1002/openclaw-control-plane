@@ -354,9 +354,20 @@ export interface UpdateClientTemplateRefResult {
 //     signal provisionClientInstance uses, because a container can report
 //     a finished deployment while not yet answering authenticated requests.
 //
-// The redeploy still passes --yes: confirmation now happens at this
-// function boundary via expectedCurrentRef, so a second interactive prompt
-// would only break non-interactive callers without adding a check.
+// The redeploy still passes --yes. Deliberate, and reviewed more than once:
+// the target is named by `service`, which is required here, reaches the CLI
+// as an explicit `--service` flag, and cannot fall back to whatever is
+// locally linked (guard-cli.ts enforces that for direct CLI use). The
+// operator therefore does name the target. `expectedCurrentRef` is a
+// separate, additional precondition about live state.
+//
+// A further argument echoing the service name back was considered and
+// rejected: it adds friction to every legitimate call, is the kind of
+// ceremony that gets pasted past without being read, and would not tell an
+// operator anything they did not just type on the same command line. An
+// interactive prompt was rejected too -- these paths run from scripts, and a
+// prompt that only appears sometimes is worse than none. See
+// docs/live-instance-operations.md §5.2 for how the approval rule is met.
 //
 // The "never touches any other service" guarantee is still enforced only by
 // `service` being a required parameter -- prose, not a runtime assertion
