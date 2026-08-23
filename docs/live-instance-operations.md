@@ -362,6 +362,12 @@ two together catch both.
 
 ## 7. Gap Register and Disposition
 
+Open gaps are tracked on GitHub so they survive the session that found
+them: G4 in issue #45, and G3 / G5's concurrency half / G6 / G8 in
+issue #47. An entry here that says "still open" with no decision
+attached is a bug in this document, not a neutral state -- that is how
+the stale entries corrected in #46 arose.
+
 Every gap found by the research pass behind this document, dispositioned
 exactly once. See
 [docs/plans/live-instance-operations/plan.md](plans/live-instance-operations/plan.md)
