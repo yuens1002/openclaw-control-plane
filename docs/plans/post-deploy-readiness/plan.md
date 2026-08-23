@@ -36,8 +36,7 @@ identity/soul seeding). Scope was split during planning (see #18 comments):
   control-plane code fix. Doc note only (D7).
 - **Part 2** (seed agent identity/soul from the client profile) is split
   out to **#20** — mechanism confirmed from docs but not live-tested, and
-  half its content ownership sits in the private
-  `openClaw-CoT-agency-profile` repo.
+  half its content ownership sits in the private client-profile repo.
 
 ## Background (live-verified findings from #18, confirmed against wrapper source)
 
