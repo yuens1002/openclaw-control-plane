@@ -395,12 +395,28 @@ that read, deliberately — `/setup/api/config/raw` is served by the
 wrapper from the config file and never proxied to the gateway, so the
 POST's gateway restart does not gate it.
 
-*Still open:* concurrency control. The read-modify-write window between
-the GET and the POST means a concurrent write to the same config is
-silently lost, last-write-wins over the whole document. *Recommended
-fix:* compare the document read during verification against what was
-written, and fail loudly on divergence rather than assuming this
-process was the only writer.
+*Still open, and renamed to what it actually is:* **concurrent-loss
+detection, not concurrency control.** The read-modify-write window
+between the GET and the POST means a concurrent write to the same
+config is silently lost, last-write-wins over the whole document.
+
+The previously recommended fix -- compare the document read during
+verification against what was written, and fail on divergence -- was
+filed under "concurrency control" and does not deserve that name. It
+reports a clobber *after* it has happened; the other writer's change is
+already gone by the time it fires. Detection is still worth more than
+silence, but calling it control overstates it, and this document has
+been wrong about exactly this class of claim before.
+
+Genuine prevention needs a provider-side conditional write (the CLI
+exposes none, verified under G4) or a lock shared by every writer --
+the same wall G1 hit.
+
+*Exposure looks low:* the writers of this config are the provisioning
+path, the applier, and manual edits, and those are sequential in
+practice -- one operator, one run at a time. Absent evidence of real
+concurrent writers, detection-after-the-fact is a reasonable place to
+stop. Reprioritise if that assumption stops holding.
 
 **G1 — CLOSED.** The client-ref update functions performed an
 unconditional variable write with a hardcoded auto-confirmed redeploy,
@@ -450,6 +466,16 @@ exported. *Recommended fix:* add a pre-read comparison before this is
 ever wired into a provisioning path. Low urgency while it has no
 production callers; not low urgency the day it gains one.
 
+*But nothing enforces that trigger.* "Fix it when it gains a caller"
+currently depends on whoever wires it up having read this register
+first, which is precisely the kind of precondition that gets missed --
+the deferral is sound and its enforcement is imaginary. Cheap remedy:
+a test asserting this function has no production callers. The day
+someone wires it in, that test fails and points here, converting a
+hope into a tripwire for roughly ten lines. Same shape as the
+mutation-check discipline: make the absence of a thing observable
+rather than assumed.
+
 **G4 — programmatic Railway variable calls bypass the human-CLI
 guard.** `guard-cli.ts` enforces explicit service scoping and a
 secret-echo acknowledgement, but only for direct human invocation:
@@ -476,18 +502,46 @@ reaches the CLI as an explicit `--service` flag. Nothing asserts at run
 time that the named service is the intended one. (Related, and
 deliberately not opened as its own gap: `provisionClientInstance` runs
 a volume-attach command unscoped, but that is initial provisioning,
-outside §1's scope.) *Recommended fix:* a runtime assertion that the
-resolved target matches the caller-declared target before any mutating
-call. Future work.
+outside §1's scope.) *The previously recommended fix was circular* and is withdrawn: "assert
+the resolved target matches the caller-declared target" compares
+`options.service` to itself, since that parameter *is* the declaration.
+It proves nothing. (The same objection applies to adding a second
+argument echoing the service name back, which was raised in review on
+the G1 work and declined for that reason -- see §5.2.)
+
+*Partially mitigated by G1, with an important limit.* The
+compare-and-swap added to both update paths means a mistyped service
+name is usually refused: the wrong client's current ref will not match
+the expected ref the caller declared. That mitigation disappears
+exactly where it is most needed, though. `OPENCLAW_TEMPLATE_REF`
+defaults to `template-lock.json`'s `pinnedCommit`, so clients
+provisioned without an explicit override all carry the *same* value --
+and a typo landing on such a client passes the check cleanly and
+redeploys it. Homogeneous fleets are the normal case for the template
+ref, so treat this as protection against hitting a
+differently-versioned target, not against hitting the wrong target.
+
+*Recommended fix:* validate the named service against an independent
+source of truth -- a client registry the caller does not supply -- so
+the check has something real to disagree with. Future work.
 
 ### Explicitly excluded — no follow-up
 
 **G8 — a Railway-CLI test fixture is duplicated.** A shared fixture
 exists at `tests/fixtures/fake-railway-runner.ts`, and several test
 files separately declare their own local class of the same name with a
-different constructor shape. This is test hygiene, unrelated to
-live-instance safety: no live target is reachable from a test fixture.
-Recorded here only so it is not mistaken for an oversight.
+different constructor shape. This is test hygiene rather than
+live-instance safety -- no live target is reachable from a test
+fixture -- so it stays out of this document's scope.
+
+It is not merely cosmetic, though, and the original wording undersold
+it. Duplicated fakes mean a fix to one does not reach the others: a
+fake that failed to reflect its own writes was corrected in one test
+double, and the identical defect then recurred in a second, because the
+correction landed on the instance rather than the pattern. In both
+cases the consequence was a test that passed while asserting nothing.
+Track it as test hygiene with that evidence attached, not as a
+tidiness nit.
 
 ## 8. Decision and Alternatives Considered
 
