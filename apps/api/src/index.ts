@@ -7,10 +7,15 @@ import {
   DomainSchema,
   type PipelineState
 } from "@openclaw-control-plane/contracts";
-import { InMemoryEventStore, type EventStore } from "@openclaw-control-plane/db";
+import {
+  InMemoryEventStore,
+  type EventStore,
+  type RuntimeReadiness
+} from "@openclaw-control-plane/db";
 
 export interface ControlPlaneDependencies {
   eventStore: EventStore;
+  readiness?: () => Promise<RuntimeReadiness>;
 }
 
 export function createControlPlaneApp(
@@ -18,16 +23,26 @@ export function createControlPlaneApp(
 ) {
   const app = new Hono();
 
-  app.get("/health", (context) =>
-    context.json({
+  app.get("/health", async (context) => {
+    const readiness = dependencies.readiness
+      ? await dependencies.readiness()
+      : { database: "unavailable", migrations: "missing", registry: "invalid" } as const;
+    const ready =
+      readiness.database === "ready" &&
+      readiness.migrations === "ready" &&
+      readiness.registry === "ready";
+    return context.json({
       ok: true,
       service: "openclaw-control-plane-api",
-      database: "not_connected",
+      ready,
+      database: readiness.database,
+      migrations: readiness.migrations,
+      registry: readiness.registry,
       worker_registry: [],
       failed_runs: 0,
       stale_workers: []
-    })
-  );
+    });
+  });
 
   const operatorAuth = createOperatorAuthMiddleware();
   if (operatorAuth) {
