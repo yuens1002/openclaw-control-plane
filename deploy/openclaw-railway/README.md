@@ -56,7 +56,7 @@ content half lives in the private client-profile repo.
 ### Workspace identity file transport (not yet wired in)
 
 [Issue #20](https://github.com/yuens1002/openclaw-control-plane/issues/20)
-splits ownership between the private `[private-repo]` repo
+splits ownership between the private client-profile repo
 (the *content* — intake fields and templating the actual
 `IDENTITY.md`/`USER.md`/`SOUL.md` markdown, tracked as that repo's own #3,
 not yet done) and this repo (the *transport*).

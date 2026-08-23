@@ -5,7 +5,7 @@ Source: session discussion — "test the control plane e2e," scoped down to the
 Railway installer's foundation-automation layer (`packages/openclaw-railway-installer`),
 deliberately stopping before `packages/openclaw-setup-applier` (the "profile
 layer," out of scope — a separate, throwaway-client, live e2e is being built
-for that in `[private-repo]`).
+for that in a sibling private client-profile repo).
 
 ## Summary
 
@@ -211,7 +211,8 @@ newly touches a file this plan edits.
 
 - `packages/openclaw-setup-applier` (the "profile layer") and its own
   `runCommand`/`resolveRailwayExecutable` copy — a live, throwaway-client e2e
-  for that layer is being built separately in `[private-repo]`.
+  for that layer is being built separately in a sibling private
+  client-profile repo.
 - Chaining `provisionClientInstance` or `installOpenClawOnRailway` output
   into `verifyOpenClawRailwayProof` — explicitly considered and rejected,
   see Current State; no such composition exists in production.
