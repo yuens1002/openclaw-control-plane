@@ -41,7 +41,14 @@ async function main(): Promise<void> {
     const options = parseUpdateRefArgs(rest);
     const result = await updateClientTemplateRef(options, { runner });
     console.log("");
-    console.log(`Service '${result.serviceName}' redeployed on template ref ${result.templateRef}.`);
+    console.log(
+      result.changed
+        ? `Service '${result.serviceName}': template ref set to ${result.templateRef}, a new deployment reached SUCCESS, and ` +
+            `the instance is answering authenticated requests.`
+        : `Service '${result.serviceName}' already has template ref ${result.templateRef} set and is answering requests; ` +
+            `nothing redeployed. The running build was not verified to be this ref -- if a previous attempt ` +
+            `failed after writing it, re-run with --force-redeploy.`
+    );
     return;
   }
 
@@ -49,7 +56,14 @@ async function main(): Promise<void> {
     const options = parseUpdateOpenClawRefArgs(rest);
     const result = await updateClientOpenClawRef(options, { runner });
     console.log("");
-    console.log(`Service '${result.serviceName}' redeployed on openclaw ref ${result.openclawRef}.`);
+    console.log(
+      result.changed
+        ? `Service '${result.serviceName}': openclaw ref set to ${result.openclawRef}, a new deployment reached SUCCESS, and ` +
+            `the instance is answering authenticated requests.`
+        : `Service '${result.serviceName}' already has openclaw ref ${result.openclawRef} set and is answering requests; ` +
+            `nothing redeployed. The running build was not verified to be this ref -- if a previous attempt ` +
+            `failed after writing it, re-run with --force-redeploy.`
+    );
     return;
   }
 
@@ -136,6 +150,17 @@ export function parseUpdateRefArgs(args: string[]): UpdateClientTemplateRefOptio
         options.templateRef = requireValue(arg, value);
         index += 1;
         break;
+      case "--expected-current-ref":
+        options.expectedCurrentRef = requireValue(arg, value);
+        index += 1;
+        break;
+      case "--setup-username":
+        options.setupUsername = requireValue(arg, value);
+        index += 1;
+        break;
+      case "--force-redeploy":
+        options.forceRedeploy = true;
+        break;
       case "--poll-seconds":
         options.pollSeconds = parseIntegerFlag(arg, value);
         index += 1;
@@ -155,6 +180,13 @@ export function parseUpdateRefArgs(args: string[]): UpdateClientTemplateRefOptio
   if (!options.templateRef) {
     throw new Error("Missing required --template-ref");
   }
+  if (!options.expectedCurrentRef) {
+    throw new Error(
+      "Missing required --expected-current-ref. State the ref you believe is currently set; the update " +
+        "reads the live value first and aborts if it does not match, so you cannot redeploy a client " +
+        "without knowing what you are replacing."
+    );
+  }
 
   return options as UpdateClientTemplateRefOptions;
 }
@@ -168,6 +200,17 @@ export function parseUpdateOpenClawRefArgs(args: string[]): UpdateClientOpenClaw
       case "--service":
         options.service = requireValue(arg, value);
         index += 1;
+        break;
+      case "--expected-current-ref":
+        options.expectedCurrentRef = requireValue(arg, value);
+        index += 1;
+        break;
+      case "--setup-username":
+        options.setupUsername = requireValue(arg, value);
+        index += 1;
+        break;
+      case "--force-redeploy":
+        options.forceRedeploy = true;
         break;
       case "--openclaw-ref":
         options.openclawRef = requireValue(arg, value);
@@ -191,6 +234,13 @@ export function parseUpdateOpenClawRefArgs(args: string[]): UpdateClientOpenClaw
   }
   if (!options.openclawRef) {
     throw new Error("Missing required --openclaw-ref");
+  }
+  if (!options.expectedCurrentRef) {
+    throw new Error(
+      "Missing required --expected-current-ref. State the ref you believe is currently set; the update " +
+        "reads the live value first and aborts if it does not match, so you cannot redeploy a client " +
+        "without knowing what you are replacing."
+    );
   }
 
   return options as UpdateClientOpenClawRefOptions;

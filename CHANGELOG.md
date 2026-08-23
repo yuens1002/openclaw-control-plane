@@ -7,6 +7,10 @@ and uses semantic versioning once releases begin.
 
 ## [Unreleased]
 
+- 2026-08-23 - docs(adr): ADR 0001 no longer names which GitHub auth mechanism any tenant currently runs
+- 2026-08-23 - docs(ops): cross-link the gap register to its GitHub tracking issues
+- 2026-08-23 - docs(ops): correct the live-instance gap register (G3 trigger, G5 naming, G6 circular fix, G8 evidence)
+- 2026-08-22 - fix(railway): compare-and-swap + auth-gated readiness for client ref updates (closes protocol gap G1)
 - 2026-08-21 - chore(setup-applier): delete the unused destructive config-reset capability (closes #36, protocol gap G2)
 - 2026-08-21 - fix(railway): add post-write verification to the allowedOrigins patch (closes protocol gap G5's first half)
 - 2026-08-21 - fix(railway): make root the canonical Control UI URL, exempt passive-fetch paths, and revert the base-path auth exemption

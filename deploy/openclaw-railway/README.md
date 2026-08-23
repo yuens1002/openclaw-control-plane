@@ -138,11 +138,57 @@ template, or control-plane's own `main`.
 .\deploy\openclaw-railway\provision-client.ps1 -ClientName acme -ProjectId <existing-project-id>
 .\deploy\openclaw-railway\provision-client.ps1 -ClientName acme -TemplateRef <commit-sha>
 
-.\deploy\openclaw-railway\update-client-template-ref.ps1 -Service acme-openclaw -TemplateRef <new-commit-sha>
+.\deploy\openclaw-railway\update-client-template-ref.ps1 -Service acme-openclaw -TemplateRef <new-commit-sha> -ExpectedCurrentRef <current-commit-sha>
 ```
 
 `OPENCLAW_TEMPLATE_REF` defaults to this repo's own
 `template-lock.json` → `pinnedCommit` when not passed explicitly.
+
+`-ExpectedCurrentRef` is required on both update scripts. State the ref you
+believe the service is currently on: the update reads the live value first,
+does nothing at all when it already equals the ref you asked for (a redeploy
+is downtime, so a no-op must not cause one), and aborts without writing when
+the live value is neither the expected one nor the target. That makes it
+impossible to redeploy a client without knowing what you are replacing. It
+is a read-then-write check, not an atomic compare-and-swap, so it catches
+drift that already existed rather than serialising two updates racing each
+other. After the redeploy both scripts wait for the instance to answer an
+*authenticated* request, not merely for the platform to report a finished
+deployment.
+
+Pass `-SetupUsername` if the client was provisioned with a non-default
+setup username; the readiness check authenticates with it, and would
+otherwise fail until timeout against a service that does not use the
+default.
+
+For a client's **first** OpenClaw version bump, pass `-ExpectedCurrentRef
+'<unset>'`. Provisioning writes `OPENCLAW_TEMPLATE_REF` but not
+`OPENCLAW_GIT_REF` — the application ref exists only as a Dockerfile
+build-time default until the first bump sets it as a service variable — so
+a freshly provisioned client genuinely has no current value to state. The
+sentinel makes that an explicit declaration rather than a silent special
+case: passing it against a service that *does* have a value is refused,
+just like any other mismatch.
+
+If an update fails *after* the variable was written — the error says the ref
+"WAS updated" but the instance is not confirmed healthy — a plain retry will
+not fix it. The variable already matches, so there is nothing to change, and
+the update declines to report that as success while the instance is
+unhealthy.
+
+To recover, re-run with **both** `-ForceRedeploy` **and** `-ExpectedCurrentRef`
+set to the ref that was already written (the target, not the value it held
+before the failed attempt):
+
+```powershell
+.\deploy\openclaw-railway\update-client-openclaw-ref.ps1 -Service acme-openclaw `
+  -OpenClawRef v2026.7.1-2 -ExpectedCurrentRef v2026.7.1-2 -ForceRedeploy
+```
+
+Passing the *old* value on that retry fails, and correctly so: the variable
+now holds the target, so claiming to expect the old one is a false statement
+about live state. `-ForceRedeploy` only bypasses the already-up-to-date
+short-circuit; it does not disable the expected-ref check.
 
 `OPENCLAW_TEMPLATE_REF` is a **different** pin from `OPENCLAW_GIT_REF`: the
 template ref is the Railway wrapper/scaffold (`vignesh07/clawdbot-railway-template`)
@@ -154,7 +200,7 @@ baked into this repo's `Dockerfile` and, like the template ref, can be
 overridden per client without touching any other service:
 
 ```powershell
-.\deploy\openclaw-railway\update-client-openclaw-ref.ps1 -Service acme-openclaw -OpenClawRef v2026.7.1-2
+.\deploy\openclaw-railway\update-client-openclaw-ref.ps1 -Service acme-openclaw -OpenClawRef v2026.7.1-2 -ExpectedCurrentRef v2026.6.0-1
 ```
 
 Provisioning sets `PORT=8080`, `OPENCLAW_STATE_DIR=/data/.openclaw`, and
