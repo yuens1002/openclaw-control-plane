@@ -71,6 +71,14 @@ export class FakeRailwayRunner implements RailwayRunner {
       return { stdout: "" };
     }
     if (key === "variable set") {
+      // Reflect the write back into what `variable list` returns. A fake that
+      // accepts writes but keeps serving the pre-write values cannot exercise
+      // any caller that writes and then re-reads to confirm the value landed
+      // -- it reports the old value forever and makes a good write look like
+      // a failure. The name is args[2]; the value arrives on stdin.
+      if (args[2] !== undefined && stdin !== undefined) {
+        this.variableListResponse = { ...this.variableListResponse, [args[2]]: stdin };
+      }
       return { stdout: JSON.stringify([args[2]]) };
     }
     if (key === "variable list") {
