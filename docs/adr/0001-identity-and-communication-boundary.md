@@ -138,30 +138,29 @@ just account bookkeeping, becomes part of the decision.
 
 ## Status Updates
 
-### 2026-08-18 — Decision (4), source-control: PAT adopted as a documented single-tenant outlier
+### 2026-08-18 — Decision (4), source-control: App-based connector built, then reverted as premature
 
 Decision (4)'s App-based model — one provider-owned GitHub App installed
 separately per organization, short-lived per-use tokens minted from an
 App JWT, never a static secret handed to the CoT — was designed for a
-multi-tenant scenario: the agency and each downstream client org each
-needing their own scoped installation. That scenario does not currently
-exist. This agency's target clients do not have their own GitHub org,
-repos, or any notion of what a repo is — the agency builds and owns the
-workflows/servers the CoT tracks on their behalf. As of this writing, the
-agency itself is the only org that needs the CoT to read a GitHub repo at
-all.
+multi-tenant scenario: a provider and each downstream client org each
+needing their own scoped installation. A single-tenant deployment, with
+no client org yet needing its own scoped installation, doesn't need that
+model's full mint-and-refresh machinery to get equivalent protection —
+the tradeoff only pays for itself once a genuine multi-tenant need
+exists.
 
 Given that, decision (4)'s App-based model was built
 (`openclaw-control-plane` `packages/openclaw-source-control-connector`,
 PR [#32](https://github.com/yuens1002/openclaw-control-plane/pull/32) —
 `buildAppJwt` + `mintInstallationToken`, tested, documented, deliberately
-unwired) and then **reverted**, not carried forward. A classic GitHub
-Personal Access Token, scoped to the agency's own account, is what the
-agency's live CoT instance actually uses today — already configured and
-working. Building and operating the App's mint-and-refresh pipeline
-(installation tokens expire in ≤1hr, requiring a recurring refresh job
-with no existing scheduling infrastructure to run it from) was
-disproportionate effort for a single, low-risk, single-tenant credential.
+unwired) and then **reverted**, not carried forward: building and
+operating the App's mint-and-refresh pipeline (installation tokens expire
+in ≤1hr, requiring a recurring refresh job with no existing scheduling
+infrastructure to run it from) was disproportionate effort ahead of an
+actual multi-tenant need. Which credential mechanism the agency's own
+live instance runs day to day is operational detail this ADR doesn't
+track — see the 2026-08-22 update below.
 
 Decision (4)'s general principle — provider-owned App, least-privilege
 per-installation scope, short-lived minted tokens, no static secret
@@ -175,3 +174,18 @@ are the starting point, not a from-scratch investigation — see
 for the full writeup. It's also plausible OpenClaw ships native GitHub
 App support upstream before that scenario ever arises, which would
 obsolete this control-plane package entirely rather than just revive it.
+
+### 2026-08-22 — Decision (4), source-control: this ADR doesn't track which mechanism any tenant currently runs
+
+The entry above named which credential mechanism this agency's live CoT
+instance used at the time. That was a scope mistake for an architecture
+doc: this ADR records the general pattern, not any tenant's current
+operational state, which changes independently of the architecture and
+belongs in each tenant's own private profile repo, not here.
+
+For the record, going forward: GitHub access for a CoT can be provisioned
+either way under decision (4)'s general principle — a PAT (simpler,
+adequate for a single low-risk credential) or a GitHub App installation
+(least-privilege, short-lived minted tokens, appropriate once a genuine
+multi-tenant need exists). Which one any given tenant runs, and why, is
+operational detail this ADR does not track.
