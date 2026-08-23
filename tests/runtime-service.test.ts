@@ -271,6 +271,7 @@ describe("principal-aware runtime service", () => {
     expect(repository.recordAuthorizationDecision).toHaveBeenCalledWith({
       stream_id: "stream-1",
       operation_type: "example.state.reconcile",
+      operation_schema_version: 1,
       target: target(),
       request_id: "request-1",
       command_context: input.command_context

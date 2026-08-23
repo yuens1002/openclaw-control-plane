@@ -176,10 +176,11 @@ describePostgres("M1 to durable runtime PostgreSQL migration", () => {
         projection_type: "legacy.replay_count",
         subject: { type: "legacy.domain", id: "migrated" },
         projection_version: 1,
+        input_types: [{ kind: "event", type: "legacy.event", schema_version: 1 }],
         initial_state: { count: 0 },
         reduce: (state) => ({ count: Number(state.count) + 1 })
       })
-    ).resolves.toMatchObject({ state: { count: 7 }, last_record_sequence: 7 });
+    ).resolves.toMatchObject({ state: { count: 1 }, last_record_sequence: 7 });
   });
 });
 

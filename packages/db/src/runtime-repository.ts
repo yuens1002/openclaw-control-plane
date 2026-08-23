@@ -73,9 +73,18 @@ export interface RuntimeProjectionRebuild {
   projection_type: string;
   subject: RuntimeSubject;
   projection_version: number;
+  input_types: readonly RuntimeProjectionInputType[];
   initial_state: RuntimePayload;
   reduce: (state: RuntimePayload, record: RuntimeRecord) => RuntimePayload;
 }
+
+export interface RuntimeProjectionInputType {
+  kind: RuntimeKind;
+  type: string;
+  schema_version: number;
+}
+
+export type RuntimeProjectionAdvance = Omit<RuntimeProjectionRebuild, "initial_state">;
 
 export interface AppendRuntimeCommand {
   stream_id: string;
@@ -102,6 +111,7 @@ export interface RuntimeOperationResult {
 export interface AuthorizationDenialInput {
   stream_id: string;
   operation_type: string;
+  operation_schema_version: number;
   target: RuntimeSubject;
   request_id: string;
   command_context: TrustedCommandContext;
@@ -363,11 +373,18 @@ export class PostgresRuntimeRepository {
     if (context.authorization.result !== "denied") {
       throw new Error("recordAuthorizationDecision only accepts denied decisions.");
     }
+    const operation = this.registry.requireOperation(
+      input.operation_type,
+      input.operation_schema_version
+    );
+    if (context.authorization.action !== operation.authorization_action) {
+      throw new Error("Denied authorization action does not match the registered operation action.");
+    }
     const auditId = randomUUID();
     return this.appendDeniedAudit({
       stream_id: input.stream_id,
       operation_type: input.operation_type,
-      operation_schema_version: 1,
+      operation_schema_version: input.operation_schema_version,
       idempotency_key: `authorization:${context.authorization.decision_id}`,
       canonicalization_version: "authorization-decision-v1",
       command_digest: jsonDigest({
@@ -467,6 +484,7 @@ export class PostgresRuntimeRepository {
   }> {
     RuntimeSubjectSchema.parse(input.subject);
     RuntimePayloadSchema.parse(input.initial_state);
+    validateProjectionInputTypes(input.input_types);
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
@@ -484,7 +502,9 @@ export class PostgresRuntimeRepository {
       for (const record of records) {
         validateHistoricalRecord(record, this.registry);
       }
-      const state = records.reduce(input.reduce, input.initial_state);
+      const state = records
+        .filter((record) => projectionConsumes(record, input.input_types))
+        .reduce(input.reduce, input.initial_state);
       RuntimePayloadSchema.parse(state);
       const lastRecord = records.at(-1);
 
@@ -520,6 +540,79 @@ export class PostgresRuntimeRepository {
       );
       await client.query("COMMIT");
       return { state, last_record_sequence: lastRecord?.record_sequence ?? 0 };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async advanceProjection(input: RuntimeProjectionAdvance): Promise<{
+    state: RuntimePayload;
+    last_record_sequence: number;
+  }> {
+    RuntimeSubjectSchema.parse(input.subject);
+    validateProjectionInputTypes(input.input_types);
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const projection = await client.query<{
+        projection_id: string;
+        state: RuntimePayload;
+        last_record_sequence: string;
+      }>(
+        `SELECT p.projection_id, p.state, c.last_record_sequence
+         FROM projection_states p
+         JOIN projection_checkpoints c ON c.projection_id = p.projection_id
+         WHERE p.stream_id = $1 AND p.projection_type = $2
+           AND p.subject_type = $3 AND p.subject_id = $4
+           AND p.projection_version = $5
+         FOR UPDATE`,
+        [
+          input.stream_id,
+          input.projection_type,
+          input.subject.type,
+          input.subject.id,
+          input.projection_version
+        ]
+      );
+      const current = projection.rows[0];
+      if (!current) throw new Error("Projection must be rebuilt before it can advance.");
+      RuntimePayloadSchema.parse(current.state);
+      const recordsResult = await client.query<RuntimeRecordRow>(
+        `SELECT record_id, stream_id, record_sequence, kind, type, schema_version,
+                schema_ref, operation_type, command_context, subject, payload,
+                occurred_at, recorded_at
+         FROM runtime_records
+         WHERE stream_id = $1 AND record_sequence > $2
+         ORDER BY record_sequence
+         FOR UPDATE`,
+        [input.stream_id, current.last_record_sequence]
+      );
+      const records = recordsResult.rows.map(mapRuntimeRecord);
+      for (const record of records) validateHistoricalRecord(record, this.registry);
+      const state = records
+        .filter((record) => projectionConsumes(record, input.input_types))
+        .reduce(input.reduce, current.state);
+      RuntimePayloadSchema.parse(state);
+      const lastRecord = records.at(-1);
+      const lastRecordSequence = lastRecord?.record_sequence ??
+        Number(current.last_record_sequence);
+      await client.query(
+        "UPDATE projection_states SET state = $2::jsonb, updated_at = now() WHERE projection_id = $1",
+        [current.projection_id, JSON.stringify(state)]
+      );
+      if (lastRecord) {
+        await client.query(
+          `UPDATE projection_checkpoints
+           SET last_record_sequence = $2, last_record_id = $3, updated_at = now()
+           WHERE projection_id = $1`,
+          [current.projection_id, lastRecord.record_sequence, lastRecord.record_id]
+        );
+      }
+      await client.query("COMMIT");
+      return { state, last_record_sequence: lastRecordSequence };
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
@@ -1155,6 +1248,37 @@ function validateHistoricalRecord(
     return;
   }
   validateBuiltInRecord(record);
+}
+
+function validateProjectionInputTypes(
+  inputTypes: readonly RuntimeProjectionInputType[]
+): void {
+  if (inputTypes.length === 0) {
+    throw new Error("Projection input_types must contain at least one typed input.");
+  }
+  const keys = new Set<string>();
+  for (const input of inputTypes) {
+    RuntimeKindSchema.parse(input.kind);
+    SafeNamespacedIdentifierSchema.parse(input.type);
+    if (!Number.isInteger(input.schema_version) || input.schema_version < 1) {
+      throw new Error("Projection input schema versions must be positive integers.");
+    }
+    const key = `${input.kind}:${input.type}:${input.schema_version}`;
+    if (keys.has(key)) throw new Error(`Duplicate projection input type ${key}.`);
+    keys.add(key);
+  }
+}
+
+function projectionConsumes(
+  record: RuntimeRecord,
+  inputTypes: readonly RuntimeProjectionInputType[]
+): boolean {
+  return inputTypes.some(
+    (input) =>
+      input.kind === record.kind &&
+      input.type === record.type &&
+      input.schema_version === record.schema_version
+  );
 }
 
 function validateBuiltInRecord(

@@ -99,8 +99,8 @@ identical key and digest is idempotent.
 New commands require an active registration. Retiring a registration prevents
 new writes but does not make historical records unreadable. Historical records
 retain their schema reference and payload; projection rebuild or action replay
-that requires a missing or retired registration fails explicitly rather than
-silently interpreting the payload.
+may use a matching retired registration, while a missing or changed
+registration fails explicitly rather than silently interpreting the payload.
 
 Operation registrations are separate because an operation consumes a command
 and may produce several result types:

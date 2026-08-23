@@ -155,6 +155,9 @@ describePostgres("PostgreSQL durable runtime repository", () => {
         projection_type: "example.record_counts",
         subject: { type: "example.environment", id: "production" },
         projection_version: 1,
+        input_types: [
+          { kind: "event", type: "example.observation", schema_version: 1 }
+        ],
         initial_state: { count: 0 },
         reduce: (state) => ({ count: Number(state.count) + 1 })
       });
@@ -169,9 +172,20 @@ describePostgres("PostgreSQL durable runtime repository", () => {
       ...late,
       records: [{ ...late.records[0]!, occurred_at: "2025-01-01T00:00:00.000Z" }]
     });
-    const second = await rebuild();
-    expect(first).toEqual({ state: { count: 7 }, last_record_sequence: 7 });
-    expect(second).toEqual({ state: { count: 8 }, last_record_sequence: 8 });
+    const advanced = await repository.advanceProjection({
+      stream_id: "rebuild-stream",
+      projection_type: "example.record_counts",
+      subject: { type: "example.environment", id: "production" },
+      projection_version: 1,
+      input_types: [
+        { kind: "event", type: "example.observation", schema_version: 1 }
+      ],
+      reduce: (state) => ({ count: Number(state.count) + 1 })
+    });
+    const rebuilt = await rebuild();
+    expect(first).toEqual({ state: { count: 1 }, last_record_sequence: 7 });
+    expect(advanced).toEqual({ state: { count: 2 }, last_record_sequence: 8 });
+    expect(rebuilt).toEqual(advanced);
   });
 
   it("audits an idempotency conflict without creating the changed effect", async () => {
@@ -361,6 +375,7 @@ describePostgres("PostgreSQL durable runtime repository", () => {
     const result = await repository.recordAuthorizationDecision({
       stream_id: "denial-stream",
       operation_type: "example.state.reconcile",
+      operation_schema_version: 1,
       target: { type: "example.environment", id: "production" },
       request_id: "request-denied-001",
       command_context: trustedContext("denied")
@@ -375,11 +390,30 @@ describePostgres("PostgreSQL durable runtime repository", () => {
     ]);
   });
 
+  it("rejects denied evidence for an unrelated registered action", async () => {
+    const repository = new PostgresRuntimeRepository(pool, registry);
+    const context = trustedContext("denied");
+    await expect(
+      repository.recordAuthorizationDecision({
+        stream_id: "denial-wrong-action-stream",
+        operation_type: "example.state.reconcile",
+        operation_schema_version: 1,
+        target: { type: "example.environment", id: "production" },
+        request_id: "request-denied-wrong-action",
+        command_context: {
+          ...context,
+          authorization: { ...context.authorization, action: "runtime.unrelated_action" }
+        }
+      })
+    ).rejects.toThrow(/denied authorization action/i);
+  });
+
   it("content-binds denial audit idempotency and audits changed evidence", async () => {
     const repository = new PostgresRuntimeRepository(pool, registry);
     const input = {
       stream_id: "denial-conflict-stream",
       operation_type: "example.state.reconcile",
+      operation_schema_version: 1,
       target: { type: "example.environment", id: "production" },
       request_id: "request-denied-001",
       command_context: trustedContext("denied")
@@ -497,6 +531,9 @@ describePostgres("PostgreSQL durable runtime repository", () => {
         projection_type: "example.retired_replay",
         subject: { type: "example.environment", id: "production" },
         projection_version: 1,
+        input_types: [
+          { kind: "event", type: "example.observation", schema_version: 1 }
+        ],
         initial_state: { count: 0 },
         reduce: (state) => ({ count: Number(state.count) + 1 })
       })
@@ -521,6 +558,9 @@ describePostgres("PostgreSQL durable runtime repository", () => {
         projection_type: "example.missing_schema",
         subject: { type: "example.environment", id: "production" },
         projection_version: 1,
+        input_types: [
+          { kind: "event", type: "example.observation", schema_version: 1 }
+        ],
         initial_state: {},
         reduce: (state) => state
       })

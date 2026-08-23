@@ -99,6 +99,7 @@ export class PrincipalAwareRuntimeService {
       return this.repository.recordAuthorizationDecision({
         stream_id: input.stream_id,
         operation_type: command.operation_type,
+        operation_schema_version: command.operation_schema_version,
         target: command.target,
         request_id: input.action.request_id,
         command_context: context
