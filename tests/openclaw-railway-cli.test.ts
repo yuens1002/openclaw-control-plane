@@ -102,6 +102,17 @@ describe("marketplace-install path never reads Railway variables", () => {
   // filename in a doc comment, e.g. index.ts's waitForSetupReady comment,
   // which legitimately references provision-client.ts as one of its
   // callers without importing it.
+  //
+  // Known, accepted limitation: this is a source-text check, not an
+  // import-graph walk, so it cannot catch a *future* re-export of a reader
+  // under a name that doesn't contain any of the three substrings above.
+  // Checked against the repo as it stands today, not assumed: the one
+  // existing re-export (openclaw-setup-applier/src/railway-variables.ts's
+  // `export * from ".../railway-variables"`) is still caught, because its
+  // own import specifier contains "railway-variables". Building a real
+  // import-graph invariant for a hypothetical future re-export under an
+  // unrelated name was judged disproportionate to what this closure
+  // actually needs to pin.
   const forbiddenImportPattern =
     /(?:from\s+|import\s*\(\s*|import\s+)["'][^"']*(?:railway-variables|provision-client|apply-profile)[^"']*["']/;
 
