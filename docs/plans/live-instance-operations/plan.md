@@ -191,7 +191,11 @@ Named, with the recommended fix stated, but not built here:
   provisioning path; low urgency while it has no callers.
 - Programmatic Railway variable calls bypass the human-CLI guard's scoping
   checks. Moving the check to the process-spawn boundary is a real refactor,
-  not a doc change.
+  not a doc change. *(State at planning time. Closed since, by narrowing
+  rather than by the recommended spawn-boundary refactor: every production
+  caller already meets this row's requirements a different way — mandatory
+  service scoping plus a non-echoing runner — once traced against the real
+  code rather than assumed. See gap G4 in the protocol, §7.)*
 - The CORS-patch function lacks the post-write verification the profile-apply
   function has. **This is the first recommended follow-up** — the protocol's
   own idempotent-write rule requires both halves, and this path currently has

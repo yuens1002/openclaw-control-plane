@@ -500,32 +500,40 @@ gating one: does in-process exposure still matter once nothing is
 echoed? Decided **no**, for this repo's current threat model, once the
 actual mechanism was traced rather than assumed:
 
-- Every one of the seven callers routes through one of two real
-  runners — `openclaw-railway-installer/src/client-cli.ts`'s
-  `runCommand` (used by `provision-client.ts`) and
-  `openclaw-setup-applier/src/cli.ts`'s `runCommand` (used by
-  `apply-profile.ts`). Both deliberately never write captured stdout to
-  this process's own stdout — confirmed in code, not assumed — and both
-  are pinned by an existing real-child-process regression test
-  (`tests/openclaw-railway-client-cli.test.ts` and
-  `tests/openclaw-setup-applier-onboarding-cycle-cli.test.ts`, each
-  titled "never writes the spawned process's stdout to this process's
-  own stdout, even though it's still captured for parsing"). The one
-  runner that *does* echo (`cli.ts`/`index.ts`, the marketplace-install
-  path) never calls either function, or the modules that call them —
-  confirmed by source-text scan, not assumed, and pinned by
-  `tests/openclaw-railway-cli.test.ts`'s "marketplace-install path never
-  reads Railway variables" suite, which matches each file's actual import
-  specifiers (not a bare mention — `index.ts`'s own doc comments
-  legitimately name `provision-client.ts` as a caller of an unrelated
-  export) so a future import of `railway-variables.js`,
-  `provision-client.js`, or `apply-profile.js` into either file fails that
-  test. Coarser than an import-graph check — it cannot catch a re-export
-  under a different name — but sufficient for the direct-import
-  regression path this closure actually depends on.
-- `service` is a required parameter on both functions with no unscoped
-  fallback, meeting this row's scoping requirement structurally rather
-  than by a runtime check.
+- Every one of the seven call sites is reachable through one of three
+  real runners, each wired up by a different CLI entrypoint:
+  `openclaw-railway-installer/src/client-cli.ts`'s `runCommand`
+  (`provisionClientInstance`, invoked directly), `openclaw-setup-applier
+  /src/cli.ts`'s `runCommand` (`applyProfile`/`dryRunApplyProfile`,
+  invoked directly), and `openclaw-setup-applier/src/onboarding-cycle-
+  cli.ts`'s own separate `runCommand` (the same two call graphs, reached
+  instead through `bootstrapOnboardingCycle`/`runRegressionCheck`, which
+  compose provisioning and profile-application into one bootstrap run).
+  All three deliberately never write captured stdout to this process's
+  own stdout — confirmed in code, not assumed — and all three are pinned
+  by an existing real-child-process regression test, each titled "never
+  writes the spawned process's stdout to this process's own stdout, even
+  though it's still captured for parsing":
+  `tests/openclaw-railway-client-cli.test.ts` for the first,
+  `tests/openclaw-setup-applier-cli.test.ts` for the second (added by
+  this closure — it had no real-spawn coverage of any kind beforehand),
+  and `tests/openclaw-setup-applier-onboarding-cycle-cli.test.ts` for the
+  third. The one runner that *does* echo (`cli.ts`/`index.ts`, the
+  marketplace-install path) never calls any of the reader functions, or
+  the modules that call them — confirmed by source-text scan, not
+  assumed, and pinned by `tests/openclaw-railway-cli.test.ts`'s
+  "marketplace-install path never reads Railway variables" suite, which
+  matches each file's actual import specifiers — a `from` clause, a bare
+  side-effect import, or a dynamic `import(...)` — not a bare mention
+  (`index.ts`'s own doc comments legitimately name `provision-client.ts`
+  as a caller of an unrelated export) so a future import of
+  `railway-variables.js`, `provision-client.js`, or `apply-profile.js`
+  into either file fails that test. Coarser than an import-graph check —
+  it cannot catch a re-export under a different name — but sufficient for
+  the direct-import regression path this closure actually depends on.
+- `service` is a required parameter on every reader function with no
+  unscoped fallback, meeting this row's scoping requirement structurally
+  rather than by a runtime check.
 - What remains is real and was weighed, not overlooked: every call still
   materializes every variable on the service in this process's memory to
   select one (issue #45's "why every read is a broad read" — no targeted

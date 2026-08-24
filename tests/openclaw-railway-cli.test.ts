@@ -82,20 +82,28 @@ describe("marketplace-install path never reads Railway variables", () => {
   // stdout (see the test above) never being reachable from a call that
   // reads a secret-bearing variable: railway-variables.ts's
   // listRailwayVariables/readRailwayVariable are only ever routed through
-  // the non-echoing runners in client-cli.ts and openclaw-setup-applier's
-  // cli.ts. That was true when traced, but nothing previously made it
-  // observable if it stopped being true. A source-text check is a coarser
-  // signal than an import-graph check, but it fails loudly the day either
-  // file starts importing railway-variables.js directly, or starts
-  // importing provision-client.js/apply-profile.js — the two modules that
-  // already call the reader functions, so wiring either of *those* in here
-  // would reintroduce the exposure without this file's own source ever
+  // one of three non-echoing runners — client-cli.ts's, openclaw-setup-
+  // applier/src/cli.ts's, and onboarding-cycle-cli.ts's own runCommand
+  // (each pinned by its own real-spawn regression test: this file's
+  // sibling client-cli test, tests/openclaw-setup-applier-cli.test.ts, and
+  // tests/openclaw-setup-applier-onboarding-cycle-cli.test.ts respectively)
+  // — never through this file's own runCommand, which does echo. That was
+  // true when traced, but nothing previously made it observable if it
+  // stopped being true. A source-text check is a coarser signal than an
+  // import-graph check, but it fails loudly the day either file starts
+  // importing railway-variables.js directly, or starts importing
+  // provision-client.js/apply-profile.js — the modules that already call
+  // the reader functions, so wiring either of *those* in here would
+  // reintroduce the exposure without this file's own source ever
   // mentioning "railway-variables" — which is exactly the moment this
-  // closed gap needs re-examining. Matches only actual import specifiers
-  // (`from "...name..."`), not prose mentions of a sibling module's
-  // filename in a doc comment — index.ts's waitForSetupReady comment
-  // legitimately references provision-client.ts as one of its callers.
-  const forbiddenImportPattern = /from\s+["'][^"']*(?:railway-variables|provision-client|apply-profile)[^"']*["']/;
+  // closed gap needs re-examining. Matches a `from "...name..."`
+  // specifier, a bare side-effect `import "...name..."`, or a dynamic
+  // `import("...name...")` — not a prose mention of a sibling module's
+  // filename in a doc comment, e.g. index.ts's waitForSetupReady comment,
+  // which legitimately references provision-client.ts as one of its
+  // callers without importing it.
+  const forbiddenImportPattern =
+    /(?:from\s+|import\s*\(\s*|import\s+)["'][^"']*(?:railway-variables|provision-client|apply-profile)[^"']*["']/;
 
   it("cli.ts never imports railway-variables.js, provision-client.js, or apply-profile.js", async () => {
     const source = await readFile("packages/openclaw-railway-installer/src/cli.ts", "utf8");

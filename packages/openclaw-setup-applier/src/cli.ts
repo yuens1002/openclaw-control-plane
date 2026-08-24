@@ -123,7 +123,7 @@ async function resolveRailwayExecutable(): Promise<string> {
   return "railway";
 }
 
-function runCommand(command: string, args: string[], stdin?: string): Promise<{ stdout: string }> {
+export function runCommand(command: string, args: string[], stdin?: string): Promise<{ stdout: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       stdio: [stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
