@@ -44,7 +44,8 @@ a substitute for the pending human review.
 | --- | --- | --- | --- |
 | Security QC | Authentication, authorization, delegation, trusted context, denial behavior, JWKS/TLS handling, readiness, deployment profile, and security tests | `a0f7a793ca88962477665a97fd335f467defac43` | No blocker; clean security verdict |
 | Behavioral and AC QC | Runtime behavior, HTTP/tool contracts, PostgreSQL persistence, approvals, provenance, registration lifecycle, test coverage, and all behavioral ACs | `a0f7a793ca88962477665a97fd335f467defac43` | No blocker; all behavioral ACs confirmed |
-| Evidence consistency QC | Plan status, 30-row AC ledger, executed evidence, residual risks, and stale-placeholder audit | `8304c36ac5acb3d6889daa806b43d7b1b4ad671c` | Initial review found three documentation blockers; corrections are recorded in the next docs-only commit and require final re-review |
+| Evidence consistency QC | Plan status, 30-row AC ledger, executed evidence, residual risks, and stale-placeholder audit | `8304c36ac5acb3d6889daa806b43d7b1b4ad671c` | Initial review found three documentation blockers |
+| Evidence consistency re-review | Historical-baseline labeling, worker build evidence, durable independent-review records, and final review consistency | `167bc3550f659f0b088c3b72e28ac1c1a381a80c` | No blockers; all prior findings closed and `/review` ready for human review |
 
 ## Residual Risks
 
