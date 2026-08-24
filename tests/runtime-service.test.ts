@@ -174,6 +174,31 @@ describe("principal-aware runtime service", () => {
     });
   });
 
+  it("references an immutable pre-recorded approval without duplicating it", async () => {
+    const repository = new FakeRepository();
+    const service = createService(repository, [actionId, resultId], true);
+    const input = allowedInput();
+
+    await service.execute({
+      ...input,
+      approval_evidence: {
+        ...approvalEvidence(input.command_digest),
+        record_id: approvalId
+      }
+    });
+
+    const append = repository.appendCommand.mock.calls[0]![0];
+    expect(append.approval_record_id).toBe(approvalId);
+    expect(append.records).toHaveLength(2);
+    expect(append.records).not.toContainEqual(expect.objectContaining({ kind: "approval" }));
+    expect(append.edges).toContainEqual({
+      from_record_id: actionId,
+      relation: "approved_by",
+      to_record_id: approvalId,
+      ordinal: 0
+    });
+  });
+
   it("binds the approval principal to trusted approver context", async () => {
     const repository = new FakeRepository();
     const service = createService(repository, undefined, true);

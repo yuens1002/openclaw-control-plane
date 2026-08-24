@@ -53,6 +53,7 @@ export interface ExecuteRuntimeCommandInput {
 }
 
 export interface RuntimeApprovalEvidence {
+  record_id?: string;
   work_item_id: string;
   operation_type: string;
   action_revision: number;
@@ -138,7 +139,7 @@ export class PrincipalAwareRuntimeService {
     }
 
     const actionRecordId = this.createId();
-    const approvalRecordId = approval ? this.createId() : undefined;
+    const approvalRecordId = approval?.record_id ?? (approval ? this.createId() : undefined);
     const resultRecords = command.declared_effects.map(
       (effect) =>
         ({
@@ -192,6 +193,7 @@ export class PrincipalAwareRuntimeService {
       canonical_command: command,
       command_context: context,
       ...(approval ? { approval_context: approval.context } : {}),
+      ...(approval?.record_id ? { approval_record_id: approval.record_id } : {}),
       records: [
         {
           record_id: actionRecordId,
@@ -205,7 +207,7 @@ export class PrincipalAwareRuntimeService {
           operation_type: command.operation_type,
           operation_schema_version: command.operation_schema_version
         },
-        ...(approval && approvalRecordId
+        ...(approval && approvalRecordId && !approval.record_id
           ? [
               {
                 record_id: approvalRecordId,
@@ -279,6 +281,7 @@ function validateApprovalEvidence(
   command: CanonicalCommandEnvelope,
   computedDigest: string
 ): {
+  record_id?: string;
   decided_at: string;
   payload: RuntimePayload;
   context: TrustedCommandContext;
@@ -321,5 +324,10 @@ function validateApprovalEvidence(
     throw new Error("Approver authorization action must be runtime.command.approve.");
   }
 
-  return { decided_at: payload.decided_at, payload, context: approverContext };
+  return {
+    ...(evidence.record_id ? { record_id: evidence.record_id } : {}),
+    decided_at: payload.decided_at,
+    payload,
+    context: approverContext
+  };
 }

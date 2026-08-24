@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
 
 import { PostgresEventStore } from "./event-store.js";
+import { RuntimeApiService } from "./runtime-api-service.js";
 import { runSqlMigrations } from "./migrations.js";
 import {
   exampleOperationRegistrations,
@@ -20,6 +21,7 @@ import {
 export interface PostgresRuntime {
   eventStore: PostgresEventStore;
   repository: PostgresRuntimeRepository;
+  apiService: RuntimeApiService;
   readiness: () => Promise<RuntimeReadiness>;
   close: () => Promise<void>;
 }
@@ -70,6 +72,7 @@ export async function initializePostgresRuntime(
   return {
     eventStore: new PostgresEventStore(pool),
     repository,
+    apiService: new RuntimeApiService(repository, registry),
     readiness: () => repository.readiness(),
     close: () => pool.end()
   };

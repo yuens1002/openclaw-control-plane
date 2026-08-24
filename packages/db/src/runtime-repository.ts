@@ -15,6 +15,7 @@ import {
   SafeNamespacedIdentifierSchema,
   TrustedCommandContextSchema,
   type CanonicalCommandEnvelope,
+  type RecordRef,
   type RuntimeKind,
   type RuntimePayload,
   type RuntimeSubject,
@@ -100,6 +101,7 @@ export interface AppendRuntimeCommand {
   canonical_command: CanonicalCommandEnvelope;
   command_context: TrustedCommandContext;
   approval_context?: TrustedCommandContext;
+  approval_record_id?: string;
   records: readonly RuntimeRecordDraft[];
   edges?: readonly RuntimeEdgeDraft[];
   projection_updates?: readonly RuntimeProjectionUpdate[];
@@ -126,6 +128,33 @@ export interface RuntimeReadiness {
   database: "ready" | "unavailable";
   migrations: "ready" | "missing";
   registry: "ready" | "invalid";
+}
+
+export interface RuntimeIntakeInput {
+  stream_id: string;
+  record: RuntimeRecordDraft;
+  source_refs?: readonly RecordRef[];
+  command_context: TrustedCommandContext;
+}
+
+export interface RuntimeRecordPageInput {
+  stream_id?: string;
+  kind?: RuntimeKind;
+  type?: string;
+  after_sequence?: number;
+  limit: number;
+}
+
+export interface RuntimeRecordPage {
+  records: RuntimeRecord[];
+  next_sequence: number | null;
+}
+
+export interface RuntimeAccessDenialInput {
+  stream_id: string;
+  target: RuntimeSubject;
+  request_id: string;
+  command_context: TrustedCommandContext;
 }
 
 export class IdempotencyConflictError extends Error {
@@ -311,6 +340,7 @@ export class PostgresRuntimeRepository {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
+      await validateExternalApproval(client, command);
       const inserted = await appendRecords(client, command.stream_id, command.command_context, command.records);
       await appendResultReceipts(
         client,
@@ -431,6 +461,74 @@ export class PostgresRuntimeRepository {
     });
   }
 
+  async appendIntakeRecord(
+    input: RuntimeIntakeInput
+  ): Promise<{ status: "inserted" | "replayed"; record: RuntimeRecord }> {
+    const context = TrustedCommandContextSchema.parse(input.command_context);
+    if (context.authorization.result !== "allowed") {
+      throw new Error("Denied context may only use recordAuthorizationDecision.");
+    }
+    validateIntakeRecord(input.record, this.registry);
+    const existing = await this.getRecord(input.record.record_id);
+    if (existing) return this.replayIntakeRecord(existing, input);
+
+    const edges = (input.source_refs ?? []).map((source, ordinal) => ({
+      from_record_id: input.record.record_id,
+      relation: "derived_from" as const,
+      to_record_id: source.id,
+      ordinal
+    }));
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const records = await appendRecords(client, input.stream_id, context, [input.record]);
+      await appendEdges(client, edges);
+      await client.query("COMMIT");
+      return { status: "inserted", record: records[0]! };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      const raced = await this.getRecord(input.record.record_id);
+      if (raced) return this.replayIntakeRecord(raced, input);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async recordAccessDenial(input: RuntimeAccessDenialInput): Promise<RuntimeRecord> {
+    const context = TrustedCommandContextSchema.parse(input.command_context);
+    if (context.authorization.result !== "denied") {
+      throw new Error("recordAccessDenial only accepts denied decisions.");
+    }
+    const record: RuntimeRecordDraft = {
+      record_id: randomUUID(),
+      kind: "audit_entry",
+      type: "runtime.authorization.denied",
+      schema_version: 1,
+      schema_ref: "runtime://schemas/authorization-denied/v1",
+      subject: RuntimeSubjectSchema.parse(input.target),
+      payload: AuthorizationDenialAuditPayloadSchema.parse({
+        request_id: input.request_id,
+        decision_id: context.authorization.decision_id,
+        policy_version: context.authorization.policy_version,
+        reason_codes: context.authorization.reason_codes
+      }),
+      occurred_at: new Date().toISOString()
+    };
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const records = await appendRecords(client, input.stream_id, context, [record]);
+      await client.query("COMMIT");
+      return records[0]!;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async getRecord(recordId: string): Promise<RuntimeRecord | null> {
     const result = await this.pool.query<RuntimeRecordRow>(
       `SELECT record_id, stream_id, record_sequence, kind, type, schema_version,
@@ -453,6 +551,40 @@ export class PostgresRuntimeRepository {
       [streamId]
     );
     return result.rows.map(mapRuntimeRecord);
+  }
+
+  async listRecords(input: RuntimeRecordPageInput): Promise<RuntimeRecordPage> {
+    if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100) {
+      throw new Error("Runtime record page limit must be between 1 and 100.");
+    }
+    const values: unknown[] = [];
+    const clauses: string[] = [];
+    const add = (clause: string, value: unknown) => {
+      values.push(value);
+      clauses.push(clause.replace("?", `$${values.length}`));
+    };
+    if (input.stream_id) add("stream_id = ?", input.stream_id);
+    if (input.kind) add("kind = ?", input.kind);
+    if (input.type) add("type = ?", input.type);
+    add("record_sequence > ?", input.after_sequence ?? 0);
+    values.push(input.limit + 1);
+    const result = await this.pool.query<RuntimeRecordRow>(
+      `SELECT record_id, stream_id, record_sequence, kind, type, schema_version,
+              schema_ref, operation_type, operation_schema_version, command_context, subject, payload,
+              occurred_at, recorded_at
+       FROM runtime_records
+       WHERE ${clauses.join(" AND ")}
+       ORDER BY stream_id, record_sequence
+       LIMIT $${values.length}`,
+      values
+    );
+    const records = result.rows.map(mapRuntimeRecord);
+    const hasMore = records.length > input.limit;
+    const page = records.slice(0, input.limit);
+    return {
+      records: page,
+      next_sequence: hasMore ? page.at(-1)?.record_sequence ?? null : null
+    };
   }
 
   async listEdges(recordId: string): Promise<RuntimeEdgeDraft[]> {
@@ -668,6 +800,46 @@ export class PostgresRuntimeRepository {
     } catch {
       return { database: "unavailable", migrations: "missing", registry: "invalid" };
     }
+  }
+
+  private async replayIntakeRecord(
+    existing: RuntimeRecord,
+    input: RuntimeIntakeInput
+  ): Promise<{ status: "replayed"; record: RuntimeRecord }> {
+    const comparableExisting = {
+      stream_id: existing.stream_id,
+      kind: existing.kind,
+      type: existing.type,
+      schema_version: existing.schema_version,
+      schema_ref: existing.schema_ref,
+      subject: existing.subject,
+      payload: existing.payload,
+      authenticated_principal_ref: existing.command_context.authenticated_principal_ref
+    };
+    const comparableInput = {
+      stream_id: input.stream_id,
+      kind: input.record.kind,
+      type: input.record.type,
+      schema_version: input.record.schema_version,
+      schema_ref: input.record.schema_ref,
+      subject: input.record.subject,
+      payload: input.record.payload,
+      authenticated_principal_ref: input.command_context.authenticated_principal_ref
+    };
+    const expectedSources = (input.source_refs ?? []).map((source) => source.id);
+    const existingSources = (await this.listEdges(existing.record_id))
+      .filter(
+        (edge) => edge.from_record_id === existing.record_id && edge.relation === "derived_from"
+      )
+      .sort((left, right) => left.ordinal - right.ordinal)
+      .map((edge) => edge.to_record_id);
+    if (
+      jsonDigest(comparableExisting) !== jsonDigest(comparableInput) ||
+      jsonDigest(existingSources) !== jsonDigest(expectedSources)
+    ) {
+      throw new IdempotencyConflictError();
+    }
+    return { status: "replayed", record: existing };
   }
 
   private async persistedRegistryMatches(): Promise<boolean> {
@@ -989,6 +1161,40 @@ async function releaseIdempotencyReservation(
   );
 }
 
+async function validateExternalApproval(
+  client: PoolClient,
+  command: AppendRuntimeCommand
+): Promise<void> {
+  if (!command.approval_record_id) return;
+  const result = await client.query<RuntimeRecordRow>(
+    `SELECT record_id, stream_id, record_sequence, kind, type, schema_version,
+            schema_ref, operation_type, operation_schema_version, command_context, subject, payload,
+            occurred_at, recorded_at
+     FROM runtime_records WHERE record_id = $1 FOR SHARE`,
+    [command.approval_record_id]
+  );
+  const record = result.rows[0] ? mapRuntimeRecord(result.rows[0]) : undefined;
+  if (!record || record.kind !== "approval" || record.type !== "runtime.command.approval") {
+    throw new Error("Approval record was not found.");
+  }
+  const payload = ApprovalAttributionPayloadSchema.parse(record.payload);
+  const context = command.approval_context;
+  if (
+    !context ||
+    payload.operation_type !== command.operation_type ||
+    payload.command_digest !== command.command_digest ||
+    payload.work_item_id !== command.canonical_command.work_item_id ||
+    payload.action_revision !== command.canonical_command.action_revision ||
+    payload.decision !== "approved" ||
+    payload.approved_by_principal_ref !== context.authenticated_principal_ref ||
+    jsonDigest(payload.effective_approver) !== jsonDigest(context.effective_actor) ||
+    jsonDigest(payload.approver_authorization) !== jsonDigest(context.authorization) ||
+    jsonDigest(record.command_context) !== jsonDigest(context)
+  ) {
+    throw new Error("Approval record is not authorized for this exact command.");
+  }
+}
+
 async function appendRecords(
   client: PoolClient,
   streamId: string,
@@ -1158,6 +1364,26 @@ async function appendConflictAudit(
   ]);
 }
 
+function validateIntakeRecord(record: RuntimeRecordDraft, registry: RuntimeTypeRegistry): void {
+  RuntimeKindSchema.exclude(["projection"]).parse(record.kind);
+  SafeNamespacedIdentifierSchema.parse(record.type);
+  RuntimeSubjectSchema.parse(record.subject);
+  RuntimePayloadSchema.parse(record.payload);
+  if (record.kind === "event" || record.kind === "work_item") {
+    const registration = registry.requireType(record.kind, record.type, record.schema_version);
+    if (registration.schema_ref !== record.schema_ref) {
+      throw new Error(`Schema reference for ${record.type} does not match its registration.`);
+    }
+    registry.validatePayload(record.kind, record.type, record.schema_version, record.payload);
+    return;
+  }
+  if (record.kind === "approval" && record.type === "runtime.command.approval") {
+    ApprovalAttributionPayloadSchema.parse(record.payload);
+    return;
+  }
+  throw new Error("Intake accepts only registered events, work items, and command approvals.");
+}
+
 function validateAppendCommand(
   command: AppendRuntimeCommand,
   registry: RuntimeTypeRegistry
@@ -1222,10 +1448,11 @@ function validateAppendCommand(
     }
   }
   const approvals = command.records.filter((record) => record.kind === "approval");
-  if (operation.approval_required && approvals.length !== 1) {
+  const approvalCount = approvals.length + (command.approval_record_id ? 1 : 0);
+  if (operation.approval_required && approvalCount !== 1) {
     throw new Error(`Operation ${command.operation_type} requires exactly one approval record.`);
   }
-  if (!operation.approval_required && approvals.length !== 0) {
+  if (!operation.approval_required && approvalCount !== 0) {
     throw new Error(`Operation ${command.operation_type} does not accept approval records.`);
   }
   const approvalContext = command.approval_context
@@ -1329,6 +1556,19 @@ function validateAppendCommand(
           edge.relation === "approved_by" &&
           edge.from_record_id === action.record_id &&
           edge.to_record_id === approvals[0]!.record_id
+      )
+    ) {
+      throw new Error("Approved commands require an approved_by edge from the action attempt.");
+    }
+  }
+  if (command.approval_record_id) {
+    if (
+      !action ||
+      !(command.edges ?? []).some(
+        (edge) =>
+          edge.relation === "approved_by" &&
+          edge.from_record_id === action.record_id &&
+          edge.to_record_id === command.approval_record_id
       )
     ) {
       throw new Error("Approved commands require an approved_by edge from the action attempt.");

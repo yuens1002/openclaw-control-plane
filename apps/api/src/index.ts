@@ -1,40 +1,92 @@
+import { randomUUID } from "node:crypto";
+
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { basicAuth } from "hono/basic-auth";
 import { HTTPException } from "hono/http-exception";
 import type { MiddlewareHandler } from "hono";
 import {
   EventEnvelopeSchema,
   DomainSchema,
+  RuntimeApprovalRequestSchema,
+  RuntimeCommandRequestSchema,
+  RuntimeIntakeRequestSchema,
+  RuntimeRecordQuerySchema,
+  SafeLocalIdentifierSchema,
+  SafeNamespacedIdentifierSchema,
   type PipelineState,
   type TrustedCommandContext
 } from "@openclaw-control-plane/contracts";
 import {
+  IdempotencyConflictError,
   InMemoryEventStore,
+  type RuntimeApiService,
   type EventStore,
   type RuntimeReadiness
 } from "@openclaw-control-plane/db";
+import {
+  AuthenticationError,
+  type AuthenticatedPrincipal,
+  type OidcAuthenticator,
+  type TrustedContextCoordinator,
+  type IdentityReadiness
+} from "@openclaw-control-plane/runtime-auth";
+import { z } from "zod";
+
+type RuntimeApiBoundary = Pick<
+  RuntimeApiService,
+  | "describeOperation"
+  | "listRegistrations"
+  | "createIntake"
+  | "createApproval"
+  | "executeCommand"
+  | "getRecord"
+  | "listRecords"
+  | "listEdges"
+  | "getProjection"
+  | "recordAccessDenial"
+  | "recordCommandDenial"
+>;
+
+type AppEnvironment = {
+  Variables: { trustedCommandContext: TrustedCommandContext; requestId: string };
+};
 
 export interface ControlPlaneDependencies {
   eventStore: EventStore;
   readiness?: () => Promise<RuntimeReadiness>;
   eventCommandContext?: () => TrustedCommandContext | Promise<TrustedCommandContext>;
+  runtimeApiService?: RuntimeApiBoundary;
+  authenticator?: Pick<OidcAuthenticator, "authenticateBearer">;
+  trustedContextCoordinator?: Pick<TrustedContextCoordinator, "authorize">;
+  identityReadiness?: () => Promise<IdentityReadiness>;
 }
 
 export function createControlPlaneApp(
   dependencies: ControlPlaneDependencies = { eventStore: new InMemoryEventStore() }
 ) {
-  const app = new Hono<{
-    Variables: { trustedCommandContext: TrustedCommandContext };
-  }>();
+  const app = new Hono<AppEnvironment>();
+
+  app.use("*", async (context, next) => {
+    context.set("requestId", randomUUID());
+    await next();
+  });
 
   app.get("/health", async (context) => {
     const readiness = dependencies.readiness
       ? await dependencies.readiness()
       : { database: "unavailable", migrations: "missing", registry: "invalid" } as const;
-    const ready =
+    const identity = dependencies.identityReadiness
+      ? await dependencies.identityReadiness()
+      : { identity: "invalid", jwks: "unavailable" } as const;
+    const persistenceReady =
       readiness.database === "ready" &&
       readiness.migrations === "ready" &&
       readiness.registry === "ready";
+    const identityRequired = Boolean(dependencies.identityReadiness);
+    const ready =
+      persistenceReady &&
+      (!identityRequired || (identity.identity === "ready" && identity.jwks === "ready"));
     return context.json({
       ok: ready,
       service: "openclaw-control-plane-api",
@@ -42,6 +94,8 @@ export function createControlPlaneApp(
       database: readiness.database,
       migrations: readiness.migrations,
       registry: readiness.registry,
+      identity: identity.identity,
+      jwks: identity.jwks,
       worker_registry: [],
       failed_runs: 0,
       stale_workers: []
@@ -54,7 +108,7 @@ export function createControlPlaneApp(
   }
 
   app.use("*", async (context, next) => {
-    if (context.req.method !== "POST") {
+    if (context.req.method !== "POST" || context.req.path.startsWith("/v1/runtime")) {
       await next();
       return;
     }
@@ -65,6 +119,147 @@ export function createControlPlaneApp(
     }
     context.set("trustedCommandContext", await dependencies.eventCommandContext());
     await next();
+  });
+
+  app.get("/v1/runtime/registrations", async (context) => {
+    const runtime = requireRuntimeApi(dependencies);
+    await authorizeRequest(context, dependencies, {
+      action: "runtime.record.read",
+      resource: { type: "runtime.registry", id: "active" },
+      streamId: "authorization"
+    });
+    return context.json(runtime.listRegistrations());
+  });
+
+  app.post("/v1/runtime/events", async (context) => {
+    const request = RuntimeIntakeRequestSchema.parse({
+      ...(await context.req.json()),
+      kind: "event"
+    });
+    const trusted = await authorizeRequest(context, dependencies, {
+      action: "runtime.event.ingest",
+      resource: request.subject,
+      streamId: request.stream_id
+    });
+    const result = await requireRuntimeApi(dependencies).createIntake(request, trusted);
+    return context.json(result, result.status === "inserted" ? 202 : 200);
+  });
+
+  app.post("/v1/runtime/work-items", async (context) => {
+    const request = RuntimeIntakeRequestSchema.parse({
+      ...(await context.req.json()),
+      kind: "work_item"
+    });
+    const trusted = await authorizeRequest(context, dependencies, {
+      action: "runtime.work-item.create",
+      resource: request.subject,
+      streamId: request.stream_id
+    });
+    const result = await requireRuntimeApi(dependencies).createIntake(request, trusted);
+    return context.json(result, result.status === "inserted" ? 202 : 200);
+  });
+
+  app.post("/v1/runtime/approvals", async (context) => {
+    const request = RuntimeApprovalRequestSchema.parse(await context.req.json());
+    const trusted = await authorizeRequest(context, dependencies, {
+      action: "runtime.command.approve",
+      resource: request.target,
+      streamId: `approval:${request.work_item_id}`
+    });
+    const result = await requireRuntimeApi(dependencies).createApproval(request, trusted);
+    return context.json(result, result.status === "inserted" ? 201 : 200);
+  });
+
+  app.post("/v1/runtime/commands", async (context) => {
+    const runtime = requireRuntimeApi(dependencies);
+    const request = RuntimeCommandRequestSchema.parse(await context.req.json());
+    const operation = runtime.describeOperation(
+      request.operation_type,
+      request.operation_schema_version
+    );
+    const trusted = await authorizeRequest(context, dependencies, {
+      action: operation.authorization_action,
+      resource: request.target,
+      streamId: request.stream_id,
+      operation: {
+        type: request.operation_type,
+        version: request.operation_schema_version
+      }
+    });
+    const result = await runtime.executeCommand(
+      request,
+      trusted,
+      context.get("requestId")
+    );
+    return context.json(result, result.status === "inserted" ? 202 : 200);
+  });
+
+  app.get("/v1/runtime/records/:recordId", async (context) => {
+    const recordId = z.string().uuid().parse(context.req.param("recordId"));
+    await authorizeRequest(context, dependencies, {
+      action: "runtime.record.read",
+      resource: { type: "runtime.record", id: recordId },
+      streamId: "authorization"
+    });
+    const record = await requireRuntimeApi(dependencies).getRecord(recordId);
+    if (!record) throw new HTTPException(404, { message: "Runtime record was not found." });
+    return context.json({ record });
+  });
+
+  app.get("/v1/runtime/records/:recordId/edges", async (context) => {
+    const recordId = z.string().uuid().parse(context.req.param("recordId"));
+    await authorizeRequest(context, dependencies, {
+      action: "runtime.record.read",
+      resource: { type: "runtime.record", id: recordId },
+      streamId: "authorization"
+    });
+    return context.json({ edges: await requireRuntimeApi(dependencies).listEdges(recordId) });
+  });
+
+  app.get("/v1/runtime/streams/:streamId/records", async (context) => {
+    const streamId = SafeLocalIdentifierSchema.parse(context.req.param("streamId"));
+    await authorizeRequest(context, dependencies, {
+      action: "runtime.record.read",
+      resource: { type: "runtime.stream", id: streamId },
+      streamId
+    });
+    const query = parseRecordQuery(context.req.query(), { stream_id: streamId });
+    return context.json(await requireRuntimeApi(dependencies).listRecords(query));
+  });
+
+  app.get("/v1/runtime/audit", async (context) => {
+    await authorizeRequest(context, dependencies, {
+      action: "runtime.record.read",
+      resource: { type: "runtime.audit", id: "history" },
+      streamId: "authorization"
+    });
+    const query = parseRecordQuery(context.req.query(), { kind: "audit_entry" });
+    return context.json(await requireRuntimeApi(dependencies).listRecords(query));
+  });
+
+  app.get("/v1/runtime/projections/:projectionType/:subjectType/:subjectId", async (context) => {
+    const projectionType = SafeNamespacedIdentifierSchema.parse(
+      context.req.param("projectionType")
+    );
+    const subjectType = SafeNamespacedIdentifierSchema.parse(context.req.param("subjectType"));
+    const subjectId = SafeLocalIdentifierSchema.parse(context.req.param("subjectId"));
+    const streamId = SafeLocalIdentifierSchema.parse(context.req.query("stream_id"));
+    const projectionVersion = z.coerce.number().int().positive().parse(
+      context.req.query("projection_version")
+    );
+    await authorizeRequest(context, dependencies, {
+      action: "runtime.record.read",
+      resource: { type: "runtime.projection", id: `${projectionType}:${subjectId}` },
+      streamId
+    });
+    const projection = await requireRuntimeApi(dependencies).getProjection(
+      streamId,
+      projectionType,
+      { type: subjectType, id: subjectId },
+      projectionVersion
+    );
+    if (!projection) throw new HTTPException(404, { message: "Projection was not found." });
+    return context.json({ projection });
   });
 
   app.get("/", (context) =>
@@ -195,10 +390,44 @@ export function createControlPlaneApp(
     })
   );
 
+  app.onError((error, context) => {
+    const requestId = context.get("requestId") ?? randomUUID();
+    if (error instanceof AuthenticationError) {
+      context.header("www-authenticate", 'Bearer realm="OpenClaw Control Plane"');
+      return context.json(errorEnvelope("runtime.authentication_failed", "Authentication failed.", requestId), 401);
+    }
+    if (error instanceof z.ZodError) {
+      return context.json(errorEnvelope("runtime.invalid_request", "Request validation failed.", requestId), 400);
+    }
+    if (error instanceof IdempotencyConflictError) {
+      return context.json(errorEnvelope("runtime.idempotency_conflict", error.message, requestId), 409);
+    }
+    if (error instanceof HTTPException) {
+      const challenge = error.getResponse().headers.get("www-authenticate");
+      if (challenge) context.header("www-authenticate", challenge);
+      return context.json(
+        errorEnvelope(
+          error.status === 404 ? "runtime.not_found" : "runtime.request_rejected",
+          error.message,
+          requestId
+        ),
+        error.status
+      );
+    }
+    console.error("Runtime API request failed", { requestId, error });
+    return context.json(
+      errorEnvelope("runtime.request_failed", "Request could not be completed.", requestId),
+      500
+    );
+  });
+
   return app;
 }
 
 function createOperatorAuthMiddleware(): MiddlewareHandler | null {
+  if (process.env.RUNTIME_ENABLE_BASIC_AUTH !== "true") {
+    return null;
+  }
   const password = process.env.SETUP_PASSWORD;
   if (!password) {
     return null;
@@ -209,6 +438,83 @@ function createOperatorAuthMiddleware(): MiddlewareHandler | null {
     password,
     realm: "OpenClaw Control Plane"
   });
+}
+
+async function authorizeRequest(
+  context: Context<AppEnvironment>,
+  dependencies: ControlPlaneDependencies,
+  request: {
+    action: string;
+    resource: { type: string; id: string };
+    streamId: string;
+    operation?: { type: string; version: number };
+  }
+): Promise<TrustedCommandContext> {
+  if (!dependencies.authenticator || !dependencies.trustedContextCoordinator) {
+    throw new HTTPException(503, { message: "Runtime authentication is not configured." });
+  }
+  const authenticated: AuthenticatedPrincipal = await dependencies.authenticator.authenticateBearer(
+    context.req.header("authorization")
+  );
+  const onBehalfOf = context.req.header("x-on-behalf-of-principal");
+  if (onBehalfOf && !/^principal:\/\/[A-Za-z0-9][A-Za-z0-9._:@/-]*$/.test(onBehalfOf)) {
+    throw new z.ZodError([
+      { code: "custom", path: ["x-on-behalf-of-principal"], message: "Invalid principal reference." }
+    ]);
+  }
+  const trusted = dependencies.trustedContextCoordinator.authorize({
+    authenticated_principal: authenticated,
+    ...(onBehalfOf ? { on_behalf_of_principal_id: onBehalfOf } : {}),
+    action: request.action,
+    resource: request.resource,
+    request_origin: "http"
+  });
+  if (trusted.authorization.result === "denied") {
+    const runtime = requireRuntimeApi(dependencies);
+    if (request.operation) {
+      await runtime.recordCommandDenial({
+        stream_id: request.streamId,
+        operation_type: request.operation.type,
+        operation_schema_version: request.operation.version,
+        target: request.resource,
+        request_id: context.get("requestId"),
+        command_context: trusted
+      });
+    } else {
+      await runtime.recordAccessDenial({
+        stream_id: request.streamId,
+        target: request.resource,
+        request_id: context.get("requestId"),
+        command_context: trusted
+      });
+    }
+    throw new HTTPException(403, { message: "Request is not authorized." });
+  }
+  return trusted;
+}
+
+function requireRuntimeApi(dependencies: ControlPlaneDependencies): RuntimeApiBoundary {
+  if (!dependencies.runtimeApiService) {
+    throw new HTTPException(503, { message: "Typed runtime API is not configured." });
+  }
+  return dependencies.runtimeApiService;
+}
+
+function parseRecordQuery(
+  query: Record<string, string>,
+  fixed: { stream_id?: string; kind?: "audit_entry" }
+) {
+  return RuntimeRecordQuerySchema.parse({
+    ...fixed,
+    ...(query.kind ? { kind: query.kind } : {}),
+    ...(query.type ? { type: query.type } : {}),
+    ...(query.after_sequence ? { after_sequence: Number(query.after_sequence) } : {}),
+    ...(query.limit ? { limit: Number(query.limit) } : {})
+  });
+}
+
+function errorEnvelope(code: string, message: string, requestId: string) {
+  return { error: { code, message, request_id: requestId } };
 }
 
 export type ControlPlaneApp = ReturnType<typeof createControlPlaneApp>;

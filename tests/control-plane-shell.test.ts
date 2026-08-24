@@ -6,10 +6,12 @@ import { DomainSchema } from "@openclaw-control-plane/contracts";
 describe("control-plane shell defaults", () => {
   const originalSetupPassword = process.env.SETUP_PASSWORD;
   const originalSetupUsername = process.env.OPENCLAW_SETUP_USERNAME;
+  const originalRuntimeBasicAuth = process.env.RUNTIME_ENABLE_BASIC_AUTH;
 
   afterEach(() => {
     restoreEnv("SETUP_PASSWORD", originalSetupPassword);
     restoreEnv("OPENCLAW_SETUP_USERNAME", originalSetupUsername);
+    restoreEnv("RUNTIME_ENABLE_BASIC_AUTH", originalRuntimeBasicAuth);
   });
 
   it("serves a public root status response", async () => {
@@ -33,6 +35,7 @@ describe("control-plane shell defaults", () => {
 
   it("keeps health public when operator auth is configured", async () => {
     process.env.SETUP_PASSWORD = "setup-secret";
+    process.env.RUNTIME_ENABLE_BASIC_AUTH = "true";
     const app = createControlPlaneApp();
 
     const response = await app.request("/health");
@@ -42,6 +45,7 @@ describe("control-plane shell defaults", () => {
 
   it("requires operator auth on the public root when setup password is configured", async () => {
     process.env.SETUP_PASSWORD = "setup-secret";
+    process.env.RUNTIME_ENABLE_BASIC_AUTH = "true";
     const app = createControlPlaneApp();
 
     const response = await app.request("/");
@@ -53,6 +57,7 @@ describe("control-plane shell defaults", () => {
   it("accepts operator auth with the configured setup password", async () => {
     process.env.SETUP_PASSWORD = "setup-secret";
     process.env.OPENCLAW_SETUP_USERNAME = "operator";
+    process.env.RUNTIME_ENABLE_BASIC_AUTH = "true";
     const app = createControlPlaneApp();
 
     const response = await app.request("/", {
@@ -147,7 +152,10 @@ describe("control-plane shell defaults", () => {
   });
 });
 
-function restoreEnv(key: "SETUP_PASSWORD" | "OPENCLAW_SETUP_USERNAME", value: string | undefined) {
+function restoreEnv(
+  key: "SETUP_PASSWORD" | "OPENCLAW_SETUP_USERNAME" | "RUNTIME_ENABLE_BASIC_AUTH",
+  value: string | undefined
+) {
   if (value === undefined) {
     delete process.env[key];
     return;

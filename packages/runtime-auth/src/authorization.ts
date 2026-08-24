@@ -55,7 +55,10 @@ export class StaticRbacAuthorizationProvider implements AuthorizationProvider {
 
   authorize(request: AuthorizationRequest): AuthorizationDecision {
     const resource = RuntimeSubjectSchema.parse(request.resource);
-    const principal = request.authenticated_principal.principal;
+    const principal = this.principals.get(
+      request.authenticated_principal.principal.principal_id
+    );
+    if (!principal) return this.decision("denied", ["policy.unknown_principal"]);
     const roleAllows = principal.roles.some((roleName) =>
       this.roles.get(roleName)?.grants.some(
         (grant) =>

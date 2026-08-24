@@ -34,6 +34,28 @@ export const exampleRuntimeAuthConfiguration: RuntimeAuthConfiguration = {
         {
           authorization_action: "state.reconcile",
           resources: [{ type: "example.environment", id: "*" }]
+        },
+        {
+          authorization_action: "runtime.event.ingest",
+          resources: [{ type: "example.environment", id: "*" }]
+        },
+        {
+          authorization_action: "runtime.work-item.create",
+          resources: [{ type: "example.environment", id: "*" }]
+        },
+        {
+          authorization_action: "runtime.command.approve",
+          resources: [{ type: "example.environment", id: "*" }]
+        },
+        {
+          authorization_action: "runtime.record.read",
+          resources: [
+            { type: "runtime.record", id: "*" },
+            { type: "runtime.stream", id: "*" },
+            { type: "runtime.projection", id: "*" },
+            { type: "runtime.audit", id: "*" },
+            { type: "runtime.registry", id: "*" }
+          ]
         }
       ]
     }
