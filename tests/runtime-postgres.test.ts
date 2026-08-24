@@ -5,6 +5,10 @@ import { Pool } from "pg";
 import { beforeAll, beforeEach, afterAll, describe, expect, it } from "vitest";
 
 import { commandDigest } from "../packages/db/src/canonical-command.js";
+import {
+  describePostgres,
+  postgresTestConnectionString as connectionString
+} from "./postgres-test-helpers.js";
 
 import {
   IdempotencyConflictError,
@@ -16,13 +20,10 @@ import {
   type AppendRuntimeCommand
 } from "@openclaw-control-plane/db";
 
-const connectionString = process.env.TEST_DATABASE_URL;
-const describePostgres = connectionString ? describe : describe.skip;
-
 describePostgres("PostgreSQL durable runtime repository", () => {
   const databaseName = `runtime_repository_${randomUUID().replaceAll("-", "")}`;
-  const adminPool = new Pool({ connectionString: connectionString! });
-  const databaseUrl = new URL(connectionString!);
+  const adminPool = new Pool({ connectionString });
+  const databaseUrl = new URL(connectionString);
   databaseUrl.pathname = `/${databaseName}`;
   const pool = new Pool({ connectionString: databaseUrl.toString() });
   const registry = new RuntimeTypeRegistry(

@@ -6,7 +6,7 @@
     "outDir": "../dist/tests",
     "types": ["vitest/globals", "node"]
   },
-  "include": ["**/*.test.ts", "fixtures/**/*.ts", "fixtures/**/*.json"],
+  "include": ["**/*.ts", "fixtures/**/*.json"],
   "references": [
     { "path": "../packages/contracts" },
     { "path": "../packages/db" },

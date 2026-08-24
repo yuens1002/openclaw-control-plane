@@ -6,15 +6,17 @@ import { initializePostgresRuntime } from "@openclaw-control-plane/db";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-const connectionString = process.env.TEST_DATABASE_URL;
-const describePostgres = connectionString ? describe : describe.skip;
+import {
+  describePostgres,
+  postgresTestConnectionString as connectionString
+} from "./postgres-test-helpers.js";
 
 describePostgres("PostgreSQL runtime bootstrap", () => {
   const databaseName = `runtime_bootstrap_${randomUUID().replaceAll("-", "")}`;
   const runtimeRole = `runtime_role_${randomUUID().replaceAll("-", "")}`;
   const runtimePassword = randomUUID();
-  const adminPool = new Pool({ connectionString: connectionString! });
-  const databaseUrl = new URL(connectionString!);
+  const adminPool = new Pool({ connectionString });
+  const databaseUrl = new URL(connectionString);
   databaseUrl.pathname = `/${databaseName}`;
   const runtimeDatabaseUrl = new URL(databaseUrl);
   runtimeDatabaseUrl.username = runtimeRole;
