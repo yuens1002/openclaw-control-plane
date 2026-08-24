@@ -82,6 +82,36 @@ describe("control-plane shell defaults", () => {
     expect(pipelines.pipelines).toEqual([]);
   });
 
+  it("reports persistence readiness dimensions independently", async () => {
+    delete process.env.SETUP_PASSWORD;
+    const app = createControlPlaneApp({
+      eventStore: {
+        insertEventIfNew: async (event) => ({ status: "inserted", event }),
+        getEventByIdempotencyKey: async () => null
+      },
+      readiness: async () => ({
+        database: "ready",
+        migrations: "ready",
+        registry: "invalid"
+      })
+    });
+
+    const response = await app.request("/health");
+    const health = (await response.json()) as {
+      ready: boolean;
+      database: string;
+      migrations: string;
+      registry: string;
+    };
+
+    expect(health).toMatchObject({
+      ready: false,
+      database: "ready",
+      migrations: "ready",
+      registry: "invalid"
+    });
+  });
+
   it("accepts plugin-provided domain identifiers", () => {
     expect(DomainSchema.parse("client-location-pipeline")).toBe("client-location-pipeline");
   });
