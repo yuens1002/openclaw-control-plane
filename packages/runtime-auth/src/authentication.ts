@@ -35,6 +35,7 @@ export class OidcAuthenticator {
   private readonly jwks = new Map<string, JWTVerifyGetKey>();
 
   constructor(config: RuntimeAuthConfiguration, options: OidcAuthenticatorOptions = {}) {
+    validateRemoteJwksOptions(options.remoteJwks);
     for (const issuer of config.issuers) {
       this.issuers.set(issuer.issuer, issuer);
       this.jwks.set(
@@ -92,6 +93,24 @@ export class OidcAuthenticator {
     const principal = this.principals.get(identityKey(issuer.issuer, claims.sub));
     if (!principal) throw new AuthenticationError("unknown_principal");
     return { issuer: issuer.issuer, subject: claims.sub, principal, claims };
+  }
+}
+
+function validateRemoteJwksOptions(options: OidcAuthenticatorOptions["remoteJwks"]): void {
+  if (!options) return;
+  const bounds = {
+    cooldownDuration: [1, 300_000],
+    cacheMaxAge: [1_000, 3_600_000],
+    timeoutDuration: [100, 30_000]
+  } as const;
+  for (const [name, [minimum, maximum]] of Object.entries(bounds)) {
+    const value = options[name as keyof typeof options];
+    if (
+      value !== undefined &&
+      (!Number.isFinite(value) || !Number.isInteger(value) || value < minimum || value > maximum)
+    ) {
+      throw new Error(`Remote JWKS ${name} must be an integer between ${minimum} and ${maximum}.`);
+    }
   }
 }
 

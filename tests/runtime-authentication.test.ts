@@ -33,6 +33,13 @@ beforeAll(async () => {
 });
 
 describe("OIDC authentication", () => {
+  it("rejects unsafe remote JWKS cache timing overrides", () => {
+    expect(() =>
+      new OidcAuthenticator(exampleRuntimeAuthConfiguration, {
+        remoteJwks: { cooldownDuration: -1, cacheMaxAge: Infinity }
+      })
+    ).toThrow(/Remote JWKS/i);
+  });
   it("verifies a token and resolves stable identity independently of mutable claims", async () => {
     const authenticator = createAuthenticator(() => [publicJwk]);
     const first = await authenticator.authenticateBearer(

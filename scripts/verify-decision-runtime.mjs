@@ -1,17 +1,15 @@
 import { execFileSync } from "node:child_process";
-import { createServer } from "node:http";
-
 import { SignJWT, exportJWK, generateKeyPair } from "jose";
 
 const suffix = `${process.pid}-${Date.now()}`;
 const network = `runtime-verify-${suffix}`;
 const postgres = `runtime-postgres-${suffix}`;
+const issuerContainer = `runtime-issuer-${suffix}`;
 const api = `runtime-api-${suffix}`;
 const image = process.env.RUNTIME_VERIFY_IMAGE ?? "openclaw-decision-runtime:conformance";
 const apiPort = Number(process.env.RUNTIME_VERIFY_API_PORT ?? 18787);
-const issuerPort = Number(process.env.RUNTIME_VERIFY_ISSUER_PORT ?? 18788);
 const postgresPort = Number(process.env.RUNTIME_VERIFY_POSTGRES_PORT ?? 15439);
-const issuer = `http://host.docker.internal:${issuerPort}`;
+const issuer = "http://runtime-issuer:8080";
 const databaseUrl = `postgresql://openclaw:openclaw@runtime-postgres:5432/openclaw_control_plane`;
 const hostDatabaseUrl = `postgresql://openclaw:openclaw@localhost:${postgresPort}/openclaw_control_plane`;
 const restoreDatabaseUrl = `postgresql://openclaw:openclaw@localhost:${postgresPort}/recovery_restore`;
@@ -69,27 +67,20 @@ const token = await new SignJWT({})
   .setIssuedAt()
   .setExpirationTime("10m")
   .sign(privateKey);
-const issuerServer = createServer((request, response) => {
-  if (request.url === "/jwks") {
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ keys: [publicJwk] }));
-    return;
-  }
-  response.writeHead(404).end();
-});
-
 try {
-  await new Promise((resolve, reject) => {
-    issuerServer.once("error", reject);
-    issuerServer.listen(issuerPort, "0.0.0.0", resolve);
-  });
   if (process.env.RUNTIME_VERIFY_SKIP_BUILD !== "true") {
     docker("build", "-q", "-f", "deploy/decision-runtime/Dockerfile", "-t", image, ".");
   }
   docker("network", "create", network);
   docker(
+    "run", "-d", "--rm", "--name", issuerContainer, "--network", network,
+    "--network-alias", "runtime-issuer", "-e", `JWKS_JSON=${JSON.stringify({ keys: [publicJwk] })}`,
+    "node:22-alpine", "node", "-e",
+    "require('http').createServer((req,res)=>{if(req.url==='/jwks'){res.writeHead(200,{'content-type':'application/json'});res.end(process.env.JWKS_JSON)}else{res.writeHead(404).end()}}).listen(8080,'0.0.0.0')"
+  );
+  docker(
     "run", "-d", "--rm", "--name", postgres, "--network", network,
-    "--network-alias", "runtime-postgres", "-p", `${postgresPort}:5432`,
+    "--network-alias", "runtime-postgres", "-p", `127.0.0.1:${postgresPort}:5432`,
     "-e", "POSTGRES_USER=openclaw", "-e", "POSTGRES_PASSWORD=openclaw",
     "-e", "POSTGRES_DB=openclaw_control_plane", "postgres:16-alpine"
   );
@@ -222,8 +213,7 @@ try {
     degraded_readiness: degraded
   }, null, 2));
 } finally {
-  issuerServer.close();
-  for (const container of [api, postgres]) {
+  for (const container of [api, postgres, issuerContainer]) {
     try { docker("rm", "-f", container); } catch {}
   }
   try { docker("network", "rm", network); } catch {}
@@ -232,7 +222,7 @@ try {
 function startApi(runtimeDatabaseUrl = databaseUrl) {
   docker(
     "run", "-d", "--rm", "--name", api, "--network", network,
-    "--add-host", "host.docker.internal:host-gateway", "-p", `${apiPort}:8787`,
+    "-p", `127.0.0.1:${apiPort}:8787`,
     "-e", "NODE_ENV=test", "-e", `DATABASE_URL=${runtimeDatabaseUrl}`,
     "-e", `RUNTIME_AUTH_CONFIG_JSON=${JSON.stringify(authConfig)}`, image
   );
