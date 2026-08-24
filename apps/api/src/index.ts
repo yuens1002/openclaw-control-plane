@@ -23,7 +23,9 @@ export interface ControlPlaneDependencies {
 export function createControlPlaneApp(
   dependencies: ControlPlaneDependencies = { eventStore: new InMemoryEventStore() }
 ) {
-  const app = new Hono();
+  const app = new Hono<{
+    Variables: { trustedCommandContext: TrustedCommandContext };
+  }>();
 
   app.get("/health", async (context) => {
     const readiness = dependencies.readiness
@@ -34,7 +36,7 @@ export function createControlPlaneApp(
       readiness.migrations === "ready" &&
       readiness.registry === "ready";
     return context.json({
-      ok: true,
+      ok: ready,
       service: "openclaw-control-plane-api",
       ready,
       database: readiness.database,
@@ -43,13 +45,27 @@ export function createControlPlaneApp(
       worker_registry: [],
       failed_runs: 0,
       stale_workers: []
-    });
+    }, ready ? 200 : 503);
   });
 
   const operatorAuth = createOperatorAuthMiddleware();
   if (operatorAuth) {
     app.use("*", operatorAuth);
   }
+
+  app.use("*", async (context, next) => {
+    if (context.req.method !== "POST") {
+      await next();
+      return;
+    }
+    if (!dependencies.eventCommandContext) {
+      throw new HTTPException(503, {
+        message: "Authenticated operational commands are not configured."
+      });
+    }
+    context.set("trustedCommandContext", await dependencies.eventCommandContext());
+    await next();
+  });
 
   app.get("/", (context) =>
     context.json({
@@ -78,15 +94,9 @@ export function createControlPlaneApp(
       });
     }
 
-    if (!dependencies.eventCommandContext) {
-      throw new HTTPException(503, {
-        message: "Authenticated event ingestion is not configured."
-      });
-    }
-    const commandContext = await dependencies.eventCommandContext();
     const insertResult = await dependencies.eventStore.insertEventIfNew(
       parsedEvent.data,
-      commandContext
+      context.get("trustedCommandContext")
     );
 
     return context.json(

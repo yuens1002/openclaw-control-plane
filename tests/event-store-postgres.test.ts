@@ -11,14 +11,15 @@ import {
 } from "@openclaw-control-plane/db";
 import { Pool } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-
-const connectionString = process.env.TEST_DATABASE_URL;
-const describePostgres = connectionString ? describe : describe.skip;
+import {
+  describePostgres,
+  postgresTestConnectionString as connectionString
+} from "./postgres-test-helpers.js";
 
 describePostgres("PostgresEventStore", () => {
   const databaseName = `event_store_${randomUUID().replaceAll("-", "")}`;
-  const adminPool = new Pool({ connectionString: connectionString! });
-  const databaseUrl = new URL(connectionString!);
+  const adminPool = new Pool({ connectionString });
+  const databaseUrl = new URL(connectionString);
   databaseUrl.pathname = `/${databaseName}`;
   const pool = new Pool({ connectionString: databaseUrl.toString() });
   const migrationsDirectory = fileURLToPath(

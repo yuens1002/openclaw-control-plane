@@ -37,7 +37,7 @@ describe("control-plane shell defaults", () => {
 
     const response = await app.request("/health");
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(503);
   });
 
   it("requires operator auth on the public root when setup password is configured", async () => {
@@ -105,11 +105,35 @@ describe("control-plane shell defaults", () => {
     };
 
     expect(health).toMatchObject({
+      ok: false,
       ready: false,
       database: "ready",
       migrations: "ready",
       registry: "invalid"
     });
+    expect(response.status).toBe(503);
+  });
+
+  it("fails every operational command closed without trusted context", async () => {
+    delete process.env.SETUP_PASSWORD;
+    const app = createControlPlaneApp();
+    const commandPaths = [
+      "/events",
+      "/pipelines/example-workflow/run",
+      "/pipelines/example-workflow/pause",
+      "/pipelines/example-workflow/resume",
+      "/runs/run-1/retry",
+      "/events/event-1/replay",
+      "/artifacts/artifact-1/review",
+      "/approvals/approval-1/approve",
+      "/approvals/approval-1/reject",
+      "/work-items/work-item-1/handoff"
+    ];
+
+    for (const path of commandPaths) {
+      const response = await app.request(path, { method: "POST" });
+      expect(response.status, path).toBe(503);
+    }
   });
 
   it("accepts plugin-provided domain identifiers", () => {
