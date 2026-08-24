@@ -8,7 +8,8 @@ const JwkSchema = z
     kid: z.string().min(1),
     kty: z.enum(["RSA", "EC", "OKP"]),
     alg: z.string().min(1).optional(),
-    use: z.string().optional()
+    use: z.string().optional(),
+    key_ops: z.array(z.string()).optional()
   })
   .passthrough();
 const JwksDocumentSchema = z.object({ keys: z.array(JwkSchema).min(1) });
@@ -47,7 +48,8 @@ async function checkIssuer(issuer: IssuerConfiguration, fetchImpl: typeof fetch)
       issuer.allowed_algorithms
         .filter(
           (algorithm) =>
-            key.use !== "enc" &&
+            (!key.use || key.use === "sig") &&
+            (!key.key_ops || key.key_ops.includes("verify")) &&
             !Object.hasOwn(key, "d") &&
             (!key.alg || key.alg === algorithm) &&
             ((algorithm.startsWith("RS") && key.kty === "RSA") ||

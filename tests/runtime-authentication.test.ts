@@ -127,10 +127,18 @@ describe("OIDC authentication", () => {
     const metadataOnly = await checkIdentityReadiness(exampleRuntimeAuthConfiguration, async () =>
       Response.json({ keys: [{ kid: "key-1", kty: "RSA", alg: "RS256" }] })
     );
+    const wrongUse = await checkIdentityReadiness(exampleRuntimeAuthConfiguration, async () =>
+      Response.json({ keys: [{ ...publicJwk, use: "other" }] })
+    );
+    const signOnly = await checkIdentityReadiness(exampleRuntimeAuthConfiguration, async () =>
+      Response.json({ keys: [{ ...publicJwk, key_ops: ["sign"] }] })
+    );
 
     expect(duplicate.jwks).toBe("unavailable");
     expect(incompatible.jwks).toBe("unavailable");
     expect(metadataOnly.jwks).toBe("unavailable");
+    expect(wrongUse.jwks).toBe("unavailable");
+    expect(signOnly.jwks).toBe("unavailable");
   });
 });
 
