@@ -626,23 +626,37 @@ differently-versioned target, not against hitting the wrong target.
 source of truth -- a client registry the caller does not supply -- so
 the check has something real to disagree with. Future work.
 
-### Explicitly excluded — no follow-up
+### Explicitly excluded from this document's scope, but fixed via issue #47
 
-**G8 — a Railway-CLI test fixture is duplicated.** A shared fixture
-exists at `tests/fixtures/fake-railway-runner.ts`, and several test
-files separately declare their own local class of the same name with a
-different constructor shape. This is test hygiene rather than
-live-instance safety -- no live target is reachable from a test
-fixture -- so it stays out of this document's scope.
+**G8 — CLOSED.** A Railway-CLI test fixture was duplicated: a shared
+fixture exists at `tests/fixtures/fake-railway-runner.ts`, and four
+test files (`openclaw-railway-installer-readiness.test.ts`,
+`openclaw-setup-applier-railway-variables.test.ts`,
+`openclaw-setup-applier-apply-profile.test.ts`,
+`openclaw-setup-applier-onboarding-cycle.test.ts`) separately declared
+their own local class of the same name with a different constructor
+shape. This is test hygiene rather than live-instance safety -- no live
+target is reachable from a test fixture -- so it stays out of this
+document's scope for classification purposes.
 
-It is not merely cosmetic, though, and the original wording undersold
+It was not merely cosmetic, though, and the original wording undersold
 it. Duplicated fakes mean a fix to one does not reach the others: a
 fake that failed to reflect its own writes was corrected in one test
 double, and the identical defect then recurred in a second, because the
 correction landed on the instance rather than the pattern. In both
 cases the consequence was a test that passed while asserting nothing.
-Track it as test hygiene with that evidence attached, not as a
-tidiness nit.
+
+All four local declarations now import the shared `FakeRailwayRunner`
+instead. Two behavioral differences the local classes carried had to be
+either reproduced explicitly or shown not to matter, rather than
+silently dropped: the shared fixture's default domain differs from the
+literal domains three of the four files asserted against, so each now
+calls `setDomainList` with its own expected value; and the shared
+fixture holds its last queued `service list` response once exhausted
+rather than falling back to empty, which the onboarding-cycle file's
+provisioning-flow test now relies on deliberately (see that file's
+`newRunner` comment) instead of the boolean `upCalled` flag it used to
+carry. All previously-passing assertions still pass unchanged.
 
 ## 8. Decision and Alternatives Considered
 

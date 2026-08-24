@@ -2,41 +2,33 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import type { CommandResult, RailwayRunner } from "@openclaw-control-plane/openclaw-railway-installer";
 import {
   applyProfile,
   dryRunApplyProfile,
   printDryRunResult
 } from "@openclaw-control-plane/openclaw-setup-applier/apply-profile";
 import { createSetupApiClient } from "@openclaw-control-plane/openclaw-setup-applier/setup-api-client";
+import { FakeRailwayRunner } from "./fixtures/fake-railway-runner.js";
 
 const SENTINEL_SECRET = "sk-test-DO-NOT-LOG-9f8e7d";
 const SENTINEL_MINTED = "sk-test-DO-NOT-LOG-minted-key";
 const SENTINEL_MINTED_HASH = "hash-test-minted-abc123";
 
-class FakeRailwayRunner implements RailwayRunner {
-  readonly writes: Array<{ name: string; value?: string; skipDeploys: boolean }> = [];
-  constructor(private readonly variables: Record<string, string>) {}
+function runnerWithVariables(variables: Record<string, string>): FakeRailwayRunner {
+  const runner = new FakeRailwayRunner();
+  runner.setVariableListResponse(variables);
+  return runner;
+}
 
-  async run(args: string[], stdin?: string): Promise<CommandResult> {
-    if (args[0] === "variable" && args[1] === "list") {
-      return { stdout: JSON.stringify(this.variables) };
-    }
-    if (args[0] === "variable" && args[1] === "set") {
-      const name = args[2];
-      if (name === undefined) {
-        throw new Error("Missing variable name in write args.");
-      }
-      this.writes.push({
-        name,
-        skipDeploys: args.includes("--skip-deploys"),
-        ...(stdin !== undefined ? { value: stdin } : {})
-      });
-      this.variables[name] = stdin ?? "";
-      return { stdout: JSON.stringify({ ok: true }) };
-    }
-    throw new Error(`Unexpected command: ${args.join(" ")}`);
-  }
+/** Reduces the shared fixture's raw `calls` down to the `variable set` writes this file asserts on. */
+function writesOf(runner: FakeRailwayRunner): Array<{ name: string; value?: string; skipDeploys: boolean }> {
+  return runner.calls
+    .filter((call) => call.args[0] === "variable" && call.args[1] === "set")
+    .map((call) => ({
+      name: call.args[2] as string,
+      skipDeploys: call.args.includes("--skip-deploys"),
+      ...(call.stdin !== undefined ? { value: call.stdin } : {})
+    }));
 }
 
 /**
@@ -78,7 +70,7 @@ function buildFetchStub(options: {
 
 describe("apply-profile dry-run mode", () => {
   it("reports a required secret as present when it exists in Railway variables", async () => {
-    const runner = new FakeRailwayRunner({ EXAMPLE_OPENROUTER_API_KEY: SENTINEL_SECRET });
+    const runner = runnerWithVariables({ EXAMPLE_OPENROUTER_API_KEY: SENTINEL_SECRET });
 
     const result = await dryRunApplyProfile(readFixture("plain-secret-provider.json"), { service: "svc" }, { runner });
 
@@ -86,7 +78,7 @@ describe("apply-profile dry-run mode", () => {
   });
 
   it("reports a required secret as missing when it isn't set", async () => {
-    const runner = new FakeRailwayRunner({});
+    const runner = runnerWithVariables({});
 
     const result = await dryRunApplyProfile(readFixture("plain-secret-provider.json"), { service: "svc" }, { runner });
 
@@ -94,7 +86,7 @@ describe("apply-profile dry-run mode", () => {
   });
 
   it("builds a redacted payload preview with no real secret values", async () => {
-    const runner = new FakeRailwayRunner({ EXAMPLE_OPENROUTER_API_KEY: SENTINEL_SECRET });
+    const runner = runnerWithVariables({ EXAMPLE_OPENROUTER_API_KEY: SENTINEL_SECRET });
 
     const result = await dryRunApplyProfile(readFixture("plain-secret-provider.json"), { service: "svc" }, { runner });
 
@@ -104,7 +96,7 @@ describe("apply-profile dry-run mode", () => {
   });
 
   it("previews the flat channel-field shape, redacted -- one field per declared secret, not one per channel", async () => {
-    const runner = new FakeRailwayRunner({});
+    const runner = runnerWithVariables({});
 
     const result = await dryRunApplyProfile(readFixture("slack-channel.json"), { service: "svc" }, { runner });
 
@@ -115,7 +107,7 @@ describe("apply-profile dry-run mode", () => {
   });
 
   it("previews multiple channels in one call as separate top-level fields", async () => {
-    const runner = new FakeRailwayRunner({});
+    const runner = runnerWithVariables({});
 
     const result = await dryRunApplyProfile(readFixture("multi-channel.json"), { service: "svc" }, { runner });
 
@@ -127,7 +119,7 @@ describe("apply-profile dry-run mode", () => {
   });
 
   it("never prints a real secret value when the result is printed", async () => {
-    const runner = new FakeRailwayRunner({ EXAMPLE_OPENROUTER_API_KEY: SENTINEL_SECRET });
+    const runner = runnerWithVariables({ EXAMPLE_OPENROUTER_API_KEY: SENTINEL_SECRET });
     const result = await dryRunApplyProfile(readFixture("plain-secret-provider.json"), { service: "svc" }, { runner });
 
     const originalLog = console.log;
@@ -145,7 +137,7 @@ describe("apply-profile dry-run mode", () => {
   });
 
   it("also fails loud on a structurally invalid channel, same as apply mode -- dry-run must not preview a profile that would fail live", async () => {
-    const runner = new FakeRailwayRunner({});
+    const runner = runnerWithVariables({});
     const profile = {
       attachments: {
         modelProviders: [],
@@ -164,7 +156,7 @@ describe("apply-profile apply mode", () => {
 
   it("skips /setup/api/run entirely when the instance already reports configured", async () => {
     const callOrder: string[] = [];
-    const runner = new FakeRailwayRunner({ EXAMPLE_OPENROUTER_API_KEY: SENTINEL_SECRET });
+    const runner = runnerWithVariables({ EXAMPLE_OPENROUTER_API_KEY: SENTINEL_SECRET });
     const fetchImpl = buildFetchStub({ instanceUrl, configured: true, callOrder });
     const setupApiClient = createSetupApiClient({ baseUrl: instanceUrl, fetchImpl });
 
@@ -180,7 +172,7 @@ describe("apply-profile apply mode", () => {
 
   it("skips minting when the required secret is already present in Railway variables", async () => {
     const callOrder: string[] = [];
-    const runner = new FakeRailwayRunner({ EXAMPLE_OPENROUTER_MANAGED_API_KEY: SENTINEL_SECRET });
+    const runner = runnerWithVariables({ EXAMPLE_OPENROUTER_MANAGED_API_KEY: SENTINEL_SECRET });
     const fetchImpl = buildFetchStub({ instanceUrl, configured: false, callOrder });
     const setupApiClient = createSetupApiClient({ baseUrl: instanceUrl, fetchImpl });
 
@@ -192,12 +184,12 @@ describe("apply-profile apply mode", () => {
 
     expect(result.outcome).toBe("applied");
     expect(callOrder).not.toContain("mint");
-    expect(runner.writes).toHaveLength(0);
+    expect(writesOf(runner)).toHaveLength(0);
   });
 
   it("mints, writes with --skip-deploys, and never re-healthchecks for a plain provider", async () => {
     const callOrder: string[] = [];
-    const runner = new FakeRailwayRunner({});
+    const runner = runnerWithVariables({});
     const fetchImpl = buildFetchStub({ instanceUrl, configured: false, callOrder });
     const setupApiClient = createSetupApiClient({ baseUrl: instanceUrl, fetchImpl });
 
@@ -208,7 +200,7 @@ describe("apply-profile apply mode", () => {
     );
 
     expect(callOrder).not.toContain("healthz");
-    expect(runner.writes).toEqual([
+    expect(writesOf(runner)).toEqual([
       { name: "EXAMPLE_OPENROUTER_MANAGED_API_KEY", value: SENTINEL_MINTED, skipDeploys: true }
     ]);
     expect(callOrder.indexOf("mint")).toBeLessThan(callOrder.indexOf("run"));
@@ -217,7 +209,7 @@ describe("apply-profile apply mode", () => {
 
   it("leaves mintedKeyHash undefined when no mint occurred (secret already present)", async () => {
     const callOrder: string[] = [];
-    const runner = new FakeRailwayRunner({ EXAMPLE_OPENROUTER_MANAGED_API_KEY: SENTINEL_SECRET });
+    const runner = runnerWithVariables({ EXAMPLE_OPENROUTER_MANAGED_API_KEY: SENTINEL_SECRET });
     const fetchImpl = buildFetchStub({ instanceUrl, configured: false, callOrder });
     const setupApiClient = createSetupApiClient({ baseUrl: instanceUrl, fetchImpl });
 
@@ -233,7 +225,7 @@ describe("apply-profile apply mode", () => {
 
   it("omits --skip-deploys and re-healthchecks before run for a customProviderApiKeyEnv attachment", async () => {
     const callOrder: string[] = [];
-    const runner = new FakeRailwayRunner({});
+    const runner = runnerWithVariables({});
     const fetchImpl = buildFetchStub({ instanceUrl, configured: false, callOrder });
     const setupApiClient = createSetupApiClient({ baseUrl: instanceUrl, fetchImpl });
     const customProfile = {
@@ -261,7 +253,7 @@ describe("apply-profile apply mode", () => {
       { runner, setupApiClient, openRouterManagementKey: "sk-test-DO-NOT-LOG-mgmt", fetchImpl }
     );
 
-    expect(runner.writes).toEqual([
+    expect(writesOf(runner)).toEqual([
       { name: "EXAMPLE_CUSTOM_PROVIDER_KEY", value: SENTINEL_MINTED, skipDeploys: false }
     ]);
     expect(callOrder).toContain("healthz");
@@ -270,7 +262,7 @@ describe("apply-profile apply mode", () => {
 
   it("never logs a real secret value across a full stubbed mint-and-apply run", async () => {
     const callOrder: string[] = [];
-    const runner = new FakeRailwayRunner({});
+    const runner = runnerWithVariables({});
     const fetchImpl = buildFetchStub({ instanceUrl, configured: false, callOrder });
     const setupApiClient = createSetupApiClient({ baseUrl: instanceUrl, fetchImpl });
 
@@ -296,7 +288,7 @@ describe("apply-profile apply mode", () => {
 
   it("throws rather than silently applying only the first of multiple model providers", async () => {
     const callOrder: string[] = [];
-    const runner = new FakeRailwayRunner({});
+    const runner = runnerWithVariables({});
     const fetchImpl = buildFetchStub({ instanceUrl, configured: false, callOrder });
     const setupApiClient = createSetupApiClient({ baseUrl: instanceUrl, fetchImpl });
     const twoProviderProfile = {
@@ -329,7 +321,7 @@ describe("apply-profile apply mode", () => {
 
   it("throws if /setup/api/status still doesn't report configured after run completes", async () => {
     const callOrder: string[] = [];
-    const runner = new FakeRailwayRunner({ EXAMPLE_OPENROUTER_MANAGED_API_KEY: SENTINEL_SECRET });
+    const runner = runnerWithVariables({ EXAMPLE_OPENROUTER_MANAGED_API_KEY: SENTINEL_SECRET });
     // configuredAfterRun: false simulates run() returning 2xx without the
     // instance actually taking the config (e.g. a payload-shape mismatch
     // it tolerates rather than rejects).
@@ -348,7 +340,7 @@ describe("apply-profile apply mode", () => {
 
   it("sends a flat payload for a single channel: no channels key, no authGroup key", async () => {
     const callOrder: string[] = [];
-    const runner = new FakeRailwayRunner({ EXAMPLE_OPENROUTER_API_KEY: SENTINEL_SECRET, EXAMPLE_TELEGRAM_BOT_TOKEN: "sk-test-DO-NOT-LOG-tg" });
+    const runner = runnerWithVariables({ EXAMPLE_OPENROUTER_API_KEY: SENTINEL_SECRET, EXAMPLE_TELEGRAM_BOT_TOKEN: "sk-test-DO-NOT-LOG-tg" });
     const fetchImpl = buildFetchStub({ instanceUrl, configured: false, callOrder });
     const requests: Array<{ url: string; body: string }> = [];
     const capturingFetch: typeof fetch = async (input, init) => {
@@ -393,7 +385,7 @@ describe("apply-profile apply mode", () => {
 
   it("resolves every declared secret for a multi-secret channel, not just the first", async () => {
     const callOrder: string[] = [];
-    const runner = new FakeRailwayRunner({
+    const runner = runnerWithVariables({
       EXAMPLE_SLACK_BOT_TOKEN: "sk-test-DO-NOT-LOG-bot",
       EXAMPLE_SLACK_APP_TOKEN: "sk-test-DO-NOT-LOG-app"
     });
@@ -417,7 +409,7 @@ describe("apply-profile apply mode", () => {
 
   it("sets multiple channels' fields in a single /setup/api/run call, not multiple calls", async () => {
     const callOrder: string[] = [];
-    const runner = new FakeRailwayRunner({
+    const runner = runnerWithVariables({
       EXAMPLE_TELEGRAM_BOT_TOKEN: "sk-test-DO-NOT-LOG-tg",
       EXAMPLE_SLACK_BOT_TOKEN: "sk-test-DO-NOT-LOG-bot",
       EXAMPLE_SLACK_APP_TOKEN: "sk-test-DO-NOT-LOG-app"
@@ -447,7 +439,7 @@ describe("apply-profile apply mode", () => {
 
   it("throws on an unsupported channel type before any network call", async () => {
     const callOrder: string[] = [];
-    const runner = new FakeRailwayRunner({});
+    const runner = runnerWithVariables({});
     const fetchImpl = buildFetchStub({ instanceUrl, configured: false, callOrder });
     const setupApiClient = createSetupApiClient({ baseUrl: instanceUrl, fetchImpl });
     const profile = {
@@ -473,7 +465,7 @@ describe("apply-profile apply mode", () => {
     // instead of undefined for this "type", silently skipping the
     // unsupported-type check. Regression for that specific bypass class.
     const callOrder: string[] = [];
-    const runner = new FakeRailwayRunner({});
+    const runner = runnerWithVariables({});
     const fetchImpl = buildFetchStub({ instanceUrl, configured: false, callOrder });
     const setupApiClient = createSetupApiClient({ baseUrl: instanceUrl, fetchImpl });
     const profile = {
@@ -495,7 +487,7 @@ describe("apply-profile apply mode", () => {
 
   it("throws on a duplicate channel type before any network call", async () => {
     const callOrder: string[] = [];
-    const runner = new FakeRailwayRunner({
+    const runner = runnerWithVariables({
       EXAMPLE_TELEGRAM_BOT_TOKEN_1: "sk-test-DO-NOT-LOG-tg1",
       EXAMPLE_TELEGRAM_BOT_TOKEN_2: "sk-test-DO-NOT-LOG-tg2"
     });
@@ -523,7 +515,7 @@ describe("apply-profile apply mode", () => {
 
   it("throws on a slack channel attachment without exactly 2 requiredSecretNames", async () => {
     const callOrder: string[] = [];
-    const runner = new FakeRailwayRunner({ EXAMPLE_SLACK_BOT_TOKEN: "sk-test-DO-NOT-LOG-bot" });
+    const runner = runnerWithVariables({ EXAMPLE_SLACK_BOT_TOKEN: "sk-test-DO-NOT-LOG-bot" });
     const fetchImpl = buildFetchStub({ instanceUrl, configured: false, callOrder });
     const setupApiClient = createSetupApiClient({ baseUrl: instanceUrl, fetchImpl });
     const profile = {
@@ -568,7 +560,7 @@ describe("apply-profile apply mode", () => {
       }
       throw new Error(`Unexpected fetch: ${url}`);
     };
-    const runner = new FakeRailwayRunner({});
+    const runner = runnerWithVariables({});
     const setupApiClient = createSetupApiClient({ baseUrl: instanceUrl, fetchImpl });
     const customProfile = {
       attachments: {

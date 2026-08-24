@@ -2,9 +2,10 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 
-import type { CommandResult, RailwayRunner } from "@openclaw-control-plane/openclaw-railway-installer";
+import type { RailwayRunner } from "@openclaw-control-plane/openclaw-railway-installer";
 import { bootstrapOnboardingCycle, runRegressionCheck } from "@openclaw-control-plane/openclaw-setup-applier/onboarding-cycle";
 import { createFakeConfigStore } from "./fixtures/fake-config-store.js";
+import { FakeRailwayRunner } from "./fixtures/fake-railway-runner.js";
 
 const SENTINEL_MINTED = "sk-test-DO-NOT-LOG-minted-key";
 const SENTINEL_MINTED_HASH = "hash-test-minted-abc123";
@@ -14,58 +15,39 @@ function readFixture(name: string): unknown {
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
-class FakeRailwayRunner implements RailwayRunner {
-  readonly calls: string[][] = [];
-  readonly writes: Array<{ name: string; value?: string; skipDeploys: boolean }> = [];
-  private upCalled = false;
-  private readonly createdService?: { id: string; name: string; latestDeployment: { status: string } };
+/**
+ * `provisionClientInstance` calls `service list` exactly three times when
+ * creating a new service: once before `up` (empty), once after `up` to
+ * diff the newly created service in, and once more inside
+ * `pollServiceUntilSuccess`'s first poll iteration. The shared fixture
+ * holds its last queued response once exhausted, so `[[], [created]]`
+ * reproduces that sequence -- same pattern as
+ * tests/openclaw-railway-provision-client.test.ts's `freshService`.
+ */
+function newRunner(variables: Record<string, string> = {}, options: { createdServiceName?: string } = {}): FakeRailwayRunner {
+  const runner =
+    options.createdServiceName !== undefined
+      ? new FakeRailwayRunner([[], [createdService(options.createdServiceName)]])
+      : new FakeRailwayRunner();
+  runner.setVariableListResponse(variables);
+  runner.setDomainList({
+    domains: [{ domain: "fixture-onboard.up.railway.app", type: "service", targetPort: 8080 }]
+  });
+  return runner;
+}
 
-  constructor(
-    private readonly variables: Record<string, string> = {},
-    options: { createdServiceName?: string } = {}
-  ) {
-    if (options.createdServiceName !== undefined) {
-      this.createdService = { id: "svc_new", name: options.createdServiceName, latestDeployment: { status: "SUCCESS" } };
-    }
-  }
+function createdService(name: string) {
+  return { id: "svc_new", name, latestDeployment: { id: "dep_new", status: "SUCCESS" as const } };
+}
 
-  async run(args: string[], stdin?: string): Promise<CommandResult> {
-    this.calls.push(args);
-    if (args[0] === "service" && args.includes("list")) {
-      const services = this.upCalled && this.createdService ? [this.createdService] : [];
-      return { stdout: JSON.stringify(services) };
-    }
-    if (args[0] === "link" || args[0] === "init" || args[0] === "service" || args[0] === "volume") {
-      return { stdout: "" };
-    }
-    if (args[0] === "up") {
-      this.upCalled = true;
-      return { stdout: "" };
-    }
-    if (args[0] === "redeploy") {
-      return { stdout: "" };
-    }
-    if (args[0] === "domain" && args.includes("list")) {
-      return { stdout: JSON.stringify({ domains: [{ domain: "fixture-onboard.up.railway.app", type: "service", targetPort: 8080 }] }) };
-    }
-    if (args[0] === "variable" && args[1] === "list") {
-      return { stdout: JSON.stringify(this.variables) };
-    }
-    if (args[0] === "variable" && args[1] === "set") {
-      const name = args[2];
-      if (name === undefined) {
-        throw new Error("Missing variable name in write args.");
-      }
-      this.writes.push({
-        name,
-        skipDeploys: args.includes("--skip-deploys"),
-        ...(stdin !== undefined ? { value: stdin } : {})
-      });
-      this.variables[name] = stdin ?? "";
-      return { stdout: JSON.stringify({ ok: true }) };
-    }
-    throw new Error(`Unexpected command: ${args.join(" ")}`);
-  }
+function writesOf(runner: FakeRailwayRunner): Array<{ name: string; value?: string; skipDeploys: boolean }> {
+  return runner.calls
+    .filter((call) => call.args[0] === "variable" && call.args[1] === "set")
+    .map((call) => ({
+      name: call.args[2] as string,
+      skipDeploys: call.args.includes("--skip-deploys"),
+      ...(call.stdin !== undefined ? { value: call.stdin } : {})
+    }));
 }
 
 describe("runRegressionCheck", () => {
@@ -104,7 +86,7 @@ describe("runRegressionCheck", () => {
 
   it("mints a fresh key, writes it, verifies status+healthz, and deletes the key on success", async () => {
     const calls: string[] = [];
-    const runner = new FakeRailwayRunner({});
+    const runner = newRunner({});
     const fetchImpl = buildFetchStub({ statusConfigured: true, healthzStatus: 200, calls });
 
     const result = await runRegressionCheck(
@@ -124,14 +106,14 @@ describe("runRegressionCheck", () => {
     expect(result.mintedKeyHash).toBe(SENTINEL_MINTED_HASH);
     expect(result.keyDeleted).toBe(true);
     expect(calls).toEqual(["mint", "status", "healthz", "delete"]);
-    expect(runner.writes).toEqual([
+    expect(writesOf(runner)).toEqual([
       { name: "EXAMPLE_OPENROUTER_MANAGED_API_KEY", value: SENTINEL_MINTED, skipDeploys: true }
     ]);
   });
 
   it("still deletes the minted key, exactly once, when the status check reports not-configured", async () => {
     const calls: string[] = [];
-    const runner = new FakeRailwayRunner({});
+    const runner = newRunner({});
     const fetchImpl = buildFetchStub({ statusConfigured: false, healthzStatus: 200, calls });
 
     const result = await runRegressionCheck(
@@ -152,7 +134,7 @@ describe("runRegressionCheck", () => {
 
   it("guarantees deletion even when the status check throws", async () => {
     const calls: string[] = [];
-    const runner = new FakeRailwayRunner({});
+    const runner = newRunner({});
     const fetchImpl = buildFetchStub({ statusConfigured: true, healthzStatus: 200, statusThrows: true, calls });
 
     const result = await runRegressionCheck(
@@ -176,7 +158,7 @@ describe("runRegressionCheck", () => {
 
   it("never throws when deletion itself fails, folds the delete failure into the result, and forces passed=false", async () => {
     const calls: string[] = [];
-    const runner = new FakeRailwayRunner({});
+    const runner = newRunner({});
     const fetchImpl = (async (input: string | URL | Request) => {
       const url = String(input);
       if (url === "https://openrouter.ai/api/v1/keys") {
@@ -261,7 +243,7 @@ describe("runRegressionCheck", () => {
   });
 
   it("throws before minting anything when the profile has no keyProvisioning intent", async () => {
-    const runner = new FakeRailwayRunner({});
+    const runner = newRunner({});
     const fetchImpl = vi.fn(async () => {
       throw new Error("fetch must not be called");
     }) as unknown as typeof fetch;
@@ -284,7 +266,7 @@ describe("runRegressionCheck", () => {
 
 describe("bootstrapOnboardingCycle", () => {
   it("provisions, dry-runs, then applies, in that order, and returns mintedKeyHash", async () => {
-    const runner = new FakeRailwayRunner({}, { createdServiceName: "fixture-onboard" });
+    const runner = newRunner({}, { createdServiceName: "fixture-onboard" });
     const calls: string[] = [];
     let configured = false;
     const fetchImpl = (async (input: string | URL | Request) => {
