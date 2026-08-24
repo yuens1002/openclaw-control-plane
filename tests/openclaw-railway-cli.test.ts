@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { parseArgs, runCommand } from "@openclaw-control-plane/openclaw-railway-installer/cli";
@@ -71,5 +73,37 @@ describe("cli runCommand — real subprocess, no fake runner", () => {
     await expect(
       runCommand(process.execPath, ["-e", "process.stderr.write('boom'); process.exit(3);"])
     ).rejects.toThrow("failed with exit code 3: boom");
+  });
+});
+
+describe("marketplace-install path never reads Railway variables", () => {
+  // Gap G4's disposition (docs/live-instance-operations.md §7, narrowed
+  // rather than a shared guard) rests on this CLI's runCommand echoing
+  // stdout (see the test above) never being reachable from a call that
+  // reads a secret-bearing variable: railway-variables.ts's
+  // listRailwayVariables/readRailwayVariable are only ever routed through
+  // the non-echoing runners in client-cli.ts and openclaw-setup-applier's
+  // cli.ts. That was true when traced, but nothing previously made it
+  // observable if it stopped being true. A source-text check is a coarser
+  // signal than an import-graph check, but it fails loudly the day either
+  // file starts importing railway-variables.js directly, or starts
+  // importing provision-client.js/apply-profile.js — the two modules that
+  // already call the reader functions, so wiring either of *those* in here
+  // would reintroduce the exposure without this file's own source ever
+  // mentioning "railway-variables" — which is exactly the moment this
+  // closed gap needs re-examining. Matches only actual import specifiers
+  // (`from "...name..."`), not prose mentions of a sibling module's
+  // filename in a doc comment — index.ts's waitForSetupReady comment
+  // legitimately references provision-client.ts as one of its callers.
+  const forbiddenImportPattern = /from\s+["'][^"']*(?:railway-variables|provision-client|apply-profile)[^"']*["']/;
+
+  it("cli.ts never imports railway-variables.js, provision-client.js, or apply-profile.js", async () => {
+    const source = await readFile("packages/openclaw-railway-installer/src/cli.ts", "utf8");
+    expect(source).not.toMatch(forbiddenImportPattern);
+  });
+
+  it("index.ts never imports railway-variables.js, provision-client.js, or apply-profile.js", async () => {
+    const source = await readFile("packages/openclaw-railway-installer/src/index.ts", "utf8");
+    expect(source).not.toMatch(forbiddenImportPattern);
   });
 });

@@ -122,7 +122,7 @@ an in-repo path that does not.
 | Mutation tier | Credential | Rule | In-repo reference |
 | --- | --- | --- | --- |
 | read | neither | Allowed ad hoc. Declare the target (§4) and proceed. | Exemplar: `packages/openclaw-setup-applier/src/apply-profile.ts`'s `waitForHealthy` polls `/setup/healthz`, which `packages/openclaw-railway-installer/src/index.ts` documents as unauthenticated — it sends no credential and returns none. Note the near miss: `setup-api-client.ts`'s `getStatus()` looks like this row but is **not** — every `/setup/api/*` route requires Basic auth, so it belongs to the `requires a secret` row below. Reads are not credential-free by default; check which endpoint is actually being called. |
-| read | **returns** a secret | Allowed only with an explicit acknowledgement that the output will contain secrets, and only when scoped to a named target. Never pipe the output into a log, a file, or a transcript. | Exemplar: `guard-cli.ts`'s `checkGuard` requires `--i-know-this-prints-secrets` before a variable listing runs, and never spawns the underlying CLI when the check fails. Counter-example: `packages/openclaw-railway-installer/src/railway-variables.ts`'s `listRailwayVariables`/`readRailwayVariable` reach the same CLI programmatically without that gate (gap G4, §7). |
+| read | **returns** a secret | For a direct human CLI invocation: allowed only with an explicit acknowledgement that the output will contain secrets, and only when scoped to a named target. Never pipe the output into a log, a file, or a transcript. For an in-process programmatic read that never echoes captured output to this process's own stdout: mandatory service scoping plus that non-echo property stand in for the explicit acknowledgement — narrower than the human rule, judged sufficient in G4's disposition (§7), not a general substitution available to any future caller. A caller that deliberately surfaces the value to the operator who requested it (prints or persists it) still must scope to a named target, the same as the human path, and its acknowledgement is the invocation itself: a named command whose stated purpose is to hand that operator that credential for that target (e.g. `provision`) — not a general license for a programmatic path to print or persist an unrelated value it happened to read. | Exemplar (human path): `guard-cli.ts`'s `checkGuard` requires `--i-know-this-prints-secrets` before a variable listing runs, and never spawns the underlying CLI when the check fails. Programmatic path, meets the row by the narrowed rule above rather than as an exemplar of the acknowledgement mechanism: `railway-variables.ts`'s `listRailwayVariables`/`readRailwayVariable` require `service` as a mandatory parameter (no unscoped fallback), and every real runner that calls them — `openclaw-railway-installer/src/client-cli.ts`'s and `openclaw-setup-applier/src/cli.ts`'s `runCommand` — deliberately never writes captured stdout to this process's own stdout, each pinned by a real-child-process regression test. `checkGuard` itself is not reused here; it is a CLI-entrypoint whitelist for exactly two subcommands and would reject every other command (`redeploy`, `domain list`, `deploy`, ...) these runners also carry. Gap G4, §7 — narrowed, not built as a shared guard. |
 | read | **requires** a secret | Allowed **only** if the secret reaches the process by stdin or environment. Forbidden if it is interpolated into the argument string — §2.4, no exceptions. | Exemplar: `setup-api-client.ts`'s `createSetupApiClient` builds the auth header inside the process from a value never placed on a command line. Counter-example: the Manual Install block in `deploy/openclaw-railway/README.md` passes `SETUP_PASSWORD` as an inline `-v "NAME=VALUE"` argument. |
 | idempotent-write | any | Allowed through tested library code. Requires **both** halves: compare-then-write *and* post-write verification (§5). Ad hoc use is not permitted where a library path exists. | Exemplar (both halves): `packages/openclaw-setup-applier/src/apply-profile.ts`'s `applyProfile` skips the mutating call when its opening `getStatus()` already reports configured, then re-reads status after the write and throws if it did not take. Second exemplar: `patch-allowed-origins.ts`'s `patchAllowedOrigins` compares before writing, skipping the POST (and therefore a live gateway restart) when the origin is already present, then re-reads the config and throws if the origin is absent after the write reported success. Also, **for the compare/post-write properties only, not for its tier**: `provision-client.ts`'s `updateClientTemplateRef` and `updateClientOpenClawRef` read the current ref, no-op without redeploying when it already matches, refuse a mismatch, and verify after writing. Those functions are classified `restart-or-redeploy-triggering` (per §2.1's take-the-highest-tier rule, since they redeploy), and that row's stricter procedure is the one that governs them -- they appear here only as an illustration of the two required halves (gap G1, §7). |
 | unconditional-write | any | Not permitted ad hoc. In library code, requires an explicit stated reason why a pre-read comparison is impossible, plus post-write verification. Otherwise it must be converted to idempotent-write. | Counter-example: `import-workspace-files.ts`'s `importWorkspaceFiles` POSTs without a pre-read comparison (gap G3, §7). Note on `importWorkspaceFiles`: the missing pre-read is why it appears here, but its **effective tier is the row below** — `docs/plans/workspace-identity-transport/ACs.md`'s AC-XPORT-003 states that calling the import endpoint stops the gateway as a side effect. That statement is second-hand in this repo: it is asserted in the AC's premise and is the stated reason the module never retries, but the independent upstream re-confirmation recorded in that plan attaches to AC-XPORT-005 (response shape), not to the gateway stop. Classified at the higher tier because over-classifying under unresolved provenance is the safe direction; the module's own marker carries the same word. |
@@ -363,10 +363,10 @@ two together catch both.
 ## 7. Gap Register and Disposition
 
 Open gaps are tracked on GitHub so they survive the session that found
-them: G4 in issue #45, and G3 / G5's concurrency half / G6 / G8 in
-issue #47. An entry here that says "still open" with no decision
-attached is a bug in this document, not a neutral state -- that is how
-the stale entries corrected in #46 arose.
+them: G3 / G5's concurrency half / G6 / G8 in issue #47. G4 was tracked
+in issue #45 and is closed below. An entry here that says "still open"
+with no decision attached is a bug in this document, not a neutral
+state -- that is how the stale entries corrected in #46 arose.
 
 Every gap found by the research pass behind this document, dispositioned
 exactly once. See
@@ -482,23 +482,95 @@ hope into a tripwire for roughly ten lines. Same shape as the
 mutation-check discipline: make the absence of a thing observable
 rather than assumed.
 
-**G4 — programmatic Railway variable calls bypass the human-CLI
-guard.** `guard-cli.ts` enforces explicit service scoping and a
-secret-echo acknowledgement, but only for direct human invocation:
+**G4 — CLOSED (narrowed), 2026-08-23.** Filed as issue #45 as
+"programmatic Railway variable calls bypass the human-CLI guard":
+`guard-cli.ts`'s `checkGuard` enforces explicit service scoping and a
+secret-echo acknowledgement, but only for direct human invocation —
 `checkGuard` is imported nowhere outside `guard-cli.ts` itself and its
 test. `railway-variables.ts`'s `listRailwayVariables` and
-`writeRailwayVariable` call the underlying runner directly, with
-neither protection. *Recommended fix:* move the check to the
-process-spawn boundary so every path — human and
-programmatic — passes through it. This is a real refactor of where the
-spawn happens, not a doc change, which is why it is a follow-up rather
-than in scope here. **Priority raised (2026-08-23):** the client-ref update paths now also
-depend on this mechanism, to read `SETUP_PASSWORD` for their post-redeploy
-readiness check. That is a second caller on the unguarded programmatic
-secret-read path, added while closing G1 -- recorded deliberately rather
-than inherited silently. Closing G4 (a targeted secret read that does not
-pull every variable through the process) is now the highest-value remaining
-gap.
+`readRailwayVariable` (all seven callers: five in `provision-client.ts`,
+two in `apply-profile.ts`) call the underlying runner directly, with
+neither protection. `writeRailwayVariable` was also named in the original
+gap text but does not belong to this row — it does not return a secret,
+it writes one via `--stdin`, and never logs, prints, or returns the value
+it wrote.
+
+The issue posed five design questions and asked, as the first and
+gating one: does in-process exposure still matter once nothing is
+echoed? Decided **no**, for this repo's current threat model, once the
+actual mechanism was traced rather than assumed:
+
+- Every one of the seven callers routes through one of two real
+  runners — `openclaw-railway-installer/src/client-cli.ts`'s
+  `runCommand` (used by `provision-client.ts`) and
+  `openclaw-setup-applier/src/cli.ts`'s `runCommand` (used by
+  `apply-profile.ts`). Both deliberately never write captured stdout to
+  this process's own stdout — confirmed in code, not assumed — and both
+  are pinned by an existing real-child-process regression test
+  (`tests/openclaw-railway-client-cli.test.ts` and
+  `tests/openclaw-setup-applier-onboarding-cycle-cli.test.ts`, each
+  titled "never writes the spawned process's stdout to this process's
+  own stdout, even though it's still captured for parsing"). The one
+  runner that *does* echo (`cli.ts`/`index.ts`, the marketplace-install
+  path) never calls either function, or the modules that call them —
+  confirmed by source-text scan, not assumed, and pinned by
+  `tests/openclaw-railway-cli.test.ts`'s "marketplace-install path never
+  reads Railway variables" suite, which matches each file's actual import
+  specifiers (not a bare mention — `index.ts`'s own doc comments
+  legitimately name `provision-client.ts` as a caller of an unrelated
+  export) so a future import of `railway-variables.js`,
+  `provision-client.js`, or `apply-profile.js` into either file fails that
+  test. Coarser than an import-graph check — it cannot catch a re-export
+  under a different name — but sufficient for the direct-import
+  regression path this closure actually depends on.
+- `service` is a required parameter on both functions with no unscoped
+  fallback, meeting this row's scoping requirement structurally rather
+  than by a runtime check.
+- What remains is real and was weighed, not overlooked: every call still
+  materializes every variable on the service in this process's memory to
+  select one (issue #45's "why every read is a broad read" — no targeted
+  CLI read exists, confirmed against the CLI, not assumed). A guard at this
+  boundary cannot narrow that; the CLI offers no narrower call to guard
+  down to. What it would add is deliberateness and reviewability of
+  *who* reads secrets, not reduced exposure — and building that guard
+  well needs an allowlist of permitted callers, not a boolean flag a
+  future call site can paste past unread (a flag proves nothing an
+  attentive reviewer's diff review doesn't already catch). Judged not
+  worth the ceremony while every caller is internal, trusted process
+  code that already satisfies the row's actual requirements.
+
+*Previously recommended fix, withdrawn:* moving the check to the
+general process-spawn boundary. Traced against the real runners rather
+than assumed: `checkGuard` whitelists exactly two subcommands
+(`variable list`/`set`) and rejects everything else, so wrapping the
+general runner with it as-is would reject `redeploy`, `domain list`,
+`deploy`, and every other command these same runners carry. A viable
+version would need splitting `checkGuard`'s CLI-entrypoint whitelist
+from its secret-echo gate — not attempted, because the exposure it
+would close is already closed by the echo suppression above.
+
+Not every caller only consumes the value in-process. On a
+`reusedExistingService` rerun, `provisionClientInstance`'s
+reused-service branch reads back `SETUP_PASSWORD`/`OPENCLAW_GATEWAY_TOKEN`
+via `readRailwayVariable`, and `client-cli.ts`'s `provision` subcommand
+both `console.log`s the setup password to the operator and persists both
+credentials to `.env.local` and the handoff markdown file when those
+writers are enabled — the password directly (`buildProvisionHandoff`'s
+"Setup Auth" section), the gateway token embedded in the handoff link's
+`#token=` URL fragment. That is deliberate design, not an oversight this
+entry missed: it is the credential handoff the `provision` command exists
+to produce, requested by the operator who named the service on the
+command line, for the one instance they just asked about — not an
+unacknowledged bulk listing piped into a log or transcript, which is
+what this row's rule actually guards against; see the amended rule cell
+in §2.5. `updateClientRefVariable`'s ref read and `dryRunApplyProfile`'s
+presence check, by contrast, never surface a value at all — the former
+uses it only for an in-process auth header or comparison, the latter
+converts it to a boolean before
+returning. If a *future* caller starts printing, logging, or persisting
+a value this deliberate-handoff distinction doesn't cover, that is a new
+gap, not a reopening of this one. §2.5's read/returns-a-secret row
+records the mechanism this entry closes on.
 
 **G6 — the "never touches another service" invariant is prose, not
 code-enforced.** The doc comments on `provision-client.ts`'s
