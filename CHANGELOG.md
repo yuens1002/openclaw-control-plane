@@ -7,6 +7,7 @@ and uses semantic versioning once releases begin.
 
 ## [Unreleased]
 
+- 2026-08-23 - docs(ops): close protocol gap G4 by narrowing its scope rather than building a shared guard (closes #45)
 - 2026-08-23 - docs(hygiene): drop private client-profile repo name from the ADR, four plan docs, a deploy doc, and a source comment; add the audit report
 - 2026-08-23 - docs(adr): ADR 0001 no longer names which GitHub auth mechanism any tenant currently runs
 - 2026-08-23 - docs(ops): cross-link the gap register to its GitHub tracking issues

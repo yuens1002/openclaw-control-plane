@@ -398,24 +398,16 @@ async function assertInstanceReady(
   dependencies: InstallerDependencies,
   contextForFailure?: string
 ): Promise<void> {
-  // NOTE (adds a caller to gap G4, docs/live-instance-operations.md §7).
-  //
-  // This wants one named variable, but no targeted read exists: `railway
-  // variable --help` offers only `list`, `set`, and `delete`, and `list`
-  // returns every variable on the service -- OPENCLAW_GATEWAY_TOKEN included
-  // -- through this process. Verified against the CLI, not assumed, so nobody
-  // spends time looking for a narrower call that is not there. Suppressing
-  // stdout in the CLI stops terminal echo; it does not narrow what is read.
-  //
-  // Scope of the change: this is an additional caller on an existing path,
-  // not a new class of exposure -- `provisionClientInstance` already reads
-  // SETUP_PASSWORD and OPENCLAW_GATEWAY_TOKEN through the same helper. The
-  // remedies available are both out of scope here: a guarded read at the
-  // process-spawn boundary (G4 proper, which changes every call site's error
-  // handling), or an upstream CLI that can fetch one variable.
-  //
-  // Recorded rather than quietly inherited, and used to raise G4's priority
-  // in §7, because closing G1 is what added the second caller.
+  // NOTE: this wants one named variable, but no targeted read exists:
+  // `railway variable --help` offers only `list`, `set`, and `delete`, and
+  // `list` returns every variable on the service -- OPENCLAW_GATEWAY_TOKEN
+  // included -- through this process. Verified against the CLI, not
+  // assumed, so nobody spends time looking for a narrower call that is not
+  // there. Suppressing stdout in the CLI stops terminal echo; it does not
+  // narrow what is read. This was raised as an added caller on gap G4
+  // (issue #45); G4 was closed by narrowing, not by a guarded read, once
+  // tracing the real runner showed stdout was already never echoed here --
+  // see docs/live-instance-operations.md §7.
   const setupPassword = await readRailwayVariable("SETUP_PASSWORD", params.service, dependencies);
   if (!setupPassword) {
     throw new Error("the service has no SETUP_PASSWORD to authenticate with");
