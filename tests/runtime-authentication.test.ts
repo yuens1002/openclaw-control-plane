@@ -6,6 +6,7 @@ import {
   type JWK,
   type JWTVerifyGetKey
 } from "jose";
+import { createServer } from "node:http";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -47,6 +48,7 @@ describe("OIDC authentication", () => {
 
   it.each([
     ["expired", { expirationTime: Math.floor(Date.now() / 1000) - 60 }],
+    ["not yet valid", { notBefore: Math.floor(Date.now() / 1000) + 600 }],
     ["wrong audience", { audience: "other" }],
     ["wrong issuer", { issuer: "https://other.example" }]
   ])("rejects a %s token", async (_case, override) => {
@@ -72,6 +74,18 @@ describe("OIDC authentication", () => {
     await expect(authenticator.authenticateBearer(`Bearer ${hsToken}`)).rejects.toMatchObject({
       code: "unsupported_algorithm"
     });
+  });
+
+  it("rejects malformed tokens and unmapped stable identities", async () => {
+    const authenticator = createAuthenticator(() => [publicJwk]);
+    await expect(authenticator.authenticateBearer("Bearer not-a-jwt")).rejects.toBeInstanceOf(
+      AuthenticationError
+    );
+    await expect(
+      authenticator.authenticateBearer(
+        `Bearer ${await token(privateKey, "key-1", {}, { subject: "other-service" })}`
+      )
+    ).rejects.toMatchObject({ code: "unknown_principal" });
   });
 
   it("rejects tokens without required expiry and issued-at claims", async () => {
@@ -103,6 +117,71 @@ describe("OIDC authentication", () => {
     await expect(
       authenticator.authenticateBearer(`Bearer ${await token(privateKey, "key-1")}`)
     ).rejects.toBeInstanceOf(AuthenticationError);
+  });
+
+  it("bounds remote JWKS refreshes and replaces retired keys", async () => {
+    let keys = [publicJwk];
+    let fetches = 0;
+    const server = createServer((_request, response) => {
+      fetches += 1;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ keys }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("JWKS fixture did not bind.");
+    const issuer = `http://127.0.0.1:${address.port}`;
+    const config = {
+      ...exampleRuntimeAuthConfiguration,
+      issuers: [
+        {
+          ...exampleRuntimeAuthConfiguration.issuers[0]!,
+          issuer,
+          jwks_uri: `${issuer}/jwks`
+        }
+      ],
+      principals: exampleRuntimeAuthConfiguration.principals.map((principal) => ({
+        ...principal,
+        issuer
+      }))
+    };
+    const authenticator = new OidcAuthenticator(config, {
+      remoteJwks: { cooldownDuration: 20, cacheMaxAge: 60_000, timeoutDuration: 1_000 }
+    });
+
+    try {
+      await expect(
+        authenticator.authenticateBearer(
+          `Bearer ${await token(privateKey, "key-1", {}, { issuer })}`
+        )
+      ).resolves.toMatchObject({ subject: "example-service" });
+      keys = [rotatedPublicJwk];
+      await expect(
+        authenticator.authenticateBearer(
+          `Bearer ${await token(rotatedPrivateKey, "key-2", {}, { issuer })}`
+        )
+      ).rejects.toBeInstanceOf(AuthenticationError);
+      const fetchesDuringCooldown = fetches;
+      await expect(
+        authenticator.authenticateBearer(
+          `Bearer ${await token(rotatedPrivateKey, "key-2", {}, { issuer })}`
+        )
+      ).rejects.toBeInstanceOf(AuthenticationError);
+      expect(fetches).toBe(fetchesDuringCooldown);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      await expect(
+        authenticator.authenticateBearer(
+          `Bearer ${await token(rotatedPrivateKey, "key-2", {}, { issuer })}`
+        )
+      ).resolves.toMatchObject({ subject: "example-service" });
+      await expect(
+        authenticator.authenticateBearer(
+          `Bearer ${await token(privateKey, "key-1", {}, { issuer })}`
+        )
+      ).rejects.toBeInstanceOf(AuthenticationError);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 
   it("reports required JWKS readiness independently", async () => {
@@ -158,14 +237,17 @@ async function token(
     issuer?: string;
     audience?: string;
     expirationTime?: number;
+    notBefore?: number;
+    subject?: string;
   } = {}
 ) {
   return new SignJWT(claims)
     .setProtectedHeader({ alg: "RS256", kid })
     .setIssuer(override.issuer ?? "https://issuer.example")
-    .setSubject("example-service")
+    .setSubject(override.subject ?? "example-service")
     .setAudience(override.audience ?? "control-plane")
     .setIssuedAt()
+    .setNotBefore(override.notBefore ?? 0)
     .setExpirationTime(override.expirationTime ?? "5m")
     .sign(key);
 }

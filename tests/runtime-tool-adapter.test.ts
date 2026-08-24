@@ -66,4 +66,109 @@ describe("authenticated runtime tool adapter", () => {
     );
     await expect(tools.list_runtime_registrations()).rejects.not.toThrow(/super-secret-token/);
   });
+
+  it("rejects malformed API responses instead of trusting a TypeScript cast", async () => {
+    const tools = createOpenClawControlPlaneTools({
+      baseUrl: "https://control-plane.example",
+      tokenProvider: () => "token",
+      fetchImpl: vi.fn(async () => Response.json({ totally: "wrong" }))
+    });
+
+    await expect(tools.list_runtime_registrations()).rejects.toThrow();
+  });
+
+  it("validates command, record, provenance, projection, and audit responses", async () => {
+    const toolInvocationIdProvider = vi.fn(async () => "tool-call-42");
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const path = new URL(String(url)).pathname;
+      if (path.endsWith("/commands")) {
+        expect(new Headers(init?.headers).get("x-tool-invocation-id")).toBe("tool-call-42");
+        return Response.json({
+          status: "inserted",
+          terminal_status: "succeeded",
+          operation_record_id: "00000000-0000-4000-8000-000000000012",
+          result_record_ids: ["00000000-0000-4000-8000-000000000013"]
+        });
+      }
+      if (path.endsWith("/edges")) return Response.json({ edges: [] });
+      if (path.includes("/projections/")) {
+        return Response.json({ projection: { state: { ready: true }, last_record_sequence: 4 } });
+      }
+      if (path.endsWith("/audit")) return Response.json({ records: [], next_cursor: null });
+      return Response.json({ record: runtimeRecord() });
+    });
+    const tools = createOpenClawControlPlaneTools({
+      baseUrl: "https://control-plane.example",
+      tokenProvider: () => "token",
+      toolInvocationIdProvider,
+      fetchImpl
+    });
+
+    await tools.execute_runtime_command(commandRequest());
+    await tools.get_runtime_record("00000000-0000-4000-8000-000000000012");
+    await tools.get_runtime_edges("00000000-0000-4000-8000-000000000012");
+    await tools.get_runtime_projection(
+      "example.current",
+      "example.environment",
+      "production",
+      "stream-1",
+      1
+    );
+    await tools.list_runtime_audit();
+
+    expect(toolInvocationIdProvider).toHaveBeenCalledOnce();
+    expect(fetchImpl).toHaveBeenCalledTimes(5);
+  });
 });
+
+function commandRequest() {
+  return {
+    stream_id: "stream-1",
+    idempotency_key: "command-1",
+    operation_type: "example.state.reconcile",
+    operation_schema_version: 1,
+    work_item_id: "00000000-0000-4000-8000-000000000010",
+    action_revision: 1,
+    target: { type: "example.environment", id: "production" },
+    arguments: { desired: { ready: true } },
+    declared_effects: [],
+    trigger: {
+      type: "user_request" as const,
+      ref: { kind: "work_item" as const, id: "00000000-0000-4000-8000-000000000010" }
+    },
+    causation_ref: {
+      kind: "work_item" as const,
+      id: "00000000-0000-4000-8000-000000000010"
+    },
+    correlation_id: "correlation-1",
+    input_refs: []
+  };
+}
+
+function runtimeRecord() {
+  return {
+    record_id: "00000000-0000-4000-8000-000000000012",
+    stream_id: "stream-1",
+    record_sequence: 1,
+    kind: "action_attempt",
+    type: "runtime.action.attempt",
+    schema_version: 1,
+    schema_ref: "runtime://schemas/action-attribution/v1",
+    command_context: {
+      authenticated_principal_ref: "principal://example/service",
+      effective_actor: { type: "service", id: "example-service" },
+      request_origin: "tool",
+      authorization: {
+        decision_id: "decision-1",
+        action: "state.reconcile",
+        result: "allowed",
+        policy_version: "v1",
+        reason_codes: ["example.allowed"]
+      }
+    },
+    subject: { type: "example.environment", id: "production" },
+    payload: {},
+    occurred_at: "2026-08-24T12:00:00.000Z",
+    recorded_at: "2026-08-24T12:00:00.000Z"
+  };
+}

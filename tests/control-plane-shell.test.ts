@@ -104,6 +104,7 @@ describe("control-plane shell defaults", () => {
     const response = await app.request("/health");
     const health = (await response.json()) as {
       ready: boolean;
+      api: string;
       database: string;
       migrations: string;
       registry: string;
@@ -112,6 +113,7 @@ describe("control-plane shell defaults", () => {
     expect(health).toMatchObject({
       ok: false,
       ready: false,
+      api: "unavailable",
       database: "ready",
       migrations: "ready",
       registry: "invalid"

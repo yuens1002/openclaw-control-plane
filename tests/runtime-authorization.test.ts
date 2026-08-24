@@ -18,6 +18,16 @@ describe("static runtime RBAC", () => {
     });
   });
 
+  it("creates a distinct decision ID for every evaluation", () => {
+    let sequence = 0;
+    const provider = new StaticRbacAuthorizationProvider(exampleRuntimeAuthConfiguration, {
+      createDecisionId: () => `decision-${++sequence}`
+    });
+
+    expect(provider.authorize(request()).decision_id).toBe("decision-1");
+    expect(provider.authorize(request()).decision_id).toBe("decision-2");
+  });
+
   it.each([
     ["action", { action: "state.read" }],
     ["resource type", { resource: { type: "example.other", id: "production" } }]

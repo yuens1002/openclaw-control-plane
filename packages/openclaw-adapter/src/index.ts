@@ -6,11 +6,23 @@ import type {
   RuntimeCommandRequest,
   RuntimeIntakeRequest
 } from "@openclaw-control-plane/contracts";
+import {
+  RuntimeApprovalResponseSchema,
+  RuntimeEdgesResponseSchema,
+  RuntimeIntakeResponseSchema,
+  RuntimeOperationResponseSchema,
+  RuntimeProjectionResponseSchema,
+  RuntimeRecordPageResponseSchema,
+  RuntimeRecordResponseSchema,
+  RuntimeRegistrationCatalogSchema
+} from "@openclaw-control-plane/contracts";
+import type { z } from "zod";
 
 export interface OpenClawAdapterOptions {
   baseUrl: string;
   fetchImpl?: typeof fetch;
   tokenProvider?: () => string | Promise<string>;
+  toolInvocationIdProvider?: () => string | Promise<string>;
   allowInsecureTransport?: boolean;
 }
 
@@ -23,34 +35,60 @@ export function createOpenClawControlPlaneTools(options: OpenClawAdapterOptions)
 
   return {
     list_runtime_registrations: () =>
-      callApi<{ types: unknown[]; operations: unknown[] }>("/v1/runtime/registrations", {
-        method: "GET"
-      }),
+      callApi("/v1/runtime/registrations", { method: "GET" }, RuntimeRegistrationCatalogSchema),
     create_runtime_event: (input: Omit<RuntimeIntakeRequest, "kind">) =>
-      callApi("/v1/runtime/events", { method: "POST", body: input }),
+      callApi("/v1/runtime/events", { method: "POST", body: input }, RuntimeIntakeResponseSchema),
     create_runtime_work_item: (input: Omit<RuntimeIntakeRequest, "kind">) =>
-      callApi("/v1/runtime/work-items", { method: "POST", body: input }),
+      callApi(
+        "/v1/runtime/work-items",
+        { method: "POST", body: input },
+        RuntimeIntakeResponseSchema
+      ),
     create_runtime_approval: (input: RuntimeApprovalRequest) =>
-      callApi<{ approval_id: string; command_digest: string }>("/v1/runtime/approvals", {
-        method: "POST",
-        body: input
-      }),
-    execute_runtime_command: (input: RuntimeCommandRequest) =>
-      callApi("/v1/runtime/commands", { method: "POST", body: input }),
+      callApi(
+        "/v1/runtime/approvals",
+        { method: "POST", body: input },
+        RuntimeApprovalResponseSchema
+      ),
+    execute_runtime_command: async (input: RuntimeCommandRequest) =>
+      callApi(
+        "/v1/runtime/commands",
+        {
+          method: "POST",
+          body: input,
+          ...(options.toolInvocationIdProvider
+            ? { toolInvocationId: await options.toolInvocationIdProvider() }
+            : {})
+        },
+        RuntimeOperationResponseSchema
+      ),
     get_runtime_record: (recordId: string) =>
-      callApi(`/v1/runtime/records/${encodeURIComponent(recordId)}`, { method: "GET" }),
+      callApi(
+        `/v1/runtime/records/${encodeURIComponent(recordId)}`,
+        { method: "GET" },
+        RuntimeRecordResponseSchema
+      ),
     get_runtime_edges: (recordId: string) =>
-      callApi(`/v1/runtime/records/${encodeURIComponent(recordId)}/edges`, { method: "GET" }),
+      callApi(
+        `/v1/runtime/records/${encodeURIComponent(recordId)}/edges`,
+        { method: "GET" },
+        RuntimeEdgesResponseSchema
+      ),
     list_runtime_stream_records: (
       streamId: string,
       query: { kind?: string; type?: string; cursor?: string; limit?: number } = {}
     ) =>
       callApi(
         `/v1/runtime/streams/${encodeURIComponent(streamId)}/records${queryString(query)}`,
-        { method: "GET" }
+        { method: "GET" },
+        RuntimeRecordPageResponseSchema
       ),
     list_runtime_audit: (query: { cursor?: string; limit?: number } = {}) =>
-      callApi(`/v1/runtime/audit${queryString(query)}`, { method: "GET" }),
+      callApi(
+        `/v1/runtime/audit${queryString(query)}`,
+        { method: "GET" },
+        RuntimeRecordPageResponseSchema
+      ),
     get_runtime_projection: (
       projectionType: string,
       subjectType: string,
@@ -60,7 +98,8 @@ export function createOpenClawControlPlaneTools(options: OpenClawAdapterOptions)
     ) =>
       callApi(
         `/v1/runtime/projections/${encodeURIComponent(projectionType)}/${encodeURIComponent(subjectType)}/${encodeURIComponent(subjectId)}?stream_id=${encodeURIComponent(streamId)}&projection_version=${projectionVersion}`,
-        { method: "GET" }
+        { method: "GET" },
+        RuntimeProjectionResponseSchema
       ),
     list_pipelines: () =>
       callApi<{
@@ -141,15 +180,19 @@ function createApiCaller(options: OpenClawAdapterOptions) {
   const fetchImpl = options.fetchImpl ?? fetch;
   const baseUrl = options.baseUrl.replace(/\/$/, "");
 
-  return async function callApi<TResponse>(
+  return async function callApi<TResponse = unknown>(
     path: string,
-    request: { method: "GET" | "POST"; body?: unknown }
+    request: { method: "GET" | "POST"; body?: unknown; toolInvocationId?: string },
+    responseSchema?: z.ZodType<TResponse>
   ): Promise<TResponse> {
     const headers: Record<string, string> = {};
     if (options.tokenProvider) {
       const token = await options.tokenProvider();
       if (!token.trim()) throw new Error("Control plane token provider returned an empty token.");
       headers.authorization = `Bearer ${token}`;
+    }
+    if (request.toolInvocationId) {
+      headers["x-tool-invocation-id"] = request.toolInvocationId;
     }
     const requestInit: RequestInit = { method: request.method, headers };
 
@@ -164,7 +207,8 @@ function createApiCaller(options: OpenClawAdapterOptions) {
       throw new Error(`Control plane API returned ${response.status}`);
     }
 
-    return (await response.json()) as TResponse;
+    const body = await response.json();
+    return responseSchema ? responseSchema.parse(body) : (body as TResponse);
   };
 }
 

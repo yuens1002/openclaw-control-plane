@@ -771,12 +771,15 @@ describePostgres("PostgreSQL durable runtime repository", () => {
       cursor: firstPage.next_cursor!,
       limit: 1
     });
+    const unfilteredPage = await repository.listRecords({ limit: 1 });
 
     expect(inserted.status).toBe("inserted");
     expect(replayed.status).toBe("replayed");
     expect(firstPage.records.map((item) => item.record_id)).toEqual([ids.event]);
     expect(firstPage.next_cursor).toEqual({ stream_id: "intake-stream", record_sequence: 1 });
     expect(secondPage.records.map((item) => item.record_id)).toEqual([ids.work]);
+    expect(unfilteredPage.records).toHaveLength(1);
+    expect(unfilteredPage.next_cursor).not.toBeNull();
     expect(await repository.listEdges(ids.work)).toContainEqual({
       from_record_id: ids.work,
       relation: "derived_from",

@@ -94,13 +94,16 @@ export function createControlPlaneApp(
       readiness.migrations === "ready" &&
       readiness.registry === "ready";
     const identityRequired = Boolean(dependencies.identityReadiness);
+    const api = dependencies.runtimeApiService ? "ready" : "unavailable";
     const ready =
+      api === "ready" &&
       persistenceReady &&
       (!identityRequired || (identity.identity === "ready" && identity.jwks === "ready"));
     return context.json({
       ok: ready,
       service: "openclaw-control-plane-api",
       ready,
+      api,
       database: readiness.database,
       migrations: readiness.migrations,
       registry: readiness.registry,
@@ -231,7 +234,10 @@ export function createControlPlaneApp(
     const result = await runtime.executeCommand(
       request,
       trusted,
-      context.get("requestId")
+      context.get("requestId"),
+      context.req.header("x-tool-invocation-id")
+        ? SafeLocalIdentifierSchema.parse(context.req.header("x-tool-invocation-id"))
+        : undefined
     );
     return context.json(result, result.status === "inserted" ? 202 : 200);
   });

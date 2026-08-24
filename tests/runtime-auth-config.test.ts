@@ -33,6 +33,64 @@ describe("runtime auth configuration", () => {
       }
     ],
     [
+      "duplicate principal IDs",
+      {
+        principals: [
+          exampleRuntimeAuthConfiguration.principals[0]!,
+          {
+            ...exampleRuntimeAuthConfiguration.principals[1]!,
+            principal_id: exampleRuntimeAuthConfiguration.principals[0]!.principal_id
+          }
+        ]
+      }
+    ],
+    [
+      "duplicate audiences",
+      {
+        issuers: [
+          { ...exampleRuntimeAuthConfiguration.issuers[0]!, audiences: ["control-plane", "control-plane"] }
+        ]
+      }
+    ],
+    [
+      "unsupported algorithms",
+      {
+        issuers: [
+          { ...exampleRuntimeAuthConfiguration.issuers[0]!, allowed_algorithms: ["HS256"] }
+        ]
+      }
+    ],
+    [
+      "out-of-range clock skew",
+      {
+        issuers: [
+          { ...exampleRuntimeAuthConfiguration.issuers[0]!, clock_skew_seconds: 301 }
+        ]
+      }
+    ],
+    [
+      "unsafe role names",
+      {
+        roles: [{ ...exampleRuntimeAuthConfiguration.roles[0]!, name: "Unsafe Role" }]
+      }
+    ],
+    [
+      "partial resource globs",
+      {
+        roles: [
+          {
+            ...exampleRuntimeAuthConfiguration.roles[0]!,
+            grants: [
+              {
+                authorization_action: "state.reconcile",
+                resources: [{ type: "example.environment", id: "prod*" }]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    [
       "invalid delegation targets",
       {
         delegations: [

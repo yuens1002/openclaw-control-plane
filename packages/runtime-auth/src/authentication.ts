@@ -22,6 +22,11 @@ export interface AuthenticatedPrincipal {
 
 export interface OidcAuthenticatorOptions {
   createJwks?: (issuer: IssuerConfiguration) => JWTVerifyGetKey;
+  remoteJwks?: {
+    cooldownDuration?: number;
+    cacheMaxAge?: number;
+    timeoutDuration?: number;
+  };
 }
 
 export class OidcAuthenticator {
@@ -36,9 +41,9 @@ export class OidcAuthenticator {
         issuer.issuer,
         options.createJwks?.(issuer) ??
           createRemoteJWKSet(new URL(issuer.jwks_uri), {
-            cooldownDuration: 30_000,
-            cacheMaxAge: 600_000,
-            timeoutDuration: 5_000
+            cooldownDuration: options.remoteJwks?.cooldownDuration ?? 30_000,
+            cacheMaxAge: options.remoteJwks?.cacheMaxAge ?? 600_000,
+            timeoutDuration: options.remoteJwks?.timeoutDuration ?? 5_000
           })
       );
     }

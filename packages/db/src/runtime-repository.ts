@@ -585,7 +585,7 @@ export class PostgresRuntimeRepository {
               schema_ref, operation_type, operation_schema_version, command_context, subject, payload,
               occurred_at, recorded_at
        FROM runtime_records
-       WHERE ${clauses.join(" AND ")}
+       ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""}
        ORDER BY stream_id, record_sequence
        LIMIT $${values.length}`,
       values

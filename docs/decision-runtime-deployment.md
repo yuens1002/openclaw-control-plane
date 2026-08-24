@@ -19,7 +19,8 @@ changing the OpenClaw image or exposing a public domain.
 - Treat both connection strings as secrets. They belong on the runtime service,
   not in source control or the OpenClaw service.
 - Use `/health` for deployment readiness. A database, migration, or registry
-  readiness failure prevents the server from listening.
+  bootstrap failure starts a health-only process with `api: unavailable` and
+  the failed persistence dimensions; operational routes remain unavailable.
 - Set `RUNTIME_AUTH_CONFIG_JSON` to a secret-backed configuration satisfying
   `docs/runtime-authentication.md`. Production startup fails without it.
 - Keep `RUNTIME_ENABLE_BASIC_AUTH` unset in production. Startup rejects an
@@ -42,6 +43,18 @@ one API and one worker replica until migrations are moved into a separate
 release job.
 
 ## Smoke verification
+
+Run the public container, restart, and recovery verifier with:
+
+```sh
+npm run verify:decision-runtime
+```
+
+It builds the production API image, starts disposable PostgreSQL and local-JWKS
+fixtures, performs authenticated command/query/restart checks, compares a
+`pg_dump`/`pg_restore`, rebuilds the restored projection, and removes its
+containers and network on exit. Ports can be overridden with the
+`RUNTIME_VERIFY_*_PORT` variables.
 
 Against a newly migrated database, use a deterministic test issuer or a
 deployment-approved issuer to:

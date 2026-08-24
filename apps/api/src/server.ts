@@ -1,5 +1,9 @@
 import { serve } from "@hono/node-server";
-import { initializePostgresRuntime } from "@openclaw-control-plane/db";
+import {
+  InMemoryEventStore,
+  initializePostgresRuntime,
+  type PostgresRuntime
+} from "@openclaw-control-plane/db";
 import {
   OidcAuthenticator,
   StaticRbacAuthorizationProvider,
@@ -31,13 +35,24 @@ const authenticator = new OidcAuthenticator(authConfig);
 const authorizationProvider = new StaticRbacAuthorizationProvider(authConfig);
 const trustedContextCoordinator = new TrustedContextCoordinator(authorizationProvider);
 
-const runtime = await initializePostgresRuntime(databaseUrl, {
-  ...(migrationDatabaseUrl ? { migrationDatabaseUrl } : {})
-});
+let runtime: PostgresRuntime | undefined;
+try {
+  runtime = await initializePostgresRuntime(databaseUrl, {
+    ...(migrationDatabaseUrl ? { migrationDatabaseUrl } : {})
+  });
+} catch (error) {
+  console.error("Runtime persistence bootstrap failed; starting health-only API", {
+    error: error instanceof Error ? error.message : "unknown bootstrap failure"
+  });
+}
 const app = createControlPlaneApp({
-  eventStore: runtime.eventStore,
-  readiness: runtime.readiness,
-  runtimeApiService: runtime.apiService,
+  eventStore: runtime?.eventStore ?? new InMemoryEventStore(),
+  readiness: runtime?.readiness ?? (async () => ({
+    database: "unavailable",
+    migrations: "missing",
+    registry: "invalid"
+  })),
+  ...(runtime ? { runtimeApiService: runtime.apiService } : {}),
   authenticator,
   trustedContextCoordinator,
   identityReadiness: () => checkIdentityReadiness(authConfig)
@@ -51,7 +66,7 @@ const server = serve({
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     server.close(() => {
-      void runtime.close().finally(() => process.exit(0));
+      void (runtime?.close() ?? Promise.resolve()).finally(() => process.exit(0));
     });
   });
 }

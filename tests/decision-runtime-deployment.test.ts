@@ -70,10 +70,12 @@ describe("decision runtime deployment", () => {
   });
 
   it("documents production authentication, smoke, backup, restore, and rollback", async () => {
-    const [server, authDocs, deployDocs] = await Promise.all([
+    const [server, authDocs, deployDocs, packageJson, verifier] = await Promise.all([
       read("apps/api/src/server.ts"),
       read("docs/runtime-authentication.md"),
-      read("docs/decision-runtime-deployment.md")
+      read("docs/decision-runtime-deployment.md"),
+      read("package.json"),
+      read("scripts/verify-decision-runtime.mjs")
     ]);
 
     expect(server).toContain("RUNTIME_AUTH_CONFIG_JSON");
@@ -84,5 +86,9 @@ describe("decision runtime deployment", () => {
     expect(deployDocs).toContain("pg_dump");
     expect(deployDocs).toContain("pg_restore");
     expect(deployDocs).toContain("data rollback");
+    expect(packageJson).toContain("verify:decision-runtime");
+    expect(verifier).toContain("pg_dump");
+    expect(verifier).toContain("pg_restore");
+    expect(verifier).toContain("degraded_readiness");
   });
 });
