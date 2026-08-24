@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createServer } from "node:net";
 import { SignJWT, exportJWK, generateKeyPair } from "jose";
 
 const suffix = `${process.pid}-${Date.now()}`;
@@ -7,8 +8,12 @@ const postgres = `runtime-postgres-${suffix}`;
 const issuerContainer = `runtime-issuer-${suffix}`;
 const api = `runtime-api-${suffix}`;
 const image = process.env.RUNTIME_VERIFY_IMAGE ?? "openclaw-decision-runtime:conformance";
-const apiPort = Number(process.env.RUNTIME_VERIFY_API_PORT ?? 18787);
-const postgresPort = Number(process.env.RUNTIME_VERIFY_POSTGRES_PORT ?? 15439);
+const apiPort = process.env.RUNTIME_VERIFY_API_PORT
+  ? Number(process.env.RUNTIME_VERIFY_API_PORT)
+  : await freePort();
+const postgresPort = process.env.RUNTIME_VERIFY_POSTGRES_PORT
+  ? Number(process.env.RUNTIME_VERIFY_POSTGRES_PORT)
+  : await freePort();
 const issuer = "http://runtime-issuer:8080";
 const databaseUrl = `postgresql://openclaw:openclaw@runtime-postgres:5432/openclaw_control_plane`;
 const hostDatabaseUrl = `postgresql://openclaw:openclaw@localhost:${postgresPort}/openclaw_control_plane`;
@@ -288,4 +293,16 @@ function target() {
 
 function docker(...args) {
   return execFileSync("docker", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+}
+
+async function freePort() {
+  const server = createServer();
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Could not allocate a loopback port.");
+  await new Promise((resolve) => server.close(resolve));
+  return address.port;
 }
