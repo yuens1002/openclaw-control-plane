@@ -17,6 +17,7 @@
     "baseUrl": ".",
     "paths": {
       "@openclaw-control-plane/contracts": ["packages/contracts/src/index.ts"],
+      "@openclaw-control-plane/runtime-auth": ["packages/runtime-auth/src/index.ts"],
       "@openclaw-control-plane/db": ["packages/db/src/index.ts"],
       "@openclaw-control-plane/openclaw-railway-installer": ["packages/openclaw-railway-installer/src/index.ts"],
       "@openclaw-control-plane/openclaw-railway-installer/approve-own-device": ["packages/openclaw-railway-installer/src/approve-own-device.ts"],

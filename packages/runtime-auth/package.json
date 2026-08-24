@@ -1,0 +1,14 @@
+{
+  "name": "@openclaw-control-plane/runtime-auth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@openclaw-control-plane/contracts": "file:../contracts",
+    "jose": "^6.2.10",
+    "zod": "^3.24.1"
+  }
+}
