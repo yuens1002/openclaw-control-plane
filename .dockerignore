@@ -1,0 +1,14 @@
+.git
+.github
+.env
+.env.*
+*.local.md
+node_modules
+**/node_modules
+**/dist
+coverage
+**/coverage
+.Codex
+docs
+tests
+*.log

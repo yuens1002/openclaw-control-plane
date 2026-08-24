@@ -11,15 +11,33 @@ const describePostgres = connectionString ? describe : describe.skip;
 
 describePostgres("PostgreSQL runtime bootstrap", () => {
   const databaseName = `runtime_bootstrap_${randomUUID().replaceAll("-", "")}`;
+  const runtimeRole = `runtime_role_${randomUUID().replaceAll("-", "")}`;
+  const runtimePassword = randomUUID();
   const adminPool = new Pool({ connectionString: connectionString! });
   const databaseUrl = new URL(connectionString!);
   databaseUrl.pathname = `/${databaseName}`;
+  const runtimeDatabaseUrl = new URL(databaseUrl);
+  runtimeDatabaseUrl.username = runtimeRole;
+  runtimeDatabaseUrl.password = runtimePassword;
   const migrationsDirectory = fileURLToPath(
     new URL("../packages/db/migrations", import.meta.url)
   );
 
   beforeAll(async () => {
     await adminPool.query(`CREATE DATABASE ${databaseName}`);
+    await adminPool.query(`CREATE ROLE ${runtimeRole} LOGIN PASSWORD '${runtimePassword}'`);
+
+    const databaseAdminPool = new Pool({ connectionString: databaseUrl.toString() });
+    await databaseAdminPool.query(`REVOKE CREATE ON SCHEMA public FROM PUBLIC`);
+    await databaseAdminPool.query(`GRANT CONNECT ON DATABASE ${databaseName} TO ${runtimeRole}`);
+    await databaseAdminPool.query(`GRANT USAGE ON SCHEMA public TO ${runtimeRole}`);
+    await databaseAdminPool.query(
+      `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${runtimeRole}`
+    );
+    await databaseAdminPool.query(
+      `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO ${runtimeRole}`
+    );
+    await databaseAdminPool.end();
   });
 
   afterAll(async () => {
@@ -28,13 +46,17 @@ describePostgres("PostgreSQL runtime bootstrap", () => {
       [databaseName]
     );
     await adminPool.query(`DROP DATABASE IF EXISTS ${databaseName}`);
+    await adminPool.query(`DROP ROLE IF EXISTS ${runtimeRole}`);
     await adminPool.end();
   });
 
   it("migrates, synchronizes registrations, persists, and restarts ready", async () => {
     const first = await initializePostgresRuntime(
-      databaseUrl.toString(),
-      migrationsDirectory
+      runtimeDatabaseUrl.toString(),
+      {
+        migrationDatabaseUrl: databaseUrl.toString(),
+        migrationsDirectory
+      }
     );
     expect(await first.readiness()).toEqual({
       database: "ready",
@@ -68,8 +90,11 @@ describePostgres("PostgreSQL runtime bootstrap", () => {
     await first.close();
 
     const restarted = await initializePostgresRuntime(
-      databaseUrl.toString(),
-      migrationsDirectory
+      runtimeDatabaseUrl.toString(),
+      {
+        migrationDatabaseUrl: databaseUrl.toString(),
+        migrationsDirectory
+      }
     );
     expect(await restarted.eventStore.getEventByIdempotencyKey(event.idempotency_key)).toEqual(
       event
