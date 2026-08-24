@@ -13,7 +13,7 @@ import {
 
 describe("authenticated runtime API", () => {
   it("rejects missing credentials before the runtime boundary", async () => {
-    const dependencies = createDependencies();
+    const dependencies: ControlPlaneDependencies = createDependencies();
     const response = await createControlPlaneApp(dependencies).request("/v1/runtime/registrations");
 
     expect(response.status).toBe(401);
@@ -83,6 +83,76 @@ describe("authenticated runtime API", () => {
     expect(dependencies.runtimeApiService!.createIntake).not.toHaveBeenCalled();
   });
 
+  it("rejects every server-owned trust field across command-capable surfaces", async () => {
+    const fields = [
+      "actor",
+      "effective_actor",
+      "authenticated_principal_ref",
+      "on_behalf_of_principal_ref",
+      "roles",
+      "authorization",
+      "command_digest",
+      "request_id",
+      "occurred_at"
+    ];
+    const surfaces = [
+      ["/v1/runtime/events", eventRequest()],
+      ["/v1/runtime/work-items", eventRequest()],
+      ["/v1/runtime/approvals", approvalRequest()],
+      ["/v1/runtime/commands", commandRequest()]
+    ] as const;
+
+    for (const field of fields) {
+      for (const [path, body] of surfaces) {
+        const dependencies = createDependencies();
+        const response = await createControlPlaneApp(dependencies).request(path, {
+          method: "POST",
+          headers: { authorization: "Bearer valid", "content-type": "application/json" },
+          body: JSON.stringify({ ...body, [field]: "spoofed" })
+        });
+        expect(response.status, `${path} ${field}`).toBe(400);
+      }
+    }
+  });
+
+  it("rejects reserved trust fields nested in runtime payloads and command arguments", async () => {
+    for (const field of [
+      "actor",
+      "effective_actor",
+      "authenticated_principal_ref",
+      "on_behalf_of_principal_ref",
+      "authorization",
+      "command_context"
+    ]) {
+      const eventDependencies = createDependencies();
+      const event = eventRequest();
+      const eventResponse = await createControlPlaneApp(eventDependencies).request(
+        "/v1/runtime/events",
+        {
+          method: "POST",
+          headers: { authorization: "Bearer valid", "content-type": "application/json" },
+          body: JSON.stringify({ ...event, payload: { ...event.payload, [field]: "spoofed" } })
+        }
+      );
+      const commandDependencies = createDependencies();
+      const command = commandRequest();
+      const commandResponse = await createControlPlaneApp(commandDependencies).request(
+        "/v1/runtime/commands",
+        {
+          method: "POST",
+          headers: { authorization: "Bearer valid", "content-type": "application/json" },
+          body: JSON.stringify({
+            ...command,
+            arguments: { ...command.arguments, [field]: "spoofed" }
+          })
+        }
+      );
+
+      expect(eventResponse.status, `event payload ${field}`).toBe(400);
+      expect(commandResponse.status, `command arguments ${field}`).toBe(400);
+    }
+  });
+
   it("routes authorization denial through the bounded audit method", async () => {
     const dependencies = createDependencies({ deny: true });
     const response = await createControlPlaneApp(dependencies).request("/v1/runtime/registrations", {
@@ -130,6 +200,30 @@ describe("authenticated runtime API", () => {
 
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ error: { code: "runtime.invalid_request" } });
+  });
+
+  it.each([
+    ["api", { runtime: false, readiness: { database: "ready", migrations: "ready", registry: "ready" }, identity: { identity: "ready", jwks: "ready" } }],
+    ["database", { runtime: true, readiness: { database: "unavailable", migrations: "ready", registry: "ready" }, identity: { identity: "ready", jwks: "ready" } }],
+    ["migrations", { runtime: true, readiness: { database: "ready", migrations: "missing", registry: "ready" }, identity: { identity: "ready", jwks: "ready" } }],
+    ["registry", { runtime: true, readiness: { database: "ready", migrations: "ready", registry: "invalid" }, identity: { identity: "ready", jwks: "ready" } }],
+    ["identity", { runtime: true, readiness: { database: "ready", migrations: "ready", registry: "ready" }, identity: { identity: "invalid", jwks: "ready" } }],
+    ["jwks", { runtime: true, readiness: { database: "ready", migrations: "ready", registry: "ready" }, identity: { identity: "ready", jwks: "unavailable" } }]
+  ] as const)("reports %s readiness failure independently", async (dimension, fixture) => {
+    const base = createDependencies();
+    const { runtimeApiService, ...withoutRuntime } = base;
+    const dependencies: ControlPlaneDependencies = {
+      ...withoutRuntime,
+      ...(fixture.runtime ? { runtimeApiService } : {}),
+      readiness: async () => fixture.readiness,
+      identityReadiness: async () => fixture.identity
+    };
+
+    const response = await createControlPlaneApp(dependencies).request("/health");
+    const body = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(503);
+    expect(body[dimension]).toMatch(/unavailable|missing|invalid/);
   });
 });
 
@@ -236,6 +330,20 @@ function commandRequest() {
     causation_ref: { kind: "work_item", id: "00000000-0000-4000-8000-000000000010" },
     correlation_id: "correlation-1",
     input_refs: []
+  };
+}
+
+function approvalRequest() {
+  const command = commandRequest();
+  return {
+    operation_type: command.operation_type,
+    operation_schema_version: command.operation_schema_version,
+    work_item_id: command.work_item_id,
+    action_revision: command.action_revision,
+    target: command.target,
+    arguments: command.arguments,
+    declared_effects: command.declared_effects,
+    decision: "approved"
   };
 }
 

@@ -42,14 +42,14 @@ describe("authenticated runtime tool adapter", () => {
       fetchImpl
     });
 
-    await tools.list_runtime_stream_records("stream one", {
+    await tools.list_runtime_stream_records("stream-one", {
       kind: "result",
       cursor: "opaque-page-token",
       limit: 25
     });
 
     expect(fetchImpl).toHaveBeenCalledWith(
-      "https://control-plane.example/v1/runtime/streams/stream%20one/records?kind=result&cursor=opaque-page-token&limit=25",
+      "https://control-plane.example/v1/runtime/streams/stream-one/records?kind=result&cursor=opaque-page-token&limit=25",
       expect.objectContaining({ method: "GET" })
     );
   });
@@ -75,6 +75,18 @@ describe("authenticated runtime tool adapter", () => {
     });
 
     await expect(tools.list_runtime_registrations()).rejects.toThrow();
+  });
+
+  it("rejects malformed tool input before issuing a request", async () => {
+    const fetchImpl = vi.fn();
+    const tools = createOpenClawControlPlaneTools({
+      baseUrl: "https://control-plane.example",
+      tokenProvider: () => "token",
+      fetchImpl
+    });
+
+    await expect(tools.execute_runtime_command({} as never)).rejects.toThrow();
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("validates command, record, provenance, projection, and audit responses", async () => {

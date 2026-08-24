@@ -8,6 +8,7 @@ import {
   RuntimeCommandRequestSchema,
   RuntimeIntakeRequestSchema,
   RuntimeRecordQuerySchema,
+  TrustedCommandContextSchema,
   type RuntimeApprovalRequest,
   type RuntimeCommandRequest,
   type RuntimeIntakeRequest,
@@ -202,6 +203,7 @@ export class RuntimeApiService {
     const approval = request.approval_id
       ? await this.resolveApproval(request.approval_id)
       : undefined;
+    if (approval) validateApprovalForCommand(approval, command, digest);
     const startedAt = this.now();
     return this.runtimeService.execute({
       stream_id: request.stream_id,
@@ -271,7 +273,7 @@ export class RuntimeApiService {
   private async resolveApproval(recordId: string): Promise<RuntimeApprovalEvidence> {
     const record = await this.repository.getRecord(recordId);
     if (!record || record.kind !== "approval" || record.type !== "runtime.command.approval") {
-      throw new Error("Approval record was not found.");
+      throw new RuntimeRequestError("Approval record was not found.");
     }
     const payload = ApprovalAttributionPayloadSchema.parse(record.payload);
     return {
@@ -285,6 +287,29 @@ export class RuntimeApiService {
       decided_at: payload.decided_at,
       approver_context: record.command_context
     };
+  }
+}
+
+function validateApprovalForCommand(
+  approval: RuntimeApprovalEvidence,
+  command: {
+    operation_type: string;
+    work_item_id: string;
+    action_revision: number;
+  },
+  digest: string
+): void {
+  const approverContext = TrustedCommandContextSchema.parse(approval.approver_context);
+  if (
+    approval.decision !== "approved" ||
+    approval.operation_type !== command.operation_type ||
+    approval.work_item_id !== command.work_item_id ||
+    approval.action_revision !== command.action_revision ||
+    approval.command_digest !== digest ||
+    approverContext.authorization.result !== "allowed" ||
+    approverContext.authorization.action !== "runtime.command.approve"
+  ) {
+    throw new RuntimeRequestError("Approval does not authorize this exact command revision.");
   }
 }
 

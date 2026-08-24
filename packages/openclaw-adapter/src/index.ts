@@ -7,6 +7,7 @@ import type {
   RuntimeIntakeRequest
 } from "@openclaw-control-plane/contracts";
 import {
+  RuntimeApprovalRequestSchema,
   RuntimeApprovalResponseSchema,
   RuntimeEdgesResponseSchema,
   RuntimeIntakeResponseSchema,
@@ -14,9 +15,14 @@ import {
   RuntimeProjectionResponseSchema,
   RuntimeRecordPageResponseSchema,
   RuntimeRecordResponseSchema,
-  RuntimeRegistrationCatalogSchema
+  RuntimeRegistrationCatalogSchema,
+  RuntimeCommandRequestSchema,
+  RuntimeIntakeRequestSchema,
+  RuntimeRecordQuerySchema,
+  SafeLocalIdentifierSchema,
+  SafeNamespacedIdentifierSchema
 } from "@openclaw-control-plane/contracts";
-import type { z } from "zod";
+import { z } from "zod";
 
 export interface OpenClawAdapterOptions {
   baseUrl: string;
@@ -37,17 +43,21 @@ export function createOpenClawControlPlaneTools(options: OpenClawAdapterOptions)
     list_runtime_registrations: () =>
       callApi("/v1/runtime/registrations", { method: "GET" }, RuntimeRegistrationCatalogSchema),
     create_runtime_event: (input: Omit<RuntimeIntakeRequest, "kind">) =>
-      callApi("/v1/runtime/events", { method: "POST", body: input }, RuntimeIntakeResponseSchema),
+      callApi(
+        "/v1/runtime/events",
+        { method: "POST", body: intakeBody(input, "event") },
+        RuntimeIntakeResponseSchema
+      ),
     create_runtime_work_item: (input: Omit<RuntimeIntakeRequest, "kind">) =>
       callApi(
         "/v1/runtime/work-items",
-        { method: "POST", body: input },
+        { method: "POST", body: intakeBody(input, "work_item") },
         RuntimeIntakeResponseSchema
       ),
     create_runtime_approval: (input: RuntimeApprovalRequest) =>
       callApi(
         "/v1/runtime/approvals",
-        { method: "POST", body: input },
+        { method: "POST", body: RuntimeApprovalRequestSchema.parse(input) },
         RuntimeApprovalResponseSchema
       ),
     execute_runtime_command: async (input: RuntimeCommandRequest) =>
@@ -55,7 +65,7 @@ export function createOpenClawControlPlaneTools(options: OpenClawAdapterOptions)
         "/v1/runtime/commands",
         {
           method: "POST",
-          body: input,
+          body: RuntimeCommandRequestSchema.parse(input),
           ...(options.toolInvocationIdProvider
             ? { toolInvocationId: await options.toolInvocationIdProvider() }
             : {})
@@ -64,13 +74,13 @@ export function createOpenClawControlPlaneTools(options: OpenClawAdapterOptions)
       ),
     get_runtime_record: (recordId: string) =>
       callApi(
-        `/v1/runtime/records/${encodeURIComponent(recordId)}`,
+        `/v1/runtime/records/${encodeURIComponent(z.string().uuid().parse(recordId))}`,
         { method: "GET" },
         RuntimeRecordResponseSchema
       ),
     get_runtime_edges: (recordId: string) =>
       callApi(
-        `/v1/runtime/records/${encodeURIComponent(recordId)}/edges`,
+        `/v1/runtime/records/${encodeURIComponent(z.string().uuid().parse(recordId))}/edges`,
         { method: "GET" },
         RuntimeEdgesResponseSchema
       ),
@@ -79,13 +89,13 @@ export function createOpenClawControlPlaneTools(options: OpenClawAdapterOptions)
       query: { kind?: string; type?: string; cursor?: string; limit?: number } = {}
     ) =>
       callApi(
-        `/v1/runtime/streams/${encodeURIComponent(streamId)}/records${queryString(query)}`,
+        `/v1/runtime/streams/${encodeURIComponent(SafeLocalIdentifierSchema.parse(streamId))}/records${queryString(RuntimeRecordQuerySchema.omit({ stream_id: true }).parse(query))}`,
         { method: "GET" },
         RuntimeRecordPageResponseSchema
       ),
     list_runtime_audit: (query: { cursor?: string; limit?: number } = {}) =>
       callApi(
-        `/v1/runtime/audit${queryString(query)}`,
+        `/v1/runtime/audit${queryString(RuntimeRecordQuerySchema.pick({ cursor: true, limit: true }).parse(query))}`,
         { method: "GET" },
         RuntimeRecordPageResponseSchema
       ),
@@ -97,7 +107,7 @@ export function createOpenClawControlPlaneTools(options: OpenClawAdapterOptions)
       projectionVersion: number
     ) =>
       callApi(
-        `/v1/runtime/projections/${encodeURIComponent(projectionType)}/${encodeURIComponent(subjectType)}/${encodeURIComponent(subjectId)}?stream_id=${encodeURIComponent(streamId)}&projection_version=${projectionVersion}`,
+        `/v1/runtime/projections/${encodeURIComponent(SafeNamespacedIdentifierSchema.parse(projectionType))}/${encodeURIComponent(SafeNamespacedIdentifierSchema.parse(subjectType))}/${encodeURIComponent(SafeLocalIdentifierSchema.parse(subjectId))}?stream_id=${encodeURIComponent(SafeLocalIdentifierSchema.parse(streamId))}&projection_version=${z.number().int().positive().parse(projectionVersion)}`,
         { method: "GET" },
         RuntimeProjectionResponseSchema
       ),
@@ -174,6 +184,12 @@ export function createOpenClawControlPlaneTools(options: OpenClawAdapterOptions)
         }
       )
   };
+}
+
+function intakeBody(input: Omit<RuntimeIntakeRequest, "kind">, kind: "event" | "work_item") {
+  const parsed = RuntimeIntakeRequestSchema.parse({ ...input, kind });
+  const { kind: _kind, ...body } = parsed;
+  return body;
 }
 
 function createApiCaller(options: OpenClawAdapterOptions) {

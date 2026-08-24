@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { createControlPlaneApp } from "@openclaw-control-plane/api";
 import { initializePostgresRuntime, type PostgresRuntime } from "@openclaw-control-plane/db";
+import { createOpenClawControlPlaneTools } from "@openclaw-control-plane/openclaw-adapter";
 import {
   AuthenticationError,
   StaticRbacAuthorizationProvider,
@@ -177,6 +178,93 @@ describePostgres("authenticated runtime HTTP PostgreSQL conformance", () => {
 
     expect(approval.status).toBe(201);
     expect(execution.status).toBe(202);
+
+    const before = await runtime.repository.listStreamRecords("approval-http-stream");
+    const mutations = [
+      { target: { type: "example.environment", id: "staging" } },
+      { arguments: { desired: { ready: false } } },
+      {
+        declared_effects: command.declared_effects.map((effect) => ({
+          ...effect,
+          payload: { changed: false }
+        }))
+      },
+      { action_revision: 2 },
+      { approval_id: "00000000-0000-4000-8000-000000008199" },
+      { executor: "principal://example/other" }
+    ];
+    for (const [index, mutation] of mutations.entries()) {
+      const response = await app.request("/v1/runtime/commands", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          ...command,
+          approval_id: approvalBody.approval_id,
+          idempotency_key: `approval-mutation-${index}`,
+          ...mutation
+        })
+      });
+      expect(response.status, JSON.stringify(mutation)).toBe(400);
+    }
+    expect(await runtime.repository.listStreamRecords("approval-http-stream")).toHaveLength(
+      before.length
+    );
+  });
+
+  it("preserves artifact attribution through authenticated HTTP tool calls", async () => {
+    const app = authenticatedApp(runtime);
+    const workId = "00000000-0000-4000-8000-000000008202";
+    await app.request("/v1/runtime/work-items", {
+      method: "POST",
+      headers: bearerHeaders(),
+      body: JSON.stringify({
+        record_id: workId,
+        stream_id: "artifact-http-stream",
+        type: "example.state.reconcile",
+        schema_version: 1,
+        subject: target(),
+        payload: {},
+        source_refs: []
+      })
+    });
+    const tools = createOpenClawControlPlaneTools({
+      baseUrl: "https://runtime.example",
+      tokenProvider: () => "valid",
+      toolInvocationIdProvider: () => "artifact-tool-1",
+      fetchImpl: async (input, init) => app.request(String(input), init)
+    });
+    const execution = await tools.execute_runtime_command({
+      ...commandRequest(workId),
+      stream_id: "artifact-http-stream",
+      idempotency_key: "artifact-command-1",
+      operation_type: "example.report.generate",
+      arguments: { content_ref: "artifact://example/report" },
+      declared_effects: [
+        {
+          kind: "artifact",
+          result_type: "example.report",
+          schema_version: 1,
+          schema_ref: "example://schemas/report/v1",
+          target: target(),
+          payload: { content_ref: "artifact://example/report" }
+        }
+      ]
+    });
+    const artifact = await tools.get_runtime_record(execution.result_record_ids[0]!);
+    const edges = await tools.get_runtime_edges(execution.operation_record_id);
+
+    expect(artifact.record).toMatchObject({
+      kind: "artifact",
+      type: "example.report",
+      payload: { content_ref: "artifact://example/report" },
+      command_context: { request_origin: "tool" }
+    });
+    expect(edges.edges).toContainEqual(
+      expect.objectContaining({
+        relation: "produced",
+        to_record_id: execution.result_record_ids[0]
+      })
+    );
   });
 
   it("authenticates every runtime route before route-specific work", async () => {
@@ -337,8 +425,11 @@ function commandRequest(workItemId: string) {
         payload: { changed: true }
       }
     ],
-    trigger: { type: "user_request", ref: { kind: "work_item", id: workItemId } },
-    causation_ref: { kind: "work_item", id: workItemId },
+    trigger: {
+      type: "user_request" as const,
+      ref: { kind: "work_item" as const, id: workItemId }
+    },
+    causation_ref: { kind: "work_item" as const, id: workItemId },
     correlation_id: "http-correlation-1",
     input_refs: []
   };

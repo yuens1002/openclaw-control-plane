@@ -7,6 +7,7 @@ const network = `runtime-verify-${suffix}`;
 const postgres = `runtime-postgres-${suffix}`;
 const issuerContainer = `runtime-issuer-${suffix}`;
 const api = `runtime-api-${suffix}`;
+const certVolume = `runtime-certs-${suffix}`;
 const image = process.env.RUNTIME_VERIFY_IMAGE ?? "openclaw-decision-runtime:conformance";
 const apiPort = process.env.RUNTIME_VERIFY_API_PORT
   ? Number(process.env.RUNTIME_VERIFY_API_PORT)
@@ -14,7 +15,7 @@ const apiPort = process.env.RUNTIME_VERIFY_API_PORT
 const postgresPort = process.env.RUNTIME_VERIFY_POSTGRES_PORT
   ? Number(process.env.RUNTIME_VERIFY_POSTGRES_PORT)
   : await freePort();
-const issuer = "http://runtime-issuer:8080";
+const issuer = "https://runtime-issuer:8443";
 const databaseUrl = `postgresql://openclaw:openclaw@runtime-postgres:5432/openclaw_control_plane`;
 const hostDatabaseUrl = `postgresql://openclaw:openclaw@localhost:${postgresPort}/openclaw_control_plane`;
 const restoreDatabaseUrl = `postgresql://openclaw:openclaw@localhost:${postgresPort}/recovery_restore`;
@@ -77,11 +78,16 @@ try {
     docker("build", "-q", "-f", "deploy/decision-runtime/Dockerfile", "-t", image, ".");
   }
   docker("network", "create", network);
+  docker("volume", "create", certVolume);
+  docker(
+    "run", "--rm", "-v", `${certVolume}:/certs`, "node:22-alpine", "sh", "-c",
+    "apk add --no-cache openssl >/dev/null && openssl req -x509 -newkey rsa:2048 -nodes -keyout /certs/key.pem -out /certs/cert.pem -days 1 -subj /CN=runtime-issuer -addext subjectAltName=DNS:runtime-issuer"
+  );
   docker(
     "run", "-d", "--rm", "--name", issuerContainer, "--network", network,
     "--network-alias", "runtime-issuer", "-e", `JWKS_JSON=${JSON.stringify({ keys: [publicJwk] })}`,
-    "node:22-alpine", "node", "-e",
-    "require('http').createServer((req,res)=>{if(req.url==='/jwks'){res.writeHead(200,{'content-type':'application/json'});res.end(process.env.JWKS_JSON)}else{res.writeHead(404).end()}}).listen(8080,'0.0.0.0')"
+    "-v", `${certVolume}:/certs:ro`, "node:22-alpine", "node", "-e",
+    "const fs=require('fs'),https=require('https');https.createServer({key:fs.readFileSync('/certs/key.pem'),cert:fs.readFileSync('/certs/cert.pem')},(req,res)=>{if(req.url==='/jwks'){res.writeHead(200,{'content-type':'application/json'});res.end(process.env.JWKS_JSON)}else{res.writeHead(404).end()}}).listen(8443,'0.0.0.0')"
   );
   docker(
     "run", "-d", "--rm", "--name", postgres, "--network", network,
@@ -222,13 +228,15 @@ try {
     try { docker("rm", "-f", container); } catch {}
   }
   try { docker("network", "rm", network); } catch {}
+  try { docker("volume", "rm", certVolume); } catch {}
 }
 
 function startApi(runtimeDatabaseUrl = databaseUrl) {
   docker(
     "run", "-d", "--rm", "--name", api, "--network", network,
     "-p", `127.0.0.1:${apiPort}:8787`,
-    "-e", "NODE_ENV=test", "-e", `DATABASE_URL=${runtimeDatabaseUrl}`,
+    "-v", `${certVolume}:/certs:ro`, "-e", "NODE_ENV=production",
+    "-e", "NODE_EXTRA_CA_CERTS=/certs/cert.pem", "-e", `DATABASE_URL=${runtimeDatabaseUrl}`,
     "-e", `RUNTIME_AUTH_CONFIG_JSON=${JSON.stringify(authConfig)}`, image
   );
 }

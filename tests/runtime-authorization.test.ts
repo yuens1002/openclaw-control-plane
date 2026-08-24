@@ -58,6 +58,25 @@ describe("static runtime RBAC", () => {
     });
   });
 
+  it("denies configured delegation when the authenticated principal lacks the role grant", () => {
+    const config = {
+      ...exampleRuntimeAuthConfiguration,
+      principals: exampleRuntimeAuthConfiguration.principals.map((principal) =>
+        principal.principal_id === "principal://example/service"
+          ? { ...principal, roles: [] }
+          : principal
+      )
+    };
+    const provider = new StaticRbacAuthorizationProvider(config);
+
+    expect(
+      provider.authorize({
+        ...request(),
+        on_behalf_of_principal_id: "principal://example/operator"
+      })
+    ).toMatchObject({ result: "denied", reason_codes: ["policy.no_matching_grant"] });
+  });
+
   it("constructs trusted context from configured identity and delegation", () => {
     const provider = createProvider();
     const coordinator = new TrustedContextCoordinator(provider);
