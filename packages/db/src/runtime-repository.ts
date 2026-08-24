@@ -1469,25 +1469,36 @@ function validateAppendCommand(
     throw new Error("An append command accepts at most one action attempt.");
   }
   const action = actions[0];
-  const results = command.records.filter((record) => record.kind === "result");
-  if (results.length !== canonicalCommand.declared_effects.length) {
-    throw new Error("Persisted results must match canonical declared effects one-to-one.");
-  }
-  for (const [index, effect] of canonicalCommand.declared_effects.entries()) {
-    const result = results[index]!;
-    if (!operation.allowed_result_types.includes(effect.result_type)) {
-      throw new Error(
-        `Result type ${effect.result_type} is not allowed for ${command.operation_type}.`
-      );
-    }
+  const effects = command.records.filter(
+    (record) => record.kind === "result" || record.kind === "artifact"
+  );
+  for (const kind of ["result", "artifact"] as const) {
+    const declared = canonicalCommand.declared_effects.filter(
+      (effect) => (effect.kind ?? "result") === kind
+    );
+    const persisted = effects.filter((record) => record.kind === kind);
     if (
-      result.type !== effect.result_type ||
-      result.schema_version !== effect.schema_version ||
-      result.schema_ref !== effect.schema_ref ||
-      jsonDigest(result.subject) !== jsonDigest(effect.target) ||
-      jsonDigest(result.payload) !== jsonDigest(effect.payload)
+      (kind === "result" && persisted.length !== declared.length) ||
+      (kind === "artifact" && persisted.length < declared.length)
     ) {
-      throw new Error("Persisted result does not match its canonical declared effect.");
+      throw new Error("Persisted outputs do not match canonical declared effects.");
+    }
+    for (const [index, effect] of declared.entries()) {
+      const output = persisted[index]!;
+      if (!operation.allowed_result_types.includes(effect.result_type)) {
+        throw new Error(
+          `Result type ${effect.result_type} is not allowed for ${command.operation_type}.`
+        );
+      }
+      if (
+        output.type !== effect.result_type ||
+        output.schema_version !== effect.schema_version ||
+        output.schema_ref !== effect.schema_ref ||
+        jsonDigest(output.subject) !== jsonDigest(effect.target) ||
+        jsonDigest(output.payload) !== jsonDigest(effect.payload)
+      ) {
+        throw new Error("Persisted output does not match its canonical declared effect.");
+      }
     }
   }
   const terminalStatus = command.terminal_status ?? "succeeded";
@@ -1525,8 +1536,8 @@ function validateAppendCommand(
         throw new Error("Persisted outputs require ordered produced edges from the action attempt.");
       }
     }
-  } else if (results.length > 0) {
-    throw new Error("Persisted results require an action attempt.");
+  } else if (effects.length > 0) {
+    throw new Error("Persisted outputs require an action attempt.");
   }
   if (approvals[0]) {
     const payload = ApprovalAttributionPayloadSchema.parse(approvals[0].payload);

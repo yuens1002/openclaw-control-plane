@@ -83,6 +83,43 @@ describe("principal-aware runtime service", () => {
     expect(repository.recordAuthorizationDecision).not.toHaveBeenCalled();
   });
 
+  it("preserves an artifact as a distinct typed output", async () => {
+    const repository = new FakeRepository();
+    const service = createService(repository);
+    const command = {
+      ...canonicalCommand(),
+      operation_type: "example.report.generate",
+      arguments: { content_ref: "artifact://example/report" },
+      declared_effects: [
+        {
+          kind: "artifact" as const,
+          result_type: "example.report",
+          schema_version: 1,
+          schema_ref: "example://schemas/report/v1",
+          target: target(),
+          payload: { content_ref: "artifact://example/report" }
+        }
+      ]
+    };
+    const input = allowedInput();
+    input.command_context.authorization.action = "state.reconcile";
+
+    await service.execute({ ...input, command, command_digest: commandDigest(command) });
+
+    const append = repository.appendCommand.mock.calls[0]![0];
+    expect(append.records[1]).toMatchObject({
+      kind: "artifact",
+      type: "example.report",
+      payload: { content_ref: "artifact://example/report" }
+    });
+    expect(append.edges).toContainEqual({
+      from_record_id: actionId,
+      relation: "produced",
+      to_record_id: resultId,
+      ordinal: 0
+    });
+  });
+
   it("rejects a digest that does not match the RFC8785 command", async () => {
     const repository = new FakeRepository();
     const service = createService(repository);

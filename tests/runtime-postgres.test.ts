@@ -726,6 +726,95 @@ describePostgres("PostgreSQL durable runtime repository", () => {
     await repository.synchronizeRegistry();
   });
 
+  it("persists idempotent typed intake, ordered provenance, and bounded pages", async () => {
+    const repository = new PostgresRuntimeRepository(pool, registry);
+    const context = trustedContext("allowed");
+    const event = {
+      record_id: ids.event,
+      kind: "event" as const,
+      type: "example.observation",
+      schema_version: 1,
+      schema_ref: "example://schemas/observation/v1",
+      subject: { type: "example.environment", id: "production" },
+      payload: { statement: "A typed observation." },
+      occurred_at: "2026-08-23T12:00:00.000Z"
+    };
+
+    const inserted = await repository.appendIntakeRecord({
+      stream_id: "intake-stream",
+      record: event,
+      command_context: context
+    });
+    const replayed = await repository.appendIntakeRecord({
+      stream_id: "intake-stream",
+      record: event,
+      command_context: context
+    });
+    await repository.appendIntakeRecord({
+      stream_id: "intake-stream",
+      record: {
+        record_id: ids.work,
+        kind: "work_item",
+        type: "example.state.reconcile",
+        schema_version: 1,
+        schema_ref: "example://schemas/state-reconcile/v1",
+        subject: { type: "example.environment", id: "production" },
+        payload: { requested_state: { ready: true } },
+        occurred_at: "2026-08-23T12:00:01.000Z"
+      },
+      source_refs: [{ kind: "event", id: ids.event }],
+      command_context: context
+    });
+    const firstPage = await repository.listRecords({ stream_id: "intake-stream", limit: 1 });
+    const secondPage = await repository.listRecords({
+      stream_id: "intake-stream",
+      after_sequence: firstPage.next_sequence!,
+      limit: 1
+    });
+
+    expect(inserted.status).toBe("inserted");
+    expect(replayed.status).toBe("replayed");
+    expect(firstPage.records.map((item) => item.record_id)).toEqual([ids.event]);
+    expect(firstPage.next_sequence).toBe(1);
+    expect(secondPage.records.map((item) => item.record_id)).toEqual([ids.work]);
+    expect(await repository.listEdges(ids.work)).toContainEqual({
+      from_record_id: ids.work,
+      relation: "derived_from",
+      to_record_id: ids.event,
+      ordinal: 0
+    });
+    await expect(
+      repository.appendIntakeRecord({
+        stream_id: "intake-stream",
+        record: { ...event, payload: { statement: "Changed content." } },
+        command_context: context
+      })
+    ).rejects.toBeInstanceOf(IdempotencyConflictError);
+  });
+
+  it("executes against an immutable pre-recorded approval", async () => {
+    const repository = new PostgresRuntimeRepository(pool, registry);
+    const command = lifecycleCommand("approval-command-stream", "approval-key-001");
+    const approval = command.records.find((item) => item.kind === "approval")!;
+    await repository.appendIntakeRecord({
+      stream_id: "approval-record-stream",
+      record: approval,
+      command_context: trustedApprovalContext()
+    });
+
+    const result = await repository.appendCommand({
+      ...command,
+      approval_record_id: ids.approval,
+      records: command.records.filter((item) => item.kind !== "approval")
+    });
+
+    expect(result.status).toBe("inserted");
+    expect(await repository.getRecord(ids.approval)).toMatchObject({
+      kind: "approval",
+      command_context: trustedApprovalContext()
+    });
+  });
+
   it("reports database, migration, and registry readiness independently", async () => {
     const readiness = await new PostgresRuntimeRepository(pool, registry).readiness();
     expect(readiness).toEqual({ database: "ready", migrations: "ready", registry: "ready" });

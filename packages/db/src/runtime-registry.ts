@@ -354,6 +354,23 @@ export const exampleOperationRegistrations: readonly RuntimeOperationRegistratio
     authorization_action: "state.reconcile",
     approval_required: true,
     status: "active"
+  },
+  {
+    operation_type: "example.report.generate",
+    command_schema_version: 1,
+    command_schema_ref: "example://schemas/report-command/v1",
+    command_schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["content_ref"],
+      properties: { content_ref: { type: "string", minLength: 1 } }
+    },
+    allowed_result_types: ["example.report"],
+    handler_id: "example-report-handler",
+    handler_version: 1,
+    authorization_action: "state.reconcile",
+    approval_required: false,
+    status: "active"
   }
 ] as const;
 
