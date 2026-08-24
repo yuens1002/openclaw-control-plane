@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { parseArgs, runCommand } from "@openclaw-control-plane/openclaw-railway-installer/cli";
@@ -71,5 +73,60 @@ describe("cli runCommand — real subprocess, no fake runner", () => {
     await expect(
       runCommand(process.execPath, ["-e", "process.stderr.write('boom'); process.exit(3);"])
     ).rejects.toThrow("failed with exit code 3: boom");
+  });
+});
+
+describe("marketplace-install path never reads Railway variables", () => {
+  // Gap G4's disposition (docs/live-instance-operations.md §7, narrowed
+  // rather than a shared guard) rests on this CLI's runCommand echoing
+  // stdout (see the test above) never being reachable from a call that
+  // reads a secret-bearing variable: railway-variables.ts's
+  // listRailwayVariables/readRailwayVariable are only ever routed through
+  // one of three non-echoing runners — client-cli.ts's, openclaw-setup-
+  // applier/src/cli.ts's, and onboarding-cycle-cli.ts's own runCommand
+  // (each pinned by its own real-spawn regression test: this file's
+  // sibling client-cli test, tests/openclaw-setup-applier-cli.test.ts, and
+  // tests/openclaw-setup-applier-onboarding-cycle-cli.test.ts respectively)
+  // — never through this file's own runCommand, which does echo. That was
+  // true when traced, but nothing previously made it observable if it
+  // stopped being true. A source-text check is a coarser signal than an
+  // import-graph check, but it fails loudly the day either file starts
+  // importing railway-variables.js directly, or starts importing
+  // provision-client.js/apply-profile.js — the modules that already call
+  // the reader functions, so wiring either of *those* in here would
+  // reintroduce the exposure without this file's own source ever
+  // mentioning "railway-variables" — which is exactly the moment this
+  // closed gap needs re-examining. Matches a `from "...name..."`
+  // specifier, a bare side-effect `import "...name..."`, or a dynamic
+  // `import("...name...")` — not a prose mention of a sibling module's
+  // filename in a doc comment, e.g. index.ts's waitForSetupReady comment,
+  // which legitimately references provision-client.ts as one of its
+  // callers without importing it.
+  //
+  // Known, accepted limitation: this is a source-text check, not an
+  // import-graph walk, so it cannot catch a *future* re-export of a reader
+  // under a name that doesn't contain any of the three substrings above.
+  // Checked against the repo as it stands today, not assumed: the one
+  // existing re-export (openclaw-setup-applier/src/railway-variables.ts's
+  // `export * from ".../railway-variables"`) is still caught, because its
+  // own import specifier contains "railway-variables". Building a real
+  // import-graph invariant for a hypothetical future re-export under an
+  // unrelated name was judged disproportionate to what this closure
+  // actually needs to pin.
+  // Quote char class includes a backtick: a dynamic `import(...)` accepts
+  // any expression, including a template-literal specifier with no
+  // interpolation (`import(\`./provision-client.js\`)`), which the
+  // original single/double-quote-only version missed.
+  const forbiddenImportPattern =
+    /(?:from\s+|import\s*\(\s*|import\s+)["'`][^"'`]*(?:railway-variables|provision-client|apply-profile)[^"'`]*["'`]/;
+
+  it("cli.ts never imports railway-variables.js, provision-client.js, or apply-profile.js", async () => {
+    const source = await readFile("packages/openclaw-railway-installer/src/cli.ts", "utf8");
+    expect(source).not.toMatch(forbiddenImportPattern);
+  });
+
+  it("index.ts never imports railway-variables.js, provision-client.js, or apply-profile.js", async () => {
+    const source = await readFile("packages/openclaw-railway-installer/src/index.ts", "utf8");
+    expect(source).not.toMatch(forbiddenImportPattern);
   });
 });

@@ -5,10 +5,13 @@
 // `skipDeploys: false`, which lets a variable write trigger a real
 // redeploy of a live service. The readers below are read tier but are
 // credential-bearing on the other axis: they return raw secret values.
-// These calls go through the injected runner directly and are therefore
-// NOT covered by the human-CLI guard's service-scoping and secret-echo
-// checks, which only wrap a direct human invocation -- a named follow-up,
-// not something this marker asserts away.
+// These calls go through the injected runner directly, not through
+// guard-cli.ts's checkGuard, which only wraps a direct human invocation.
+// That was gap G4 (issue #45); closed by narrowing rather than by
+// building a shared guard here -- both `service` being a required
+// parameter and the runner never echoing captured stdout already meet
+// this row's actual requirements. See docs/live-instance-operations.md
+// §7 for the full disposition.
 
 import type { RailwayRunner } from "./index.js";
 

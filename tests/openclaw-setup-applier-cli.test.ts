@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { parseArgs, requireEnv } from "@openclaw-control-plane/openclaw-setup-applier/cli";
+import { parseArgs, requireEnv, runCommand } from "@openclaw-control-plane/openclaw-setup-applier/cli";
 
 describe("setup-profile-applier CLI argument parsing", () => {
   it("parses required flags", () => {
@@ -67,6 +67,35 @@ describe("requireEnv", () => {
     } finally {
       restoreEnv(testVar, previous);
     }
+  });
+});
+
+describe("cli runCommand — real subprocess, no fake runner", () => {
+  // This is the runner applyProfile/dryRunApplyProfile actually spawn
+  // through when invoked directly from this CLI (as opposed to via
+  // onboarding-cycle-cli.ts's bootstrap/regression-check paths, which use
+  // their own separate runCommand, already pinned by
+  // tests/openclaw-setup-applier-onboarding-cycle-cli.test.ts). This CLI's
+  // own runCommand had no real-spawn coverage of any kind prior to this
+  // test, discovered during gap G4's disposition review
+  // (docs/live-instance-operations.md §7) when a review comment on that
+  // closure's "two runners are tested" claim turned out to name the wrong
+  // file for one of them.
+  it("never writes the spawned process's stdout to this process's own stdout, even though it's still captured for parsing", async () => {
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      const result = await runCommand(process.execPath, ["-e", "process.stdout.write('leaked-secret-value')"]);
+      expect(result.stdout).toBe("leaked-secret-value");
+      expect(writeSpy.mock.calls.map((call) => call[0]).join("")).not.toContain("leaked-secret-value");
+    } finally {
+      writeSpy.mockRestore();
+    }
+  });
+
+  it("rejects with the real captured stderr on a non-zero exit code", async () => {
+    await expect(
+      runCommand(process.execPath, ["-e", "process.stderr.write('boom'); process.exit(3);"])
+    ).rejects.toThrow("failed with exit code 3: boom");
   });
 });
 
