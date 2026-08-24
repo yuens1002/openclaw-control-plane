@@ -39,4 +39,3 @@ remain fail-closed until authenticated command-context wiring is delivered.
 - Missing or invalid database readiness prevents startup.
 - No unauthenticated operational write is enabled.
 - Production creation uses committed GitHub source, one initial replica, and post-deploy readiness verification.
-

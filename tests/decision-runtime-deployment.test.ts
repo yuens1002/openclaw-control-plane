@@ -8,9 +8,10 @@ const read = (path: string) => readFile(`${root}/${path}`, "utf8");
 
 describe("decision runtime deployment", () => {
   it("uses a dedicated compiled API image and health check", async () => {
-    const [dockerfile, config] = await Promise.all([
+    const [dockerfile, config, docs] = await Promise.all([
       read("deploy/decision-runtime/Dockerfile"),
-      read("deploy/decision-runtime/railway.toml")
+      read("deploy/decision-runtime/railway.toml"),
+      read("docs/decision-runtime-deployment.md")
     ]);
 
     expect(dockerfile).toContain('CMD ["node", "apps/api/dist/server.js"]');
@@ -19,6 +20,9 @@ describe("decision runtime deployment", () => {
     expect(config).toContain('dockerfilePath = "deploy/decision-runtime/Dockerfile"');
     expect(config).toContain('healthcheckPath = "/health"');
     expect(config).toContain('restartPolicyType = "on_failure"');
+    expect(config).toContain("/deploy/decision-runtime/railway.toml");
+    expect(docs).toContain("config-as-code file path to the absolute repository");
+    expect(docs).toContain("`/deploy/decision-runtime/railway.toml`");
   });
 
   it("keeps local secrets and generated files out of the Docker context", async () => {

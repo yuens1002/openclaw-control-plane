@@ -8,6 +8,9 @@ changing the OpenClaw image or exposing a public domain.
 
 - Build with `deploy/decision-runtime/Dockerfile` and
   `deploy/decision-runtime/railway.toml`.
+- Set the Railway service's config-as-code file path to the absolute repository
+  path `/deploy/decision-runtime/railway.toml`. Railway otherwise discovers the
+  root `railway.toml`, which belongs to the OpenClaw service.
 - Start with one replica. Startup migrations must finish before the process
   listens, so additional replicas require a separate migration strategy.
 - Set `DATABASE_URL` to the pooled connection used for normal runtime queries.
@@ -27,7 +30,9 @@ to bypass that boundary.
 
 ## Deploy and rollback
 
-Deploy only from a reviewed commit on the repository's default branch. Verify
+Create the service from the repository's default branch, select
+`/deploy/decision-runtime/railway.toml` as its config-as-code path, and keep it
+private with one replica. Deploy only from a reviewed commit. Verify
 the platform health check, startup logs, migration ledger, and runtime registry
 before directing any caller to the service.
 

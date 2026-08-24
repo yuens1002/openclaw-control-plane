@@ -9,7 +9,7 @@ Branch: `feat/decision-runtime-deployment`
 | Check | Evidence | Status |
 | --- | --- | --- |
 | PostgreSQL split-connection test | Restricted runtime role; direct migration role; restart persistence | pass |
-| Full regression suite | 36 files, 288 tests with PostgreSQL 16 | pass |
+| Full regression suite | 36 files, 289 tests with PostgreSQL 16 | pass |
 | Typecheck and build | `npm run typecheck`; `npm run build` | pass |
 | Docker image build and smoke | Compiled image; `/health` ready; valid `/events` request returns `503` | pass |
 | Public-boundary and secret-context audit | Generic docs; `.dockerignore`; root deployment diff empty | pass |
