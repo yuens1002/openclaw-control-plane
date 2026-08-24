@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -28,8 +28,8 @@ registered. Two anti-patterns would violate that:
   the system" instead of managing it, contradicting the existing runtime
   boundary).
 - Assuming any specific internal comm tool (Slack, Teams, email, ...) in
-  the control plane or shared docs. Different orgs — our own and each
-  client's — will reasonably standardize on different tools, and the
+  the control plane or shared docs. Different organizations will reasonably
+  standardize on different tools, and the
   client side is explicitly out of our control.
 
 A further distinction surfaced during design: internal human-facing
@@ -42,8 +42,8 @@ agent traffic into free-form chat that has to be parsed rather than a
 contract that can be validated, audited, and replayed.
 
 A second instance of the same identity question surfaced when scoping
-source-control access: a CoT (ours and, by the same assumption, each
-downstream agency's) needs read access to specific private repositories.
+source-control access: a CoT may need read access to selected private
+repositories owned by the organization it serves.
 The ownership question is identical to (1) — the control plane tracks the
 grant, not the CoT — but source-control access adds a sharper risk: the
 practical way to offer this is one provider-owned connector (e.g. a single
@@ -71,7 +71,7 @@ just account bookkeeping, becomes part of the decision.
    operates (per the existing "OpenClaw owns user interaction... and
    notifications" boundary). The control plane and shared/public tooling
    must not hardcode or assume a specific provider. Each deployed instance
-   — ours and each client's — configures the connector that fits its own
+   configures the connector that fits its own
    business model. Slack is one possible connector implementation, not a
    platform assumption.
 
@@ -95,7 +95,7 @@ just account bookkeeping, becomes part of the decision.
    provisioned per tenant at minimum necessary scope: a shared
    provider-owned connector (e.g. one GitHub App) is installed separately
    per organization — ours and each downstream agency's — with the
-   specific repositories selected by that organization during its own
+   specific repositories selected by the tenant during its own
    installation, never hardcoded by the control plane. Because a shared
    connector's signing credential can reach every tenant's installation,
    its custody matters as much as the record-keeping: least-privilege
@@ -136,57 +136,17 @@ just account bookkeeping, becomes part of the decision.
   supported default.** Rejected: contradicts the workflow-neutral baseline
   and excludes clients whose business model runs on a different tool.
 
-## Status Updates
+## Implementation Note
 
-### 2026-08-18 — Decision (4), source-control: App-based connector built, then reverted as premature
+The multi-tenant source-control design remains a provider-owned App installed
+separately at least privilege for each tenant, with short-lived tokens minted
+per use. The connector implementation was explored and later reverted in
+PR [#32](https://github.com/yuens1002/openclaw-control-plane/pull/32) because
+the public baseline has no mandatory source-control integration.
 
-Decision (4)'s App-based model — one provider-owned GitHub App installed
-separately per organization, short-lived per-use tokens minted from an
-App JWT, never a static secret handed to the CoT — was designed for a
-multi-tenant scenario: a provider and each downstream client org each
-needing their own scoped installation. A single-tenant deployment, with
-no client org yet needing its own scoped installation, doesn't need that
-model's full mint-and-refresh machinery to get equivalent protection —
-the tradeoff only pays for itself once a genuine multi-tenant need
-exists.
-
-Given that, decision (4)'s App-based model was built
-(`openclaw-control-plane` `packages/openclaw-source-control-connector`,
-PR [#32](https://github.com/yuens1002/openclaw-control-plane/pull/32) —
-`buildAppJwt` + `mintInstallationToken`, tested, documented, deliberately
-unwired) and then **reverted**, not carried forward: building and
-operating the App's mint-and-refresh pipeline (installation tokens expire
-in ≤1hr, requiring a recurring refresh job with no existing scheduling
-infrastructure to run it from) was disproportionate effort ahead of an
-actual multi-tenant need. Which credential mechanism the agency's own
-live instance runs day to day is operational detail this ADR doesn't
-track — see the 2026-08-22 update below.
-
-Decision (4)'s general principle — provider-owned App, least-privilege
-per-installation scope, short-lived minted tokens, no static secret
-handed to the CoT — **still stands** for a future scenario where a client
-actually has its own org/repos the CoT needs scoped access to. At that
-point, the reverted transport code and the research trail behind this
-decision (installation vs. PAT tradeoffs; OpenClaw's own native MCP
-support, confirmed live from `openclaw/openclaw` source, not assumed)
-are the starting point, not a from-scratch investigation — the full
-writeup lives in the relevant private client-profile repo's own issue
-tracker, not in this public repo. It's also plausible OpenClaw ships
-native GitHub App support upstream before that scenario ever arises,
-which would obsolete this control-plane package entirely rather than
-just revive it.
-
-### 2026-08-22 — Decision (4), source-control: this ADR doesn't track which mechanism any tenant currently runs
-
-The entry above named which credential mechanism this agency's live CoT
-instance used at the time. That was a scope mistake for an architecture
-doc: this ADR records the general pattern, not any tenant's current
-operational state, which changes independently of the architecture and
-belongs in each tenant's own private profile repo, not here.
-
-For the record, going forward: GitHub access for a CoT can be provisioned
-either way under decision (4)'s general principle — a PAT (simpler,
-adequate for a single low-risk credential) or a GitHub App installation
-(least-privilege, short-lived minted tokens, appropriate once a genuine
-multi-tenant need exists). Which one any given tenant runs, and why, is
-operational detail this ADR does not track.
+A single-tenant deployment may choose a narrower static credential as an
+explicit deployment-specific exception. That exception does not change the
+public multi-tenant boundary, create a platform default, or justify handing a
+cross-tenant signing credential directly to an agent. If the need returns, the
+public repository history and this ADR provide the durable rationale without
+depending on a particular live deployment.

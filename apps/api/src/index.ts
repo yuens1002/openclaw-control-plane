@@ -5,12 +5,19 @@ import type { MiddlewareHandler } from "hono";
 import {
   EventEnvelopeSchema,
   DomainSchema,
-  type PipelineState
+  type PipelineState,
+  type TrustedCommandContext
 } from "@openclaw-control-plane/contracts";
-import { InMemoryEventStore, type EventStore } from "@openclaw-control-plane/db";
+import {
+  InMemoryEventStore,
+  type EventStore,
+  type RuntimeReadiness
+} from "@openclaw-control-plane/db";
 
 export interface ControlPlaneDependencies {
   eventStore: EventStore;
+  readiness?: () => Promise<RuntimeReadiness>;
+  eventCommandContext?: () => TrustedCommandContext | Promise<TrustedCommandContext>;
 }
 
 export function createControlPlaneApp(
@@ -18,16 +25,26 @@ export function createControlPlaneApp(
 ) {
   const app = new Hono();
 
-  app.get("/health", (context) =>
-    context.json({
+  app.get("/health", async (context) => {
+    const readiness = dependencies.readiness
+      ? await dependencies.readiness()
+      : { database: "unavailable", migrations: "missing", registry: "invalid" } as const;
+    const ready =
+      readiness.database === "ready" &&
+      readiness.migrations === "ready" &&
+      readiness.registry === "ready";
+    return context.json({
       ok: true,
       service: "openclaw-control-plane-api",
-      database: "not_connected",
+      ready,
+      database: readiness.database,
+      migrations: readiness.migrations,
+      registry: readiness.registry,
       worker_registry: [],
       failed_runs: 0,
       stale_workers: []
-    })
-  );
+    });
+  });
 
   const operatorAuth = createOperatorAuthMiddleware();
   if (operatorAuth) {
@@ -61,7 +78,16 @@ export function createControlPlaneApp(
       });
     }
 
-    const insertResult = await dependencies.eventStore.insertEventIfNew(parsedEvent.data);
+    if (!dependencies.eventCommandContext) {
+      throw new HTTPException(503, {
+        message: "Authenticated event ingestion is not configured."
+      });
+    }
+    const commandContext = await dependencies.eventCommandContext();
+    const insertResult = await dependencies.eventStore.insertEventIfNew(
+      parsedEvent.data,
+      commandContext
+    );
 
     return context.json(
       {

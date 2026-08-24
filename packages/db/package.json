@@ -8,6 +8,8 @@
   },
   "dependencies": {
     "@openclaw-control-plane/contracts": "file:../contracts",
+    "ajv": "^8.20.0",
+    "canonicalize": "^2.1.0",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.13.1"
   },
