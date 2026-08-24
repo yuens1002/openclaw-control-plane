@@ -1,0 +1,10 @@
+# Select this file explicitly as /deploy/decision-runtime/railway.toml in the
+# decision-runtime service settings. The repository root config serves OpenClaw.
+[build]
+builder = "dockerfile"
+dockerfilePath = "deploy/decision-runtime/Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "on_failure"

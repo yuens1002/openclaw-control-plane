@@ -5,6 +5,10 @@ import { fileURLToPath } from "node:url";
 
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+  describePostgres,
+  postgresTestConnectionString as connectionString
+} from "./postgres-test-helpers.js";
 
 import {
   RuntimeKindSchema,
@@ -21,13 +25,10 @@ import {
   runSqlMigrations
 } from "@openclaw-control-plane/db";
 
-const connectionString = process.env.TEST_DATABASE_URL;
-const describePostgres = connectionString ? describe : describe.skip;
-
 describePostgres("M1 to durable runtime PostgreSQL migration", () => {
   const databaseName = `runtime_migration_${randomUUID().replaceAll("-", "")}`;
-  const adminPool = new Pool({ connectionString: connectionString! });
-  const databaseUrl = new URL(connectionString!);
+  const adminPool = new Pool({ connectionString });
+  const databaseUrl = new URL(connectionString);
   databaseUrl.pathname = `/${databaseName}`;
   const pool = new Pool({ connectionString: databaseUrl.toString() });
   const migrationsDirectory = dirname(

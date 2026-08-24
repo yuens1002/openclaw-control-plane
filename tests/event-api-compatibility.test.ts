@@ -45,7 +45,10 @@ describe("POST /events compatibility", () => {
       },
       getEventByIdempotencyKey: async () => null
     };
-    const app = createControlPlaneApp({ eventStore });
+    const app = createControlPlaneApp({
+      eventStore,
+      eventCommandContext: trustedEventContext
+    });
     const response = await app.request("/events", {
       method: "POST",
       headers: { "content-type": "application/json" },

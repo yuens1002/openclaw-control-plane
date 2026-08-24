@@ -4,12 +4,15 @@ import { createControlPlaneApp } from "./index.js";
 
 const port = Number(process.env.PORT ?? 8787);
 const databaseUrl = process.env.DATABASE_URL;
+const migrationDatabaseUrl = process.env.DATABASE_URL_UNPOOLED;
 
 if (!databaseUrl) {
   throw new Error("DATABASE_URL is required to start the production API server.");
 }
 
-const runtime = await initializePostgresRuntime(databaseUrl);
+const runtime = await initializePostgresRuntime(databaseUrl, {
+  ...(migrationDatabaseUrl ? { migrationDatabaseUrl } : {})
+});
 const app = createControlPlaneApp({
   eventStore: runtime.eventStore,
   readiness: runtime.readiness

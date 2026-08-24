@@ -24,12 +24,25 @@ export interface PostgresRuntime {
   close: () => Promise<void>;
 }
 
+export interface PostgresRuntimeOptions {
+  migrationsDirectory?: string;
+  migrationDatabaseUrl?: string;
+}
+
 export async function initializePostgresRuntime(
   databaseUrl: string,
-  migrationsDirectory = fileURLToPath(new URL("../migrations", import.meta.url))
+  options: PostgresRuntimeOptions = {}
 ): Promise<PostgresRuntime> {
   if (!databaseUrl.trim()) throw new Error("DATABASE_URL must not be empty.");
   const pool = new Pool({ connectionString: databaseUrl });
+  const migrationDatabaseUrl = options.migrationDatabaseUrl?.trim();
+  const migrationPool =
+    migrationDatabaseUrl && migrationDatabaseUrl !== databaseUrl
+      ? new Pool({ connectionString: migrationDatabaseUrl })
+      : pool;
+  const migrationsDirectory =
+    options.migrationsDirectory ??
+    fileURLToPath(new URL("../migrations", import.meta.url));
   const registry = new RuntimeTypeRegistry(
     [...runtimeTypeRegistrations, ...legacyTypeRegistrations, ...exampleTypeRegistrations],
     [...legacyOperationRegistrations, ...exampleOperationRegistrations]
@@ -37,7 +50,8 @@ export async function initializePostgresRuntime(
   const repository = new PostgresRuntimeRepository(pool, registry);
 
   try {
-    await runSqlMigrations(pool, migrationsDirectory);
+    await runSqlMigrations(migrationPool, migrationsDirectory);
+    if (migrationPool !== pool) await migrationPool.end();
     await repository.synchronizeRegistry();
     const readiness = await repository.readiness();
     if (
@@ -48,6 +62,7 @@ export async function initializePostgresRuntime(
       throw new Error(`Runtime startup readiness failed: ${JSON.stringify(readiness)}`);
     }
   } catch (error) {
+    if (migrationPool !== pool) await migrationPool.end().catch(() => undefined);
     await pool.end();
     throw error;
   }
