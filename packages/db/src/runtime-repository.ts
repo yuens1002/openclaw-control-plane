@@ -1237,21 +1237,77 @@ function validateAppendCommand(
   if (!operation.approval_required && approvalContext) {
     throw new Error(`Operation ${command.operation_type} does not accept approver context.`);
   }
-  const action = command.records.find((record) => record.kind === "action_attempt");
+  const actions = command.records.filter((record) => record.kind === "action_attempt");
+  if (actions.length > 1) {
+    throw new Error("An append command accepts at most one action attempt.");
+  }
+  const action = actions[0];
+  const results = command.records.filter((record) => record.kind === "result");
+  if (results.length !== canonicalCommand.declared_effects.length) {
+    throw new Error("Persisted results must match canonical declared effects one-to-one.");
+  }
+  for (const [index, effect] of canonicalCommand.declared_effects.entries()) {
+    const result = results[index]!;
+    if (!operation.allowed_result_types.includes(effect.result_type)) {
+      throw new Error(
+        `Result type ${effect.result_type} is not allowed for ${command.operation_type}.`
+      );
+    }
+    if (
+      result.type !== effect.result_type ||
+      result.schema_version !== effect.schema_version ||
+      result.schema_ref !== effect.schema_ref ||
+      jsonDigest(result.subject) !== jsonDigest(effect.target) ||
+      jsonDigest(result.payload) !== jsonDigest(effect.payload)
+    ) {
+      throw new Error("Persisted result does not match its canonical declared effect.");
+    }
+  }
+  const terminalStatus = command.terminal_status ?? "succeeded";
   if (action) {
     const payload = ActionAttributionPayloadSchema.parse(action.payload);
     if (
       payload.operation_type !== command.operation_type ||
-      payload.command_digest !== command.command_digest
+      payload.command_digest !== command.command_digest ||
+      payload.work_item_id !== canonicalCommand.work_item_id ||
+      jsonDigest(payload.subject) !== jsonDigest(canonicalCommand.target) ||
+      payload.handler_id !== operation.handler_id ||
+      payload.handler_version !== operation.handler_version ||
+      payload.canonicalization_version !== canonicalCommand.canonicalization_version ||
+      (payload.outcome === "succeeded" ? "succeeded" : "failed") !== terminalStatus
     ) {
       throw new Error("Action attribution does not match its command identity.");
     }
+    const outputs = command.records.filter(
+      (record) => record.kind === "result" || record.kind === "artifact"
+    );
+    const outputRefs = outputs.map((record) => ({ kind: record.kind, id: record.record_id }));
+    if (jsonDigest(payload.result_refs) !== jsonDigest(outputRefs)) {
+      throw new Error("Action result references do not match persisted outputs.");
+    }
+    for (const [ordinal, output] of outputs.entries()) {
+      if (
+        !(command.edges ?? []).some(
+          (edge) =>
+            edge.relation === "produced" &&
+            edge.from_record_id === action.record_id &&
+            edge.to_record_id === output.record_id &&
+            edge.ordinal === ordinal
+        )
+      ) {
+        throw new Error("Persisted outputs require ordered produced edges from the action attempt.");
+      }
+    }
+  } else if (results.length > 0) {
+    throw new Error("Persisted results require an action attempt.");
   }
   if (approvals[0]) {
     const payload = ApprovalAttributionPayloadSchema.parse(approvals[0].payload);
     if (
       payload.operation_type !== command.operation_type ||
       payload.command_digest !== command.command_digest ||
+      payload.work_item_id !== canonicalCommand.work_item_id ||
+      payload.action_revision !== canonicalCommand.action_revision ||
       payload.decision !== "approved" ||
       payload.approver_authorization.result !== "allowed" ||
       payload.approver_authorization.action !== "runtime.command.approve"
@@ -1276,6 +1332,17 @@ function validateAppendCommand(
       )
     ) {
       throw new Error("Approved commands require an approved_by edge from the action attempt.");
+    }
+  }
+  for (const audit of command.records.filter(
+    (record) => record.kind === "audit_entry" && record.type === "runtime.operation.audit"
+  )) {
+    const payload = OperationAuditPayloadSchema.parse(audit.payload);
+    if (
+      (payload.outcome === "succeeded" ? "succeeded" : "failed") !== terminalStatus ||
+      (action && payload.outcome !== ActionAttributionPayloadSchema.parse(action.payload).outcome)
+    ) {
+      throw new Error("Operation audit outcome does not match the action and terminal status.");
     }
   }
 }

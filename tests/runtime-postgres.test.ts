@@ -511,6 +511,89 @@ describePostgres("PostgreSQL durable runtime repository", () => {
       /canonical command envelope/i
     );
 
+    const alteredEffectPayload = lifecycleCommand(
+      "altered-effect-payload-stream",
+      "altered-effect-payload-key-001"
+    );
+    alteredEffectPayload.records = alteredEffectPayload.records.map((record) =>
+      record.kind === "result" ? { ...record, payload: { changed: false } } : record
+    );
+    await expect(repository.appendCommand(alteredEffectPayload)).rejects.toThrow(
+      /canonical declared effect/i
+    );
+
+    const alteredEffectTarget = lifecycleCommand(
+      "altered-effect-target-stream",
+      "altered-effect-target-key-001"
+    );
+    alteredEffectTarget.records = alteredEffectTarget.records.map((record) =>
+      record.kind === "result"
+        ? { ...record, subject: { type: "example.environment", id: "staging" } }
+        : record
+    );
+    await expect(repository.appendCommand(alteredEffectTarget)).rejects.toThrow(
+      /canonical declared effect/i
+    );
+
+    const alteredEffectType = lifecycleCommand(
+      "altered-effect-type-stream",
+      "altered-effect-type-key-001"
+    );
+    alteredEffectType.records = alteredEffectType.records.map((record) =>
+      record.kind === "result" ? { ...record, type: "example.report" } : record
+    );
+    await expect(repository.appendCommand(alteredEffectType)).rejects.toThrow();
+
+    for (const [name, mutate] of [
+      ["work-item", (payload: Record<string, unknown>) => ({ ...payload, work_item_id: randomUUID() })],
+      ["handler", (payload: Record<string, unknown>) => ({ ...payload, handler_id: "other-handler" })],
+      ["outcome", (payload: Record<string, unknown>) => ({ ...payload, outcome: "failed" })]
+    ] as const) {
+      const alteredAction = lifecycleCommand(
+        `altered-action-${name}-stream`,
+        `altered-action-${name}-key-001`
+      );
+      alteredAction.records = alteredAction.records.map((record) =>
+        record.kind === "action_attempt"
+          ? { ...record, payload: mutate(record.payload) }
+          : record
+      );
+      await expect(repository.appendCommand(alteredAction)).rejects.toThrow(
+        /action attribution/i
+      );
+    }
+
+    for (const [name, mutate] of [
+      ["work-item", (payload: Record<string, unknown>) => ({ ...payload, work_item_id: randomUUID() })],
+      ["revision", (payload: Record<string, unknown>) => ({ ...payload, action_revision: 2 })]
+    ] as const) {
+      const alteredApproval = lifecycleCommand(
+        `altered-approval-${name}-stream`,
+        `altered-approval-${name}-key-001`
+      );
+      alteredApproval.records = alteredApproval.records.map((record) =>
+        record.kind === "approval"
+          ? { ...record, payload: mutate(record.payload) }
+          : record
+      );
+      await expect(repository.appendCommand(alteredApproval)).rejects.toThrow(
+        /approval record/i
+      );
+    }
+
+    const alteredAudit = lifecycleCommand(
+      "altered-audit-outcome-stream",
+      "altered-audit-outcome-key-001"
+    );
+    alteredAudit.records = alteredAudit.records.map((record) =>
+      record.type === "runtime.operation.audit"
+        ? { ...record, payload: { outcome: "failed" } }
+        : record
+    );
+    await expect(repository.appendCommand(alteredAudit)).rejects.toThrow(
+      /audit outcome/i
+    );
+
     const invalidProducer = singleEventCommand(
       "producer-stream",
       "producer-key-001",
@@ -535,7 +618,9 @@ describePostgres("PostgreSQL durable runtime repository", () => {
       to_record_id: invalidProducer.records[1]!.record_id,
       ordinal: 0
     }];
-    await expect(repository.appendCommand(invalidProducer)).rejects.toThrow(/action attempt/i);
+    await expect(repository.appendCommand(invalidProducer)).rejects.toThrow(
+      /canonical declared effects|action attempt/i
+    );
   });
 
   it("persists retirement while preserving historical replay and failing missing-schema replay", async () => {
