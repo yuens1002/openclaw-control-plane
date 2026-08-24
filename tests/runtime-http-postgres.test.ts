@@ -109,8 +109,11 @@ describePostgres("authenticated runtime HTTP PostgreSQL conformance", () => {
       `/v1/runtime/records/${insertedBody.operation_record_id}`,
       { headers }
     );
-    const recordBody = await recordResponse.json() as { record: { payload: Record<string, unknown> } };
+    const recordBody = await recordResponse.json() as {
+      record: { payload: Record<string, unknown>; command_context: { request_origin: string } };
+    };
     expect(recordBody.record.payload).toMatchObject({ tool_invocation_id: "tool-http-1" });
+    expect(recordBody.record.command_context.request_origin).toBe("tool");
     expect((await app.request(
       `/v1/runtime/records/${insertedBody.operation_record_id}/edges`,
       { headers }

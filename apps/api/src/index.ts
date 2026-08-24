@@ -222,6 +222,9 @@ export function createControlPlaneApp(
       request.operation_type,
       request.operation_schema_version
     );
+    const toolInvocationId = context.req.header("x-tool-invocation-id")
+      ? SafeLocalIdentifierSchema.parse(context.req.header("x-tool-invocation-id"))
+      : undefined;
     const trusted = await authorizeRequest(context, dependencies, {
       action: operation.authorization_action,
       resource: request.target,
@@ -229,15 +232,14 @@ export function createControlPlaneApp(
       operation: {
         type: request.operation_type,
         version: request.operation_schema_version
-      }
+      },
+      requestOrigin: toolInvocationId ? "tool" : "http"
     });
     const result = await runtime.executeCommand(
       request,
       trusted,
       context.get("requestId"),
-      context.req.header("x-tool-invocation-id")
-        ? SafeLocalIdentifierSchema.parse(context.req.header("x-tool-invocation-id"))
-        : undefined
+      toolInvocationId
     );
     return context.json(result, result.status === "inserted" ? 202 : 200);
   });
@@ -499,6 +501,7 @@ async function authorizeRequest(
     resource: { type: string; id: string };
     streamId: string;
     operation?: { type: string; version: number };
+    requestOrigin?: TrustedCommandContext["request_origin"];
   }
 ): Promise<TrustedCommandContext> {
   if (!dependencies.authenticator || !dependencies.trustedContextCoordinator) {
@@ -520,7 +523,7 @@ async function authorizeRequest(
     ...(onBehalfOf ? { on_behalf_of_principal_id: onBehalfOf } : {}),
     action: request.action,
     resource: request.resource,
-    request_origin: "http"
+    request_origin: request.requestOrigin ?? "http"
   });
   if (trusted.authorization.result === "denied") {
     const runtime = requireRuntimeApi(dependencies);
