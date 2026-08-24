@@ -2,7 +2,7 @@
 
 Issue: https://github.com/yuens1002/openclaw-control-plane/issues/39
 Branch: `feat/authenticated-typed-work-api`
-Status: proposed for plan review; implementation has not started
+Status: implemented and independently verified; pending human review and PR publication
 
 ## Delivery Process
 
