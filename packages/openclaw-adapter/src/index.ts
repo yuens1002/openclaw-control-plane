@@ -1,14 +1,62 @@
-import type { Domain, EventEnvelope, PipelineState } from "@openclaw-control-plane/contracts";
+import type {
+  Domain,
+  EventEnvelope,
+  PipelineState,
+  RuntimeApprovalRequest,
+  RuntimeCommandRequest,
+  RuntimeIntakeRequest
+} from "@openclaw-control-plane/contracts";
 
 export interface OpenClawAdapterOptions {
   baseUrl: string;
   fetchImpl?: typeof fetch;
+  tokenProvider?: () => string | Promise<string>;
 }
 
 export function createOpenClawControlPlaneTools(options: OpenClawAdapterOptions) {
   const callApi = createApiCaller(options);
 
   return {
+    list_runtime_registrations: () =>
+      callApi<{ types: unknown[]; operations: unknown[] }>("/v1/runtime/registrations", {
+        method: "GET"
+      }),
+    create_runtime_event: (input: Omit<RuntimeIntakeRequest, "kind">) =>
+      callApi("/v1/runtime/events", { method: "POST", body: input }),
+    create_runtime_work_item: (input: Omit<RuntimeIntakeRequest, "kind">) =>
+      callApi("/v1/runtime/work-items", { method: "POST", body: input }),
+    create_runtime_approval: (input: RuntimeApprovalRequest) =>
+      callApi<{ approval_id: string; command_digest: string }>("/v1/runtime/approvals", {
+        method: "POST",
+        body: input
+      }),
+    execute_runtime_command: (input: RuntimeCommandRequest) =>
+      callApi("/v1/runtime/commands", { method: "POST", body: input }),
+    get_runtime_record: (recordId: string) =>
+      callApi(`/v1/runtime/records/${encodeURIComponent(recordId)}`, { method: "GET" }),
+    get_runtime_edges: (recordId: string) =>
+      callApi(`/v1/runtime/records/${encodeURIComponent(recordId)}/edges`, { method: "GET" }),
+    list_runtime_stream_records: (
+      streamId: string,
+      query: { kind?: string; type?: string; after_sequence?: number; limit?: number } = {}
+    ) =>
+      callApi(
+        `/v1/runtime/streams/${encodeURIComponent(streamId)}/records${queryString(query)}`,
+        { method: "GET" }
+      ),
+    list_runtime_audit: (query: { after_sequence?: number; limit?: number } = {}) =>
+      callApi(`/v1/runtime/audit${queryString(query)}`, { method: "GET" }),
+    get_runtime_projection: (
+      projectionType: string,
+      subjectType: string,
+      subjectId: string,
+      streamId: string,
+      projectionVersion: number
+    ) =>
+      callApi(
+        `/v1/runtime/projections/${encodeURIComponent(projectionType)}/${encodeURIComponent(subjectType)}/${encodeURIComponent(subjectId)}?stream_id=${encodeURIComponent(streamId)}&projection_version=${projectionVersion}`,
+        { method: "GET" }
+      ),
     list_pipelines: () =>
       callApi<{
         pipelines: Array<{
@@ -92,10 +140,16 @@ function createApiCaller(options: OpenClawAdapterOptions) {
     path: string,
     request: { method: "GET" | "POST"; body?: unknown }
   ): Promise<TResponse> {
-    const requestInit: RequestInit = { method: request.method };
+    const headers: Record<string, string> = {};
+    if (options.tokenProvider) {
+      const token = await options.tokenProvider();
+      if (!token.trim()) throw new Error("Control plane token provider returned an empty token.");
+      headers.authorization = `Bearer ${token}`;
+    }
+    const requestInit: RequestInit = { method: request.method, headers };
 
     if (request.body) {
-      requestInit.headers = { "content-type": "application/json" };
+      headers["content-type"] = "application/json";
       requestInit.body = JSON.stringify(request.body);
     }
 
@@ -107,4 +161,13 @@ function createApiCaller(options: OpenClawAdapterOptions) {
 
     return (await response.json()) as TResponse;
   };
+}
+
+function queryString(values: Record<string, string | number | undefined>): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(values)) {
+    if (value !== undefined) query.set(key, String(value));
+  }
+  const encoded = query.toString();
+  return encoded ? `?${encoded}` : "";
 }
