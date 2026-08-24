@@ -153,7 +153,7 @@ describe("OIDC authentication", () => {
       }))
     };
     const authenticator = new OidcAuthenticator(config, {
-      remoteJwks: { cooldownDuration: 20, cacheMaxAge: 60_000, timeoutDuration: 1_000 }
+      remoteJwks: { cooldownDuration: 1_000, cacheMaxAge: 60_000, timeoutDuration: 1_000 }
     });
 
     try {
@@ -175,7 +175,7 @@ describe("OIDC authentication", () => {
         )
       ).rejects.toBeInstanceOf(AuthenticationError);
       expect(fetches).toBe(fetchesDuringCooldown);
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      await new Promise((resolve) => setTimeout(resolve, 1_025));
       await expect(
         authenticator.authenticateBearer(
           `Bearer ${await token(rotatedPrivateKey, "key-2", {}, { issuer })}`
