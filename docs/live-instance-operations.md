@@ -458,8 +458,8 @@ argument, so a second interactive prompt would only break
 non-interactive callers without adding a real check. This closes the
 *write* half only -- the service-scoping invariant remains prose (G6).
 
-**G3 — the workspace-file-import function does an unconditional POST
-with no pre-read comparison.** `import-workspace-files.ts`'s
+**G3 — trigger enforcement: CLOSED. Pre-read comparison itself: still
+deferred, as designed.** `import-workspace-files.ts`'s
 `importWorkspaceFiles` POSTs the archive every call. Per the upstream
 note in that module's header (second-hand in this repo, recorded from
 the upstream wrapper's source rather than verified here, and not
@@ -467,20 +467,23 @@ re-confirmed against that source by this document), the server side
 extracts into the data directory
 without deleting existing files first, so the operation overwrites
 per-file rather than wiping — but nothing compares before writing.
-Currently unwired from both provisioning paths, though built and
-exported. *Recommended fix:* add a pre-read comparison before this is
-ever wired into a provisioning path. Low urgency while it has no
-production callers; not low urgency the day it gains one.
+Still unwired from both provisioning paths, still built and exported.
+*Recommended fix, not built here:* add a pre-read comparison before
+this is ever wired into a provisioning path. Low urgency while it has
+no production callers; not low urgency the day it gains one.
 
-*But nothing enforces that trigger.* "Fix it when it gains a caller"
-currently depends on whoever wires it up having read this register
-first, which is precisely the kind of precondition that gets missed --
-the deferral is sound and its enforcement is imaginary. Cheap remedy:
-a test asserting this function has no production callers. The day
-someone wires it in, that test fails and points here, converting a
-hope into a tripwire for roughly ten lines. Same shape as the
-mutation-check discipline: make the absence of a thing observable
-rather than assumed.
+*That deferral's trigger is now enforced, not just documented.*
+"Fix it when it gains a caller" previously depended on whoever wired
+it up having read this register first, which is precisely the kind of
+precondition that gets missed. `tests/openclaw-railway-import-workspace-
+files.test.ts`'s "importWorkspaceFiles has no production callers" suite
+source-scans every file under `apps/*/src`, `packages/*/src`, and
+`workers/*/src` for an import specifier naming `import-workspace-files`
+and fails if one appears — same source-text-scan shape as the G4
+closure's equivalent check, with the same known limitation (it cannot
+catch a future re-export under an unrelated name). The day someone
+wires this module into a provisioning path, that test fails and points
+here instead of shipping the still-missing pre-read comparison silently.
 
 **G4 — CLOSED (narrowed), 2026-08-23.** Filed as issue #45 as
 "programmatic Railway variable calls bypass the human-CLI guard":
