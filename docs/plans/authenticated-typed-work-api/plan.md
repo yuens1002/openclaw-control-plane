@@ -19,7 +19,11 @@ authorization boundary, and reach bounded typed commands and queries using only
 server-derived trusted context. The existing production target gains identity
 and JWKS readiness, smoke, backup/restore, and rollback evidence.
 
-## Current State
+## Pre-Implementation Baseline
+
+The following observations describe the repository at planning time, before the
+issue #39 implementation commits. They are retained as decision context, not as
+claims about the implemented branch.
 
 - ADR 0002 and issue #38 provide the typed registry, PostgreSQL repository,
   principal-aware command service, provenance, idempotency, approvals,

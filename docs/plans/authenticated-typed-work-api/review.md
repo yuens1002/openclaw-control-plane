@@ -4,6 +4,7 @@ Issue: https://github.com/yuens1002/openclaw-control-plane/issues/39
 Branch: `feat/authenticated-typed-work-api`
 Status: ready for human review
 Reviewed implementation SHA: `a0f7a793ca88962477665a97fd335f467defac43`
+Initial evidence-record SHA: `8304c36ac5acb3d6889daa806b43d7b1b4ad671c`
 
 ## Review Scope
 
@@ -26,13 +27,24 @@ changed. Human Reviewer evidence remains pending.
 | Check | Evidence | Status |
 | --- | --- | --- |
 | Plan and AC coverage | D1-D11 map to 30 AC rows; anti-drift language audit passed | pass |
-| Authentication and security fixtures | Config, JWT/JWKS, identity, RBAC, delegation, spoof, denial, HTTPS, and cache-bound fixtures passed; independent security verdict clean | pass |
+| Authentication and security fixtures | Config, JWT/JWKS, identity, RBAC, delegation, spoof, denial, HTTPS, and cache-bound fixtures passed; the independent security QC record below found no blocker | pass |
 | API and tool conformance | Every route covers missing/invalid/allowed/denied credentials; typed input/output, approval mutation, idempotency, artifact attribution, and tool-origin checks passed | pass |
 | PostgreSQL integration and recovery | PostgreSQL suites passed; source/restored counts matched `4/4/1/1/1/16`; projection rebuilt to `{changed:true}` | pass |
 | Full regression, typecheck, and build | `360/360` tests, `npm run typecheck`, `npm run build`, and `git diff --check` passed | pass |
-| Container build and production smoke | API production image and worker image built; TLS-JWKS production smoke, restart, replay, recovery, and degraded readiness passed | pass |
+| Container build and production smoke | API production image and worker image built against the final evidence head; TLS-JWKS production smoke, restart, replay, recovery, and degraded readiness passed | pass |
 | Dependency and public-boundary audit | `npm audit --omit=dev` reported zero vulnerabilities; generic-language grep found no private consumer references | pass |
-| Independent exact-head review | Behavioral auditor found no blockers; security reviewer issued a clean verdict on `a0f7a79` | pass |
+| Independent exact-head review | Behavioral and security QC records below found no blockers on `a0f7a79`; the docs-only final head received a separate evidence-consistency review | pass |
+
+## Independent QC Records
+
+These records make the session-scoped independent reviews durable. They are not
+a substitute for the pending human review.
+
+| Review | Scope | Reviewed SHA | Result |
+| --- | --- | --- | --- |
+| Security QC | Authentication, authorization, delegation, trusted context, denial behavior, JWKS/TLS handling, readiness, deployment profile, and security tests | `a0f7a793ca88962477665a97fd335f467defac43` | No blocker; clean security verdict |
+| Behavioral and AC QC | Runtime behavior, HTTP/tool contracts, PostgreSQL persistence, approvals, provenance, registration lifecycle, test coverage, and all behavioral ACs | `a0f7a793ca88962477665a97fd335f467defac43` | No blocker; all behavioral ACs confirmed |
+| Evidence consistency QC | Plan status, 30-row AC ledger, executed evidence, residual risks, and stale-placeholder audit | `8304c36ac5acb3d6889daa806b43d7b1b4ad671c` | Initial review found three documentation blockers; corrections are recorded in the next docs-only commit and require final re-review |
 
 ## Residual Risks
 
