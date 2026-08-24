@@ -36,9 +36,11 @@ request ID, digest, and timestamps. Request bodies containing trust fields are
 rejected by strict schemas. Denied requests are written through the bounded
 runtime denial-audit operation and cannot create work or effects.
 Authentication runs before typed-runtime request-body parsing. Bodies are
-limited to 256 KiB, and persisted denials are capped at 120 per principal per
-process per minute. Multi-replica deployments may enforce a stricter shared
-limit at their private ingress.
+limited to 256 KiB. Before creating a policy decision, the reference API caps
+authorization evaluations at 120 per principal per process per minute. This
+bounds denial persistence without creating unaudited denial decisions.
+Multi-replica deployments may enforce a stricter shared limit at their private
+ingress.
 
 The API exposes registered event/work-item intake, immutable command approvals,
 command execution, registrations, records, stream pages, provenance edges,

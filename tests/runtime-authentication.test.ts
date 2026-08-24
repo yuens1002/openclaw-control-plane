@@ -124,9 +124,13 @@ describe("OIDC authentication", () => {
     const incompatible = await checkIdentityReadiness(exampleRuntimeAuthConfiguration, async () =>
       Response.json({ keys: [{ kid: "key-1", kty: "EC", alg: "ES256" }] })
     );
+    const metadataOnly = await checkIdentityReadiness(exampleRuntimeAuthConfiguration, async () =>
+      Response.json({ keys: [{ kid: "key-1", kty: "RSA", alg: "RS256" }] })
+    );
 
     expect(duplicate.jwks).toBe("unavailable");
     expect(incompatible.jwks).toBe("unavailable");
+    expect(metadataOnly.jwks).toBe("unavailable");
   });
 });
 

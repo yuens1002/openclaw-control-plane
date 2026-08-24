@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { importJWK, type JWK } from "jose";
 
 import type { IssuerConfiguration, RuntimeAuthConfiguration } from "./config.js";
 
@@ -42,17 +43,27 @@ async function checkIssuer(issuer: IssuerConfiguration, fetchImpl: typeof fetch)
     if (!document.success) return false;
     const keyIds = document.data.keys.map((key) => key.kid);
     if (new Set(keyIds).size !== keyIds.length) return false;
-    return document.data.keys.some(
-      (key) =>
-        key.use !== "enc" &&
-        issuer.allowed_algorithms.some(
+    const checks = document.data.keys.flatMap((key) =>
+      issuer.allowed_algorithms
+        .filter(
           (algorithm) =>
+            key.use !== "enc" &&
+            !Object.hasOwn(key, "d") &&
             (!key.alg || key.alg === algorithm) &&
             ((algorithm.startsWith("RS") && key.kty === "RSA") ||
               (algorithm.startsWith("ES") && key.kty === "EC") ||
               (algorithm === "EdDSA" && key.kty === "OKP"))
         )
+        .map(async (algorithm) => {
+          try {
+            await importJWK(key as JWK, algorithm);
+            return true;
+          } catch {
+            return false;
+          }
+        })
     );
+    return (await Promise.all(checks)).some(Boolean);
   } catch {
     return false;
   }

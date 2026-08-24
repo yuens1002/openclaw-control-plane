@@ -500,6 +500,9 @@ async function authorizeRequest(
   }
   const authenticated = context.get("authenticatedPrincipal") ??
     await dependencies.authenticator.authenticateBearer(context.req.header("authorization"));
+  if (!authorizationLimiter.consume(authenticated.principal.principal_id)) {
+    throw new HTTPException(429, { message: "Authorization request rate limit exceeded." });
+  }
   const onBehalfOf = context.req.header("x-on-behalf-of-principal");
   if (onBehalfOf && !/^principal:\/\/[A-Za-z0-9][A-Za-z0-9._:@/-]*$/.test(onBehalfOf)) {
     throw new z.ZodError([
@@ -514,9 +517,6 @@ async function authorizeRequest(
     request_origin: "http"
   });
   if (trusted.authorization.result === "denied") {
-    if (!denialLimiter.consume(authenticated.principal.principal_id)) {
-      throw new HTTPException(429, { message: "Authorization denial rate limit exceeded." });
-    }
     const runtime = requireRuntimeApi(dependencies);
     if (request.operation) {
       await runtime.recordCommandDenial({
@@ -564,7 +564,7 @@ function errorEnvelope(code: string, message: string, requestId: string) {
   return { error: { code, message, request_id: requestId } };
 }
 
-class DenialRateLimiter {
+class AuthorizationRateLimiter {
   private readonly windows = new Map<string, { startedAt: number; count: number }>();
 
   consume(principalId: string, now = Date.now()): boolean {
@@ -579,6 +579,6 @@ class DenialRateLimiter {
   }
 }
 
-const denialLimiter = new DenialRateLimiter();
+const authorizationLimiter = new AuthorizationRateLimiter();
 
 export type ControlPlaneApp = ReturnType<typeof createControlPlaneApp>;
