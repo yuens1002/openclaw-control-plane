@@ -113,8 +113,12 @@ describe("marketplace-install path never reads Railway variables", () => {
   // import-graph invariant for a hypothetical future re-export under an
   // unrelated name was judged disproportionate to what this closure
   // actually needs to pin.
+  // Quote char class includes a backtick: a dynamic `import(...)` accepts
+  // any expression, including a template-literal specifier with no
+  // interpolation (`import(\`./provision-client.js\`)`), which the
+  // original single/double-quote-only version missed.
   const forbiddenImportPattern =
-    /(?:from\s+|import\s*\(\s*|import\s+)["'][^"']*(?:railway-variables|provision-client|apply-profile)[^"']*["']/;
+    /(?:from\s+|import\s*\(\s*|import\s+)["'`][^"'`]*(?:railway-variables|provision-client|apply-profile)[^"'`]*["'`]/;
 
   it("cli.ts never imports railway-variables.js, provision-client.js, or apply-profile.js", async () => {
     const source = await readFile("packages/openclaw-railway-installer/src/cli.ts", "utf8");
