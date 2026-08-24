@@ -74,6 +74,21 @@ describe("OIDC authentication", () => {
     });
   });
 
+  it("rejects tokens without required expiry and issued-at claims", async () => {
+    const authenticator = createAuthenticator(() => [publicJwk]);
+    const missingExpiry = await new SignJWT({})
+      .setProtectedHeader({ alg: "RS256", kid: "key-1" })
+      .setIssuer("https://issuer.example")
+      .setSubject("example-service")
+      .setAudience("control-plane")
+      .setIssuedAt()
+      .sign(privateKey);
+
+    await expect(
+      authenticator.authenticateBearer(`Bearer ${missingExpiry}`)
+    ).rejects.toBeInstanceOf(AuthenticationError);
+  });
+
   it("accepts a new key and rejects the retired key after a deterministic refresh", async () => {
     let keys = [publicJwk];
     const authenticator = createAuthenticator(() => keys);
@@ -100,6 +115,18 @@ describe("OIDC authentication", () => {
 
     expect(ready).toEqual({ identity: "ready", jwks: "ready" });
     expect(unavailable).toEqual({ identity: "ready", jwks: "unavailable" });
+  });
+
+  it("reports JWKS with duplicate or incompatible keys as unavailable", async () => {
+    const duplicate = await checkIdentityReadiness(exampleRuntimeAuthConfiguration, async () =>
+      Response.json({ keys: [publicJwk, publicJwk] })
+    );
+    const incompatible = await checkIdentityReadiness(exampleRuntimeAuthConfiguration, async () =>
+      Response.json({ keys: [{ kid: "key-1", kty: "EC", alg: "ES256" }] })
+    );
+
+    expect(duplicate.jwks).toBe("unavailable");
+    expect(incompatible.jwks).toBe("unavailable");
   });
 });
 

@@ -1,4 +1,6 @@
+import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 
 import {
   ApprovalAttributionPayloadSchema,
@@ -16,8 +18,7 @@ import {
 import { commandDigest } from "./canonical-command.js";
 import type {
   PostgresRuntimeRepository,
-  RuntimeAccessDenialInput,
-  RuntimeRecordPage
+  RuntimeAccessDenialInput
 } from "./runtime-repository.js";
 import { RuntimeTypeRegistry } from "./runtime-registry.js";
 import { PrincipalAwareRuntimeService, type RuntimeApprovalEvidence } from "./runtime-service.js";
@@ -26,6 +27,24 @@ export interface RuntimeApiServiceOptions {
   createId?: () => string;
   now?: () => string;
 }
+
+export class RuntimeRequestError extends Error {
+  constructor(
+    message = "Runtime request is not valid for the active registry.",
+    options?: ErrorOptions
+  ) {
+    super(message, options);
+    this.name = "RuntimeRequestError";
+  }
+}
+
+const RuntimeCursorPayloadSchema = z
+  .object({
+    version: z.literal(1),
+    stream_id: z.string().min(1),
+    record_sequence: z.number().int().nonnegative()
+  })
+  .strict();
 
 export class RuntimeApiService {
   private readonly runtimeService: PrincipalAwareRuntimeService;
@@ -45,7 +64,7 @@ export class RuntimeApiService {
   }
 
   describeOperation(operationType: string, schemaVersion: number) {
-    return this.registry.requireOperation(operationType, schemaVersion);
+    return registryRequest(() => this.registry.requireOperation(operationType, schemaVersion));
   }
 
   listRegistrations() {
@@ -59,10 +78,8 @@ export class RuntimeApiService {
 
   async createIntake(input: RuntimeIntakeRequest, context: TrustedCommandContext) {
     const request = RuntimeIntakeRequestSchema.parse(input);
-    const registration = this.registry.requireType(
-      request.kind,
-      request.type,
-      request.schema_version
+    const registration = registryRequest(() =>
+      this.registry.requireType(request.kind, request.type, request.schema_version)
     );
     return this.repository.appendIntakeRecord({
       stream_id: request.stream_id,
@@ -93,10 +110,12 @@ export class RuntimeApiService {
       arguments: request.arguments,
       declared_effects: request.declared_effects
     };
-    this.registry.validateCommand(
-      command.operation_type,
-      command.operation_schema_version,
-      command.arguments
+    registryRequest(() =>
+      this.registry.validateCommand(
+        command.operation_type,
+        command.operation_schema_version,
+        command.arguments
+      )
     );
     const digest = commandDigest(command);
     const recordId = this.createId();
@@ -148,6 +167,37 @@ export class RuntimeApiService {
       arguments: request.arguments,
       declared_effects: request.declared_effects
     };
+    const operation = registryRequest(() =>
+      this.registry.requireOperation(command.operation_type, command.operation_schema_version)
+    );
+    registryRequest(() =>
+      this.registry.validateCommand(
+        command.operation_type,
+        command.operation_schema_version,
+        command.arguments
+      )
+    );
+    for (const effect of command.declared_effects) {
+      if (!operation.allowed_result_types.includes(effect.result_type)) {
+        throw new RuntimeRequestError("A declared effect is not allowed for this operation.");
+      }
+      const kind = effect.kind ?? "result";
+      const registration = registryRequest(() =>
+        this.registry.requireType(kind, effect.result_type, effect.schema_version)
+      );
+      if (registration.schema_ref !== effect.schema_ref) {
+        throw new RuntimeRequestError("A declared effect has an invalid schema reference.");
+      }
+      registryRequest(() =>
+        this.registry.validateHistoricalPayload(
+          kind,
+          effect.result_type,
+          effect.schema_version,
+          effect.schema_ref,
+          effect.payload
+        )
+      );
+    }
     const digest = commandDigest(command);
     const approval = request.approval_id
       ? await this.resolveApproval(request.approval_id)
@@ -178,15 +228,23 @@ export class RuntimeApiService {
     return this.repository.getRecord(recordId);
   }
 
-  listRecords(input: RuntimeRecordQuery): Promise<RuntimeRecordPage> {
+  async listRecords(input: RuntimeRecordQuery) {
     const query = RuntimeRecordQuerySchema.parse(input);
-    return this.repository.listRecords({
+    const cursor = query.cursor ? decodeCursor(query.cursor) : undefined;
+    if (query.stream_id && cursor && cursor.stream_id !== query.stream_id) {
+      throw new RuntimeRequestError("The page cursor does not belong to the requested stream.");
+    }
+    const page = await this.repository.listRecords({
       ...(query.stream_id ? { stream_id: query.stream_id } : {}),
       ...(query.kind ? { kind: query.kind } : {}),
       ...(query.type ? { type: query.type } : {}),
-      after_sequence: query.after_sequence,
+      ...(cursor ? { cursor } : {}),
       limit: query.limit
     });
+    return {
+      records: page.records,
+      next_cursor: page.next_cursor ? encodeCursor(page.next_cursor) : null
+    };
   }
 
   listEdges(recordId: string) {
@@ -227,5 +285,31 @@ export class RuntimeApiService {
       decided_at: payload.decided_at,
       approver_context: record.command_context
     };
+  }
+}
+
+function registryRequest<T>(read: () => T): T {
+  try {
+    return read();
+  } catch (error) {
+    if (error instanceof z.ZodError) throw error;
+    throw new RuntimeRequestError(undefined, { cause: error });
+  }
+}
+
+function encodeCursor(cursor: { stream_id: string; record_sequence: number }): string {
+  return Buffer.from(
+    JSON.stringify({ version: 1, ...cursor }),
+    "utf8"
+  ).toString("base64url");
+}
+
+function decodeCursor(cursor: string) {
+  try {
+    return RuntimeCursorPayloadSchema.parse(
+      JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"))
+    );
+  } catch {
+    throw new RuntimeRequestError("The page cursor is malformed.");
   }
 }

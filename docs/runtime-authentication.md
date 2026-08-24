@@ -21,6 +21,8 @@ Mutable token claims such as display name and email are attributes, not
 identity. Configuration validation fails startup for duplicate external
 identities, unknown issuers or roles, invalid delegation targets, unsupported
 algorithms/providers, and an empty production trust configuration.
+Production issuer and JWKS URLs must use HTTPS. Verified bearer tokens must
+contain `sub`, `iat`, and `exp`; callers should mint short-lived tokens.
 
 ## Request boundary
 
@@ -33,12 +35,20 @@ The server derives principal, effective actor, delegation, policy decision,
 request ID, digest, and timestamps. Request bodies containing trust fields are
 rejected by strict schemas. Denied requests are written through the bounded
 runtime denial-audit operation and cannot create work or effects.
+Authentication runs before typed-runtime request-body parsing. Bodies are
+limited to 256 KiB, and persisted denials are capped at 120 per principal per
+process per minute. Multi-replica deployments may enforce a stricter shared
+limit at their private ingress.
 
 The API exposes registered event/work-item intake, immutable command approvals,
 command execution, registrations, records, stream pages, provenance edges,
 projections, and audit history under `/v1/runtime`. Pages are capped at 100
 records. Errors use `{error: {code, message, request_id}}` and never include
 tokens, key material, or private policy content.
+
+Record and audit pages return an opaque `next_cursor`. Pass it back unchanged as
+the `cursor` query parameter. Stream endpoints reject cursors issued for a
+different stream.
 
 ## Development Basic Authentication
 

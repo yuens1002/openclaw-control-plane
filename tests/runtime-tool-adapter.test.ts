@@ -3,6 +3,14 @@ import { describe, expect, it, vi } from "vitest";
 import { createOpenClawControlPlaneTools } from "@openclaw-control-plane/openclaw-adapter";
 
 describe("authenticated runtime tool adapter", () => {
+  it("rejects bearer tokens over plaintext transport unless explicitly enabled", () => {
+    expect(() =>
+      createOpenClawControlPlaneTools({
+        baseUrl: "http://control-plane.example",
+        tokenProvider: () => "token"
+      })
+    ).toThrow(/require HTTPS/i);
+  });
   it("obtains a fresh bearer token for every call", async () => {
     const requests: RequestInit[] = [];
     const tokenProvider = vi
@@ -27,7 +35,7 @@ describe("authenticated runtime tool adapter", () => {
   });
 
   it("maps bounded query inputs to the versioned API", async () => {
-    const fetchImpl = vi.fn(async () => Response.json({ records: [], next_sequence: null }));
+    const fetchImpl = vi.fn(async () => Response.json({ records: [], next_cursor: null }));
     const tools = createOpenClawControlPlaneTools({
       baseUrl: "https://control-plane.example",
       tokenProvider: () => "token",
@@ -36,12 +44,12 @@ describe("authenticated runtime tool adapter", () => {
 
     await tools.list_runtime_stream_records("stream one", {
       kind: "result",
-      after_sequence: 10,
+      cursor: "opaque-page-token",
       limit: 25
     });
 
     expect(fetchImpl).toHaveBeenCalledWith(
-      "https://control-plane.example/v1/runtime/streams/stream%20one/records?kind=result&after_sequence=10&limit=25",
+      "https://control-plane.example/v1/runtime/streams/stream%20one/records?kind=result&cursor=opaque-page-token&limit=25",
       expect.objectContaining({ method: "GET" })
     );
   });

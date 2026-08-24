@@ -141,13 +141,18 @@ export interface RuntimeRecordPageInput {
   stream_id?: string;
   kind?: RuntimeKind;
   type?: string;
-  after_sequence?: number;
+  cursor?: RuntimeRecordCursor;
   limit: number;
+}
+
+export interface RuntimeRecordCursor {
+  stream_id: string;
+  record_sequence: number;
 }
 
 export interface RuntimeRecordPage {
   records: RuntimeRecord[];
-  next_sequence: number | null;
+  next_cursor: RuntimeRecordCursor | null;
 }
 
 export interface RuntimeAccessDenialInput {
@@ -481,6 +486,7 @@ export class PostgresRuntimeRepository {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
+      await validateSourceRefs(client, input.source_refs ?? []);
       const records = await appendRecords(client, input.stream_id, context, [input.record]);
       await appendEdges(client, edges);
       await client.query("COMMIT");
@@ -566,7 +572,13 @@ export class PostgresRuntimeRepository {
     if (input.stream_id) add("stream_id = ?", input.stream_id);
     if (input.kind) add("kind = ?", input.kind);
     if (input.type) add("type = ?", input.type);
-    add("record_sequence > ?", input.after_sequence ?? 0);
+    if (input.cursor) {
+      values.push(input.cursor.stream_id, input.cursor.record_sequence);
+      clauses.push(
+        `(stream_id > $${values.length - 1} OR ` +
+          `(stream_id = $${values.length - 1} AND record_sequence > $${values.length}))`
+      );
+    }
     values.push(input.limit + 1);
     const result = await this.pool.query<RuntimeRecordRow>(
       `SELECT record_id, stream_id, record_sequence, kind, type, schema_version,
@@ -583,7 +595,12 @@ export class PostgresRuntimeRepository {
     const page = records.slice(0, input.limit);
     return {
       records: page,
-      next_sequence: hasMore ? page.at(-1)?.record_sequence ?? null : null
+      next_cursor: hasMore && page.at(-1)
+        ? {
+            stream_id: page.at(-1)!.stream_id,
+            record_sequence: page.at(-1)!.record_sequence
+          }
+        : null
     };
   }
 
@@ -1258,6 +1275,20 @@ async function appendEdges(client: PoolClient, edges: readonly RuntimeEdgeDraft[
        VALUES ($1, $2, $3, $4)`,
       [edge.from_record_id, edge.relation, edge.ordinal, edge.to_record_id]
     );
+  }
+}
+
+async function validateSourceRefs(client: PoolClient, refs: readonly RecordRef[]): Promise<void> {
+  if (refs.length === 0) return;
+  const result = await client.query<{ record_id: string; kind: RuntimeKind }>(
+    "SELECT record_id, kind FROM runtime_records WHERE record_id = ANY($1::uuid[])",
+    [refs.map((ref) => ref.id)]
+  );
+  const kinds = new Map(result.rows.map((row) => [row.record_id, row.kind]));
+  for (const ref of refs) {
+    if (kinds.get(ref.id) !== ref.kind) {
+      throw new Error("A source reference does not match an existing record and kind.");
+    }
   }
 }
 

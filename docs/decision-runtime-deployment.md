@@ -27,6 +27,9 @@ changing the OpenClaw image or exposing a public domain.
 - Readiness reports database, migrations, registry, identity configuration, and
   required JWKS independently. It returns no issuer keys, principals, grants,
   tokens, or connection values.
+- Bearer-authenticated adapters reject plaintext HTTP by default. Local or
+  private-network development requires an explicit insecure-transport opt-in;
+  production endpoints, issuers, and JWKS URLs use HTTPS.
 
 ## Optional worker
 

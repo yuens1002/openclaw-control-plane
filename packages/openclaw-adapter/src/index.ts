@@ -11,9 +11,14 @@ export interface OpenClawAdapterOptions {
   baseUrl: string;
   fetchImpl?: typeof fetch;
   tokenProvider?: () => string | Promise<string>;
+  allowInsecureTransport?: boolean;
 }
 
 export function createOpenClawControlPlaneTools(options: OpenClawAdapterOptions) {
+  const endpoint = new URL(options.baseUrl);
+  if (options.tokenProvider && endpoint.protocol !== "https:" && !options.allowInsecureTransport) {
+    throw new Error("Bearer-authenticated control plane tools require HTTPS.");
+  }
   const callApi = createApiCaller(options);
 
   return {
@@ -38,13 +43,13 @@ export function createOpenClawControlPlaneTools(options: OpenClawAdapterOptions)
       callApi(`/v1/runtime/records/${encodeURIComponent(recordId)}/edges`, { method: "GET" }),
     list_runtime_stream_records: (
       streamId: string,
-      query: { kind?: string; type?: string; after_sequence?: number; limit?: number } = {}
+      query: { kind?: string; type?: string; cursor?: string; limit?: number } = {}
     ) =>
       callApi(
         `/v1/runtime/streams/${encodeURIComponent(streamId)}/records${queryString(query)}`,
         { method: "GET" }
       ),
-    list_runtime_audit: (query: { after_sequence?: number; limit?: number } = {}) =>
+    list_runtime_audit: (query: { cursor?: string; limit?: number } = {}) =>
       callApi(`/v1/runtime/audit${queryString(query)}`, { method: "GET" }),
     get_runtime_projection: (
       projectionType: string,

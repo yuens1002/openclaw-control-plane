@@ -768,14 +768,14 @@ describePostgres("PostgreSQL durable runtime repository", () => {
     const firstPage = await repository.listRecords({ stream_id: "intake-stream", limit: 1 });
     const secondPage = await repository.listRecords({
       stream_id: "intake-stream",
-      after_sequence: firstPage.next_sequence!,
+      cursor: firstPage.next_cursor!,
       limit: 1
     });
 
     expect(inserted.status).toBe("inserted");
     expect(replayed.status).toBe("replayed");
     expect(firstPage.records.map((item) => item.record_id)).toEqual([ids.event]);
-    expect(firstPage.next_sequence).toBe(1);
+    expect(firstPage.next_cursor).toEqual({ stream_id: "intake-stream", record_sequence: 1 });
     expect(secondPage.records.map((item) => item.record_id)).toEqual([ids.work]);
     expect(await repository.listEdges(ids.work)).toContainEqual({
       from_record_id: ids.work,
@@ -783,6 +783,15 @@ describePostgres("PostgreSQL durable runtime repository", () => {
       to_record_id: ids.event,
       ordinal: 0
     });
+    await expect(
+      repository.appendIntakeRecord({
+        stream_id: "intake-stream",
+        record: { ...event, record_id: "00000000-0000-4000-8000-000000000098" },
+        source_refs: [{ kind: "work_item", id: ids.event }],
+        command_context: context
+      })
+    ).rejects.toThrow(/source reference/i);
+    expect(await repository.getRecord("00000000-0000-4000-8000-000000000098")).toBeNull();
     await expect(
       repository.appendIntakeRecord({
         stream_id: "intake-stream",

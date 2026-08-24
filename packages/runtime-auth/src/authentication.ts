@@ -76,7 +76,8 @@ export class OidcAuthenticator {
         issuer: issuer.issuer,
         audience: issuer.audiences,
         algorithms: issuer.allowed_algorithms,
-        clockTolerance: issuer.clock_skew_seconds
+        clockTolerance: issuer.clock_skew_seconds,
+        requiredClaims: ["exp", "iat", "sub"]
       });
       claims = verified.payload;
     } catch {

@@ -88,4 +88,21 @@ describe("runtime auth configuration", () => {
       )
     ).toThrow(/requires an issuer and principal mapping/i);
   });
+
+  it("requires HTTPS issuer and JWKS URLs in production", () => {
+    expect(() =>
+      parseRuntimeAuthConfiguration(
+        {
+          ...exampleRuntimeAuthConfiguration,
+          issuers: [
+            {
+              ...exampleRuntimeAuthConfiguration.issuers[0]!,
+              jwks_uri: "http://issuer.example/.well-known/jwks.json"
+            }
+          ]
+        },
+        "production"
+      )
+    ).toThrow(/must use HTTPS/i);
+  });
 });

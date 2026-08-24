@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { basicAuth } from "hono/basic-auth";
+import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 import type { MiddlewareHandler } from "hono";
 import {
@@ -19,6 +20,7 @@ import {
 } from "@openclaw-control-plane/contracts";
 import {
   IdempotencyConflictError,
+  RuntimeRequestError,
   InMemoryEventStore,
   type RuntimeApiService,
   type EventStore,
@@ -49,8 +51,16 @@ type RuntimeApiBoundary = Pick<
 >;
 
 type AppEnvironment = {
-  Variables: { trustedCommandContext: TrustedCommandContext; requestId: string };
+  Variables: {
+    authenticatedPrincipal: AuthenticatedPrincipal;
+    trustedCommandContext: TrustedCommandContext;
+    requestId: string;
+  };
 };
+
+const RUNTIME_BODY_LIMIT_BYTES = 256 * 1024;
+const DENIAL_WINDOW_MS = 60_000;
+const MAX_DENIALS_PER_WINDOW = 120;
 
 export interface ControlPlaneDependencies {
   eventStore: EventStore;
@@ -104,8 +114,40 @@ export function createControlPlaneApp(
 
   const operatorAuth = createOperatorAuthMiddleware();
   if (operatorAuth) {
-    app.use("*", operatorAuth);
+    app.use("*", async (context, next) => {
+      if (context.req.path.startsWith("/v1/runtime")) {
+        await next();
+        return;
+      }
+      await operatorAuth(context, next);
+    });
   }
+
+  app.use("/v1/runtime/*", async (context, next) => {
+    if (!dependencies.authenticator) {
+      throw new HTTPException(503, { message: "Runtime authentication is not configured." });
+    }
+    context.set(
+      "authenticatedPrincipal",
+      await dependencies.authenticator.authenticateBearer(context.req.header("authorization"))
+    );
+    await next();
+  });
+  app.use(
+    "/v1/runtime/*",
+    bodyLimit({
+      maxSize: RUNTIME_BODY_LIMIT_BYTES,
+      onError: (context) =>
+        context.json(
+          errorEnvelope(
+            "runtime.request_too_large",
+            "Request body exceeds the permitted size.",
+            context.get("requestId")
+          ),
+          413
+        )
+    })
+  );
 
   app.use("*", async (context, next) => {
     if (context.req.method !== "POST" || context.req.path.startsWith("/v1/runtime")) {
@@ -402,6 +444,9 @@ export function createControlPlaneApp(
     if (error instanceof IdempotencyConflictError) {
       return context.json(errorEnvelope("runtime.idempotency_conflict", error.message, requestId), 409);
     }
+    if (error instanceof RuntimeRequestError) {
+      return context.json(errorEnvelope("runtime.invalid_request", error.message, requestId), 400);
+    }
     if (error instanceof HTTPException) {
       const challenge = error.getResponse().headers.get("www-authenticate");
       if (challenge) context.header("www-authenticate", challenge);
@@ -453,9 +498,8 @@ async function authorizeRequest(
   if (!dependencies.authenticator || !dependencies.trustedContextCoordinator) {
     throw new HTTPException(503, { message: "Runtime authentication is not configured." });
   }
-  const authenticated: AuthenticatedPrincipal = await dependencies.authenticator.authenticateBearer(
-    context.req.header("authorization")
-  );
+  const authenticated = context.get("authenticatedPrincipal") ??
+    await dependencies.authenticator.authenticateBearer(context.req.header("authorization"));
   const onBehalfOf = context.req.header("x-on-behalf-of-principal");
   if (onBehalfOf && !/^principal:\/\/[A-Za-z0-9][A-Za-z0-9._:@/-]*$/.test(onBehalfOf)) {
     throw new z.ZodError([
@@ -470,6 +514,9 @@ async function authorizeRequest(
     request_origin: "http"
   });
   if (trusted.authorization.result === "denied") {
+    if (!denialLimiter.consume(authenticated.principal.principal_id)) {
+      throw new HTTPException(429, { message: "Authorization denial rate limit exceeded." });
+    }
     const runtime = requireRuntimeApi(dependencies);
     if (request.operation) {
       await runtime.recordCommandDenial({
@@ -508,7 +555,7 @@ function parseRecordQuery(
     ...fixed,
     ...(query.kind ? { kind: query.kind } : {}),
     ...(query.type ? { type: query.type } : {}),
-    ...(query.after_sequence ? { after_sequence: Number(query.after_sequence) } : {}),
+    ...(query.cursor ? { cursor: query.cursor } : {}),
     ...(query.limit ? { limit: Number(query.limit) } : {})
   });
 }
@@ -516,5 +563,22 @@ function parseRecordQuery(
 function errorEnvelope(code: string, message: string, requestId: string) {
   return { error: { code, message, request_id: requestId } };
 }
+
+class DenialRateLimiter {
+  private readonly windows = new Map<string, { startedAt: number; count: number }>();
+
+  consume(principalId: string, now = Date.now()): boolean {
+    const current = this.windows.get(principalId);
+    if (!current || now - current.startedAt >= DENIAL_WINDOW_MS) {
+      this.windows.set(principalId, { startedAt: now, count: 1 });
+      return true;
+    }
+    if (current.count >= MAX_DENIALS_PER_WINDOW) return false;
+    current.count += 1;
+    return true;
+  }
+}
+
+const denialLimiter = new DenialRateLimiter();
 
 export type ControlPlaneApp = ReturnType<typeof createControlPlaneApp>;

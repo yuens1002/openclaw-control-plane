@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createControlPlaneApp, type ControlPlaneDependencies } from "@openclaw-control-plane/api";
 import { exampleOperationRegistrations, type RuntimeApiService } from "@openclaw-control-plane/db";
+import { RuntimeRequestError } from "@openclaw-control-plane/db";
 import {
   AuthenticationError,
   StaticRbacAuthorizationProvider,
@@ -20,6 +21,30 @@ describe("authenticated runtime API", () => {
       error: { code: "runtime.authentication_failed", message: "Authentication failed." }
     });
     expect(dependencies.runtimeApiService!.listRegistrations).not.toHaveBeenCalled();
+  });
+
+  it("authenticates before parsing a malformed or oversized body", async () => {
+    const dependencies = createDependencies();
+    const unauthenticated = await createControlPlaneApp(dependencies).request(
+      "/v1/runtime/events",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{not-json"
+      }
+    );
+    const oversized = await createControlPlaneApp(dependencies).request(
+      "/v1/runtime/events",
+      {
+        method: "POST",
+        headers: { authorization: "Bearer valid", "content-type": "application/json" },
+        body: JSON.stringify({ padding: "x".repeat(257 * 1024) })
+      }
+    );
+
+    expect(unauthenticated.status).toBe(401);
+    expect(oversized.status).toBe(413);
+    expect(dependencies.runtimeApiService!.createIntake).not.toHaveBeenCalled();
   });
 
   it("creates a typed event with server-derived context", async () => {
@@ -79,7 +104,7 @@ describe("authenticated runtime API", () => {
   it("returns bounded stream pages through the authorized query boundary", async () => {
     const dependencies = createDependencies();
     const response = await createControlPlaneApp(dependencies).request(
-      "/v1/runtime/streams/stream-1/records?limit=25&after_sequence=10&kind=result",
+      "/v1/runtime/streams/stream-1/records?limit=25&cursor=opaque-page-token&kind=result",
       { headers: { authorization: "Bearer valid" } }
     );
 
@@ -87,9 +112,24 @@ describe("authenticated runtime API", () => {
     expect(dependencies.runtimeApiService!.listRecords).toHaveBeenCalledWith({
       stream_id: "stream-1",
       kind: "result",
-      after_sequence: 10,
+      cursor: "opaque-page-token",
       limit: 25
     });
+  });
+
+  it("returns a stable client error for unknown or retired operation registrations", async () => {
+    const dependencies = createDependencies();
+    dependencies.runtimeApiService!.describeOperation = vi.fn(() => {
+      throw new RuntimeRequestError();
+    });
+    const response = await createControlPlaneApp(dependencies).request("/v1/runtime/commands", {
+      method: "POST",
+      headers: { authorization: "Bearer valid", "content-type": "application/json" },
+      body: JSON.stringify(commandRequest())
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code: "runtime.invalid_request" } });
   });
 });
 
@@ -129,7 +169,7 @@ function createDependencies(options: { deny?: boolean } = {}) {
     createApproval: vi.fn(),
     executeCommand: vi.fn(),
     getRecord: vi.fn(),
-    listRecords: vi.fn(async () => ({ records: [], next_sequence: null })),
+    listRecords: vi.fn(async () => ({ records: [], next_cursor: null })),
     listEdges: vi.fn(async () => []),
     getProjection: vi.fn(),
     recordAccessDenial: vi.fn<RuntimeApiService["recordAccessDenial"]>(async (input) => ({
@@ -175,6 +215,27 @@ function authenticatedPrincipal(): AuthenticatedPrincipal {
     subject: "example-service",
     principal: exampleRuntimeAuthConfiguration.principals[0]!,
     claims: { iss: "https://issuer.example", sub: "example-service" }
+  };
+}
+
+function commandRequest() {
+  return {
+    stream_id: "stream-1",
+    idempotency_key: "request-1",
+    operation_type: "example.state.reconcile",
+    operation_schema_version: 1,
+    work_item_id: "00000000-0000-4000-8000-000000000010",
+    action_revision: 1,
+    target: { type: "example.environment", id: "production" },
+    arguments: { desired_state: { ready: true } },
+    declared_effects: [],
+    trigger: {
+      type: "user_request",
+      ref: { kind: "work_item", id: "00000000-0000-4000-8000-000000000010" }
+    },
+    causation_ref: { kind: "work_item", id: "00000000-0000-4000-8000-000000000010" },
+    correlation_id: "correlation-1",
+    input_refs: []
   };
 }
 

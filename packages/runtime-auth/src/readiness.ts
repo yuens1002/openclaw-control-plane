@@ -2,9 +2,15 @@ import { z } from "zod";
 
 import type { IssuerConfiguration, RuntimeAuthConfiguration } from "./config.js";
 
-const JwksDocumentSchema = z.object({
-  keys: z.array(z.object({ kid: z.string().min(1), kty: z.string().min(1) }).passthrough()).min(1)
-});
+const JwkSchema = z
+  .object({
+    kid: z.string().min(1),
+    kty: z.enum(["RSA", "EC", "OKP"]),
+    alg: z.string().min(1).optional(),
+    use: z.string().optional()
+  })
+  .passthrough();
+const JwksDocumentSchema = z.object({ keys: z.array(JwkSchema).min(1) });
 
 export interface IdentityReadiness {
   identity: "ready" | "invalid";
@@ -32,7 +38,21 @@ async function checkIssuer(issuer: IssuerConfiguration, fetchImpl: typeof fetch)
       signal: AbortSignal.timeout(5_000)
     });
     if (!response.ok) return false;
-    return JwksDocumentSchema.safeParse(await response.json()).success;
+    const document = JwksDocumentSchema.safeParse(await response.json());
+    if (!document.success) return false;
+    const keyIds = document.data.keys.map((key) => key.kid);
+    if (new Set(keyIds).size !== keyIds.length) return false;
+    return document.data.keys.some(
+      (key) =>
+        key.use !== "enc" &&
+        issuer.allowed_algorithms.some(
+          (algorithm) =>
+            (!key.alg || key.alg === algorithm) &&
+            ((algorithm.startsWith("RS") && key.kty === "RSA") ||
+              (algorithm.startsWith("ES") && key.kty === "EC") ||
+              (algorithm === "EdDSA" && key.kty === "OKP"))
+        )
+    );
   } catch {
     return false;
   }

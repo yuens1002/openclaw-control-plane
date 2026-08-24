@@ -58,7 +58,7 @@ export const RuntimeRecordQuerySchema = z
     stream_id: SafeLocalIdentifierSchema.optional(),
     kind: RuntimeRecordKindSchema.optional(),
     type: SafeNamespacedIdentifierSchema.optional(),
-    after_sequence: z.number().int().nonnegative().default(0),
+    cursor: z.string().min(1).max(512).optional(),
     limit: z.number().int().min(1).max(100).default(50)
   })
   .strict();

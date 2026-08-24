@@ -156,6 +156,11 @@ export function parseRuntimeAuthConfiguration(
     if (config.issuers.length === 0 || config.principals.length === 0) {
       throw new Error("Production authentication requires an issuer and principal mapping.");
     }
+    for (const issuer of config.issuers) {
+      if (new URL(issuer.issuer).protocol !== "https:" || new URL(issuer.jwks_uri).protocol !== "https:") {
+        throw new Error("Production issuer and JWKS URLs must use HTTPS.");
+      }
+    }
   }
   return config;
 }
