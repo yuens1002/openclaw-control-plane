@@ -20,7 +20,8 @@ Branch: `feat/decision-runtime-deployment`
 
 - Startup migrations and one initial replica are intentionally coupled. Scaling
   beyond one replica requires a separate migration job or equivalent release gate.
-- The service is useful for readiness and migration verification but remains
-  intentionally unavailable for operational writes until trusted command context
-  is wired.
+- At this reviewed commit, the service was useful for readiness and migration
+  verification but intentionally unavailable for operational writes. Issue #39
+  subsequently resolves that limitation through authenticated, server-derived
+  trusted command context.
 - Additive migrations are not automatically reversed during application rollback.

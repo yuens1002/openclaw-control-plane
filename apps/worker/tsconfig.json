@@ -6,5 +6,9 @@
     "outDir": "dist"
   },
   "include": ["src/**/*.ts"],
-  "references": []
+  "references": [
+    { "path": "../../packages/contracts" },
+    { "path": "../../packages/runtime-auth" },
+    { "path": "../../packages/db" }
+  ]
 }

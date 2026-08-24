@@ -65,10 +65,13 @@ npm run build
 npm run --workspace @openclaw-control-plane/api dev
 ```
 
-The API listens on `PORT` from `.env` or `8787` by default.
-Set `SETUP_PASSWORD` to require HTTP Basic auth on the API root and
-control-plane endpoints. `/health` stays public for platform healthchecks. The
-default username is `openclaw`; override it with `OPENCLAW_SETUP_USERNAME`.
+The API listens on `PORT` from `.env` or `8787` by default. For local
+legacy-shell testing only, set `RUNTIME_ENABLE_BASIC_AUTH=true` and
+`SETUP_PASSWORD` to require HTTP Basic auth on the API root and legacy routes.
+The default username is `openclaw`; override it with
+`OPENCLAW_SETUP_USERNAME`. `/health` stays public for platform health checks.
+Production typed-runtime routes use the OIDC and policy boundary documented in
+[`docs/runtime-authentication.md`](docs/runtime-authentication.md).
 
 ## Verification
 
