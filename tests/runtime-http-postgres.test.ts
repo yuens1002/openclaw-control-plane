@@ -45,6 +45,8 @@ describePostgres("authenticated runtime HTTP PostgreSQL conformance", () => {
     const workId = "00000000-0000-4000-8000-000000008002";
     const headers = bearerHeaders();
 
+    expect((await app.request("/v1/runtime/registrations", { headers })).status).toBe(200);
+
     expect((await app.request("/v1/runtime/events", {
       method: "POST",
       headers,
@@ -209,6 +211,38 @@ describePostgres("authenticated runtime HTTP PostgreSQL conformance", () => {
     expect(await runtime.repository.listStreamRecords("approval-http-stream")).toHaveLength(
       before.length
     );
+
+    const rejected = await app.request("/v1/runtime/approvals", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        operation_type: command.operation_type,
+        operation_schema_version: command.operation_schema_version,
+        work_item_id: command.work_item_id,
+        action_revision: command.action_revision,
+        target: command.target,
+        arguments: command.arguments,
+        declared_effects: command.declared_effects,
+        decision: "rejected"
+      })
+    });
+    const rejectedBody = await rejected.json() as { approval_id: string };
+    const rejectedRecord = await app.request(`/v1/runtime/records/${rejectedBody.approval_id}`, {
+      headers
+    });
+    expect(rejected.status).toBe(201);
+    expect(await rejectedRecord.json()).toMatchObject({
+      record: { kind: "approval", payload: { decision: "rejected" } }
+    });
+    expect((await app.request("/v1/runtime/commands", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        ...command,
+        approval_id: rejectedBody.approval_id,
+        idempotency_key: "rejected-approval-command"
+      })
+    })).status).toBe(400);
   });
 
   it("preserves artifact attribution through authenticated HTTP tool calls", async () => {
