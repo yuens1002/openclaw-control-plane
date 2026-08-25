@@ -7,6 +7,11 @@ and uses semantic versioning once releases begin.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-08-25
+
+- Generalize public deployment evidence and historical planning references,
+  and extend the Public-Repo Rule to issue/PR comments and operational IDs.
+
 ## [0.4.1] - 2026-08-25
 
 - 2026-08-25 - fix(runtime): version expanded registry contract

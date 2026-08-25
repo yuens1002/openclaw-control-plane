@@ -61,4 +61,14 @@ No Kind B (wrong-altitude) findings beyond the ADR's already-merged 2026-08-22 s
 
 This pass covered files inside the repo (docs, plans, ADRs, READMEs). It did not cover GitHub issue/PR bodies (CONTRIBUTING.md's Public-Repo Rule extends there too, per the 2026-08-15 retro entry on issues #8-10) — that would need a separate `gh` API sweep and was out of scope for this run.
 
+## Post-Audit Metadata Follow-Up
+
+On 2026-08-25, a separate GitHub API sweep covered owner-controlled issue
+bodies, PR descriptions, issue/PR comments, and review comments. Historical
+references to private consumer repositories, named dogfood exercises, live
+service domains, deployment identifiers, and configured agent identities were
+generalized in place. Third-party review comments are not owner-editable; the
+canonical rule now prevents new owner-authored replies from repeating those
+identifiers.
+
 Unrelated to this audit: `docs/live-instance-operations.md` and two files under `packages/openclaw-railway-installer/src/` show uncommitted changes in the working tree from a concurrent, unrelated workstream (closing gap G4) — not touched by this branch. One of those files' in-progress edit was accidentally captured by this branch's first commit via a same-file `git add` and has since been reverted out; see the retro-sourced item above.

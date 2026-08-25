@@ -49,11 +49,18 @@ Examples:
 ## Public-Repo Rule
 
 This rule applies to everything written in this public repo: docs, plans,
-ACs, GitHub issues, and PR descriptions.
+ACs, GitHub issues, PR descriptions, review replies, and issue/PR comments.
 
 Docs must not contain client data, private credentials, production tokens,
 handoff passwords, or private operational URLs. Put local-only values in ignored
 files such as `.env.local` or generated `*.local.md` handoff files.
+
+Public deployment evidence records behavior, not the operator's implementation.
+Use generic roles and placeholders for configured principals and actors, service
+names, domains, deployment IDs, generated record IDs, and private workflow
+names. Exact values belong in the deployment owner's private operational
+record. It is still useful to state that readiness passed, attribution was
+preserved, replay was idempotent, or provenance was traversable.
 
 Public docs should describe OpenClaw Control Plane as a workflow-neutral
 baseline. Business workflows, connectors, credentials, and client automations
@@ -70,6 +77,7 @@ truth" rather than any one of them by name.
 | `acme-agency/acme-client-profile` (a real private repo slug) | "a private agency/client profile repo" |
 | "our agency's Railway project" | "the target Railway service" |
 | "the ACME client workflow" | "a client-specific workflow (fake/manual example)" |
+| a real principal, actor, domain, or deployment ID | "the configured service principal" or "the target deployment" |
 
 If a specific private name is genuinely necessary to explain something (rare —
 usually a generic description works), stop and ask whether it belongs in this
