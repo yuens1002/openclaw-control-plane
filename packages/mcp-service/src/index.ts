@@ -209,10 +209,16 @@ export function createMcpServiceHost(options: McpServiceHostOptions) {
         // exactOptionalPropertyTypes-compatible, so keep the cast at this boundary.
         const transport = new StreamableHTTPServerTransport();
         active.add(server);
-        response.once("close", () => {
-          active.delete(server);
-          void server.close();
-        });
+        const closeRequestServer = () => {
+          response.off("finish", closeRequestServer);
+          response.off("close", closeRequestServer);
+          if (!active.delete(server)) return;
+          void server
+            .close()
+            .catch((error) => diagnose(`MCP request cleanup failed: ${classifyError(error)}`));
+        };
+        response.once("finish", closeRequestServer);
+        response.once("close", closeRequestServer);
         await server.connect(transport as unknown as Transport);
         await transport.handleRequest(request, response, body);
       } catch (error) {
@@ -241,7 +247,9 @@ export function createMcpServiceHost(options: McpServiceHostOptions) {
       close: async () => {
         if (stopped) return;
         stopped = true;
-        await Promise.all([...active].map((server) => server.close()));
+        const requestServers = [...active];
+        active.clear();
+        await Promise.all(requestServers.map((server) => server.close()));
         await new Promise<void>((resolve, reject) =>
           httpServer.close((error) => (error ? reject(error) : resolve()))
         );
