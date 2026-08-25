@@ -2,7 +2,7 @@
 
 Plan: `docs/plans/decision-runtime-mcp/plan.md`
 
-Current PR implementation SHA: `ea89a27152ed21ecc23cbe5bf67da60fe6024ff6`
+Current PR implementation SHA: `7037541898ee2e09959ad7dda5676d673021a5a3`
 
 Original independently reviewed SHA:
 `ee7c7ec2c8036ecae7c61d9cbf4fafb4cca7cdcd`
@@ -44,13 +44,13 @@ branch and transcribed the evidence into `ACs.md`.
 
 | Gate | Result |
 | --- | --- |
-| Focused MCP conformance | 39/39 passed |
-| Full suite with disposable PostgreSQL | 409/409 passed after review fixes; zero skips |
-| Clean-checkout CI command | `npm test` built workspaces first; 381 passed and only 28 PostgreSQL tests skipped without a configured database |
+| Focused MCP conformance | 40/40 passed |
+| Full suite with disposable PostgreSQL | 410/410 passed after review fixes; zero skips |
+| Clean-checkout CI command | `npm test` built workspaces first; 382 passed and only 28 PostgreSQL tests skipped without a configured database |
 | Separate PostgreSQL suite | 28/28 passed; disposable container removed |
 | TypeScript | `npm run typecheck` and `npm run build` passed |
 | Production dependencies | `npm audit --omit=dev` reported zero vulnerabilities |
-| Production images | API and MCP images built; the API image cannot resolve the MCP SDK while the MCP image can |
+| Production images | API and MCP images built; the API image cannot resolve the MCP SDK, while the MCP image can and reports release version `0.5.0` from root package metadata |
 | Hosted lifecycle | Ready against stubs, invalid Origin rejected, ready after restart, degraded when upstream failed |
 | Repository quality | `git diff --check`, public-language scan, and clean-worktree checks passed |
 
@@ -84,6 +84,8 @@ corrected and regression-tested:
     of unrelated API images.
 12. Replaced uncancelable request timeout signals with an abort controller and
     a timer cleared after response validation on every outcome.
+13. Sourced the MCP server's advertised version from root release metadata and
+    verified the pruned production image reports `0.5.0`.
 
 ## Residual Risks
 
