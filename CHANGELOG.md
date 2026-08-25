@@ -7,6 +7,8 @@ and uses semantic versioning once releases begin.
 
 ## [Unreleased]
 
+- 2026-08-25 - fix(runtime): version expanded registry contract
+
 ## [0.4.0] - 2026-08-24
 
 - Add the authenticated, versioned Decision Runtime API with OIDC identity,
