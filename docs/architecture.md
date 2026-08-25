@@ -73,11 +73,12 @@ deployment boundary, and runtime boundary — they are not phases of one release
   app directory plus the shared packages and root manifests it actually
   compiles against. A service's build boundary is exactly what its
   Dockerfile copies, nothing more.
-- **Deployment boundary**: each service declares `build.watchPatterns`
-  matching its own Dockerfile's build boundary. A commit that touches only
-  paths outside a service's watch patterns does not create a deployment for
-  that service — **rebuilding one sibling service does not rebuild
-  another**. See [Private Decision Runtime
+- **Deployment boundary**: the decision-runtime API and worker each declare
+  `build.watchPatterns` matching their own Dockerfile's build boundary; root
+  OpenClaw declares none and deploys on every commit (see the diagram
+  below). A commit that touches only paths outside a service's watch
+  patterns does not create a deployment for that service — **rebuilding one
+  sibling service does not rebuild another**. See [Private Decision Runtime
   Deployment](decision-runtime-deployment.md) for the API/worker trigger
   matrix.
 - **Runtime boundary**: OpenClaw and the decision-runtime services do not

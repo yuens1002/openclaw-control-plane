@@ -44,7 +44,8 @@ release job.
 
 ## Build triggers
 
-Both `railway.toml` and `worker.railway.toml` declare `build.watchPatterns` —
+Both `deploy/decision-runtime/railway.toml` and
+`deploy/decision-runtime/worker.railway.toml` declare `build.watchPatterns` —
 gitignore-style path patterns, evaluated from the repository root regardless
 of any root directory setting, that gate whether a commit creates a new
 deployment for that service. A commit matching none of a service's patterns
@@ -65,8 +66,8 @@ configuration, and `.dockerignore`. Root OpenClaw's `railway.toml` declares no
 | `apps/worker/**` | No | Yes |
 | `packages/contracts/**`, `packages/runtime-auth/**`, `packages/db/**` (incl. migrations) | Yes | Yes |
 | `package.json`, `package-lock.json`, `tsconfig.json`, `tsconfig.base.json`, `.dockerignore` | Yes | Yes |
-| `deploy/decision-runtime/railway.toml` or `Dockerfile` | Yes | No |
-| `deploy/decision-runtime/worker.railway.toml` or `worker.Dockerfile` | No | Yes |
+| `deploy/decision-runtime/railway.toml` or `deploy/decision-runtime/Dockerfile` | Yes | No |
+| `deploy/decision-runtime/worker.railway.toml` or `deploy/decision-runtime/worker.Dockerfile` | No | Yes |
 | Documentation, the OpenClaw wrapper, or an unrelated package | No | No |
 
 **Maintenance rule**: whenever either Dockerfile gains another copied
