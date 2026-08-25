@@ -2,20 +2,27 @@
 
 Plan: `docs/plans/decision-runtime-mcp/plan.md`
 
-Implementation SHA: `ee7c7ec2c8036ecae7c61d9cbf4fafb4cca7cdcd`
+Rebased implementation SHA: `dd2e4dd2f2413ddd66ef9107fd98b669e582d9e8`
 
-Status: independent verification and main-thread QC passed; human approval is
-pending before versioning or pull request publication.
+Original independently reviewed SHA:
+`ee7c7ec2c8036ecae7c61d9cbf4fafb4cca7cdcd`
+
+Status: independent verification, post-rebase QC, and human approval passed;
+release publication is authorized.
 
 ## Verdict
 
 PASS. No unresolved security, correctness, deployment, documentation, or public
-repository blocker remains on the reviewed implementation SHA.
+repository blocker remains on the rebased implementation SHA.
 
-The final independent verifier compared the complete diff from
+The final independent verifier compared the complete pre-rebase diff from
 `69a6b842b5796555bf24c046566709fd25023e31`, inspected the plan and every AC,
-and ran protocol, PostgreSQL, build, audit, and production-image evidence. Main
-QC reviewed and transcribed the evidence into `ACs.md`.
+and ran protocol, PostgreSQL, build, audit, and production-image evidence. After
+`origin/main` advanced to `cf9b95c1fe226f3f101d2dd0901400e49fdd3bc8`,
+the implementation commits replayed without code conflicts; only release
+version and changelog metadata required reconciliation. Main QC reran the full
+PostgreSQL-backed suite, typecheck, build, audit, and diff checks on the rebased
+branch and transcribed the evidence into `ACs.md`.
 
 ## Delivered Boundaries
 
@@ -38,7 +45,7 @@ QC reviewed and transcribed the evidence into `ACs.md`.
 | Gate | Result |
 | --- | --- |
 | Focused MCP conformance | 39/39 passed |
-| Full suite with disposable PostgreSQL | 396/396 passed; zero skips |
+| Full suite with disposable PostgreSQL | 408/408 passed after rebase; zero skips |
 | Separate PostgreSQL suite | 28/28 passed; disposable container removed |
 | TypeScript | `npm run typecheck` and `npm run build` passed |
 | Production dependencies | `npm audit --omit=dev` reported zero vulnerabilities |
@@ -82,7 +89,8 @@ justify embedding a private deployment or consumer policy in this branch.
 
 ## Human Gate
 
-Review the implementation, AC evidence, ADR, public guide, and residual risks.
-After approval, update the package minor version and changelog, commit the
-verification/release metadata, publish the implementation PR, complete CI and
-Copilot review, and merge only if the PR head remains unchanged and clean.
+Approved by the product owner on 2026-08-25 after review of the implementation,
+AC evidence, ADR, public guide, and residual risks. The approval authorizes the
+minor version release, PR publication, CI and Copilot review, merge on a clean
+reviewed head, and publication of the GitHub release from the resulting merge
+commit.
