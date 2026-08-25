@@ -7,6 +7,8 @@ and uses semantic versioning once releases begin.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-25
+
 - 2026-08-25 - fix(runtime): version expanded registry contract
 
 ## [0.4.0] - 2026-08-24
