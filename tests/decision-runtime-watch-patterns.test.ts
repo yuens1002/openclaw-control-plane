@@ -19,14 +19,14 @@ function parseWatchPatterns(tomlText: string): string[] {
 }
 
 /**
- * Mechanically derives the expected watch-pattern set from a Dockerfile's
- * build-stage COPY sources: a copied directory becomes `dir/**`, a copied
- * file becomes its exact path. `COPY --from=` lines (runtime-stage copies of
- * compiled output) are excluded — they have no corresponding source path in
- * the repository. No consolidation: a directory's `dir/**` pattern and the
- * exact-path pattern for a file separately copied from inside it both
- * appear, matching the 1:1 mapping this feature's real watchPatterns arrays
- * use.
+ * Mechanically derives the expected watch-pattern set from every `COPY` line
+ * whose source isn't `--from=` (which copies compiled output from another
+ * build stage, with no corresponding source path in the repository): a
+ * source is a `dir/**` pattern if its basename has no extension, or an
+ * exact-path pattern otherwise. No consolidation: a directory's `dir/**`
+ * pattern and the exact-path pattern for a file separately copied from
+ * inside it both appear, matching the 1:1 mapping this feature's real
+ * watchPatterns arrays use.
  */
 function deriveExpectedPatterns(dockerfileText: string, extras: string[]): Set<string> {
   const patterns = new Set<string>(extras);
