@@ -2,7 +2,7 @@
 
 Plan: `docs/plans/decision-runtime-mcp/plan.md`
 
-Current PR implementation SHA: `b4fd9d180d7e7479ca84e0f223eaa2ebcdb7e910`
+Current PR implementation SHA: `ea89a27152ed21ecc23cbe5bf67da60fe6024ff6`
 
 Original independently reviewed SHA:
 `ee7c7ec2c8036ecae7c61d9cbf4fafb4cca7cdcd`
@@ -45,12 +45,12 @@ branch and transcribed the evidence into `ACs.md`.
 | Gate | Result |
 | --- | --- |
 | Focused MCP conformance | 39/39 passed |
-| Full suite with disposable PostgreSQL | 408/408 passed after rebase; zero skips |
-| Clean-checkout CI command | `npm test` built workspaces first; 380 passed and only 28 PostgreSQL tests skipped without a configured database |
+| Full suite with disposable PostgreSQL | 409/409 passed after review fixes; zero skips |
+| Clean-checkout CI command | `npm test` built workspaces first; 381 passed and only 28 PostgreSQL tests skipped without a configured database |
 | Separate PostgreSQL suite | 28/28 passed; disposable container removed |
 | TypeScript | `npm run typecheck` and `npm run build` passed |
 | Production dependencies | `npm audit --omit=dev` reported zero vulnerabilities |
-| Production image | Built successfully; only the five intended workspaces were present |
+| Production images | API and MCP images built; the API image cannot resolve the MCP SDK while the MCP image can |
 | Hosted lifecycle | Ready against stubs, invalid Origin rejected, ready after restart, degraded when upstream failed |
 | Repository quality | `git diff --check`, public-language scan, and clean-worktree checks passed |
 
@@ -79,6 +79,11 @@ corrected and regression-tested:
    so clean CI checkouts do not depend on pre-existing `dist` output.
 10. Closed each hosted per-request MCP server on both successful response
     `finish` and aborted response `close`, with one idempotent cleanup path.
+11. Moved root MCP SDK and Zod declarations to development dependencies while
+    retaining production ownership in each MCP workspace, keeping the SDK out
+    of unrelated API images.
+12. Replaced uncancelable request timeout signals with an abort controller and
+    a timer cleared after response validation on every outcome.
 
 ## Residual Risks
 
