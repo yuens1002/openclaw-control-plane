@@ -79,3 +79,20 @@ and synchronizes `docs/architecture.md` and `docs/openclaw-tools.md` with the
 implemented API and adapter. This correction changes documentation only; its
 link, terminology, example-contract, and generic-public-boundary checks are
 recorded in the final documentation commit.
+
+## Inputs for /retro
+
+- Add to `/project-manager`: for a public feature, documentation deliverables
+  must cover the reader journey from a top-level index through overview,
+  architecture, API/contract, usage example, and operations; existing files do
+  not count as discoverable documentation unless those entry points link them.
+  When a plan moves to implemented status, label its original current-state
+  section as a historical pre-implementation baseline.
+- Add to `/test-engineer`: an environment-dependent release suite passes only
+  when its expected files/tests ran and unexpected skips are zero. Record the
+  observed pass/skip inventory, and provision the disposable dependency before
+  claiming the full gate passed.
+- Add to `/test-engineer` and `/review`: every verification claim must name the
+  executed method and durable evidence. Do not turn static inspection into a
+  build claim, and record independent review scope, reviewed SHA, and result in
+  the review artifact before calling that review auditable.
