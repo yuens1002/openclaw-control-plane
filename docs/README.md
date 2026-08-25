@@ -37,7 +37,8 @@ Examples:
 
 ## Start Here
 
-- [Architecture](architecture.md): current package and ownership boundaries.
+- [Architecture](architecture.md): current package, ownership, and
+  deployment-topology boundaries.
 - [Decision Runtime](decision-runtime.md): durable model, API, usage examples,
   typed tools, and extension path.
 - [Runtime Authentication And Authorization](runtime-authentication.md): OIDC,
