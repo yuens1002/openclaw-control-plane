@@ -68,3 +68,14 @@ a substitute for the pending human review.
 
 Ready for human review and PR publication. No current-head implementation,
 security, conformance, recovery, or documentation blocker remains.
+
+## Post-Review Documentation Correction
+
+A subsequent human-readability audit found that the runtime implementation was
+documented across authentication, deployment, ADR, and planning files but had
+no discoverable architecture-and-usage guide. The branch now includes
+`docs/decision-runtime.md`, links it from the README and documentation index,
+and synchronizes `docs/architecture.md` and `docs/openclaw-tools.md` with the
+implemented API and adapter. This correction changes documentation only; its
+link, terminology, example-contract, and generic-public-boundary checks are
+recorded in the final documentation commit.

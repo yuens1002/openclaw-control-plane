@@ -37,9 +37,11 @@ a reproducible, verifiable, agency-ready OpenClaw control-plane baseline.
 
 ## Status
 
-This project is in early M1 foundation work. Production connectors and
-client-specific assumptions are intentionally out of scope. The default API and
-worker runner start with no registered workflows.
+This project provides a tested public foundation for authenticated typed work,
+durable runtime state, and reproducible OpenClaw deployment. Production
+connectors and client-specific assumptions remain intentionally out of scope.
+The default runtime ships only workflow-neutral `example.*` registrations and
+handlers; deployments inject their own consumer registrations and behavior.
 
 ## Architecture
 
@@ -54,6 +56,20 @@ OpenClaw manages the system; it does not become the system.
 - `deploy/openclaw-railway`: OpenClaw Railway template installer and
   agency-controlled per-client provisioning
 - `docs`: architecture, feature, and operations documentation
+
+## Decision Runtime
+
+The authenticated Decision Runtime is the durable execution boundary for typed
+agent and service work. It records events, work items, approvals, action
+attempts, results, artifacts, provenance, audit history, and rebuildable
+projections without embedding a client workflow in the public control plane.
+
+Start with [Decision Runtime](docs/decision-runtime.md) for the architecture,
+runtime model, complete API surface, HTTP examples, typed tool usage, and the
+extension path. Then use
+[Runtime Authentication And Authorization](docs/runtime-authentication.md) and
+[Private Decision Runtime Deployment](docs/decision-runtime-deployment.md) for
+the trust and operating contracts.
 
 ## Local Setup
 
@@ -81,10 +97,12 @@ npm test
 npm run build
 ```
 
-The current test suite covers event envelope validation and event idempotency.
-Client-grade Railway install verification uses mocked Railway CLI tests. Live
-Railway smoke tests are intentionally opt-in so normal CI does not create cloud
-resources.
+The test suite covers contracts, authentication and authorization, the typed
+runtime API and tool adapter, PostgreSQL persistence and migration, attribution,
+idempotency, approvals, provenance, projections, and Railway install behavior.
+The production runtime container, restart, and recovery flow can be verified
+locally with `npm run verify:decision-runtime`. Live Railway smoke tests remain
+opt-in so normal CI does not create cloud resources.
 
 Workspace packages are marked `private: true` intentionally. The GitHub repo can
 be public while npm publishing remains out of scope for the M1 baseline.

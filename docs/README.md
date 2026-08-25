@@ -35,6 +35,17 @@ Examples:
   to match the latest state — a changed decision gets a new ADR that
   supersedes the old one.
 
+## Start Here
+
+- [Architecture](architecture.md): current package and ownership boundaries.
+- [Decision Runtime](decision-runtime.md): durable model, API, usage examples,
+  typed tools, and extension path.
+- [Runtime Authentication And Authorization](runtime-authentication.md): OIDC,
+  stable identity, policy, delegation, and key rotation.
+- [Private Decision Runtime Deployment](decision-runtime-deployment.md):
+  service topology, readiness, smoke, backup/restore, and rollback.
+- [OpenClaw Tools](openclaw-tools.md): typed adapter surface exposed to agents.
+
 ## Public-Repo Rule
 
 This rule applies to everything written in this public repo: docs, plans,
