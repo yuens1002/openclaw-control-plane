@@ -49,7 +49,8 @@ Examples:
 ## Public-Repo Rule
 
 This rule applies to everything written in this public repo: docs, plans,
-ACs, GitHub issues, PR descriptions, review replies, and issue/PR comments.
+ACs, GitHub issues, PR descriptions, issue/PR comments, and pull request review
+comments.
 
 Docs must not contain client data, private credentials, production tokens,
 handoff passwords, or private operational URLs. Put local-only values in ignored
@@ -77,7 +78,7 @@ truth" rather than any one of them by name.
 | `acme-agency/acme-client-profile` (a real private repo slug) | "a private agency/client profile repo" |
 | "our agency's Railway project" | "the target Railway service" |
 | "the ACME client workflow" | "a client-specific workflow (fake/manual example)" |
-| a real principal, actor, domain, or deployment ID | "the configured service principal" or "the target deployment" |
+| "a real principal, actor, domain, or deployment ID" | "the configured service principal" or "the target deployment" |
 
 If a specific private name is genuinely necessary to explain something (rare —
 usually a generic description works), stop and ask whether it belongs in this
