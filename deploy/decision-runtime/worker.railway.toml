@@ -1,6 +1,23 @@
 [build]
 builder = "dockerfile"
 dockerfilePath = "deploy/decision-runtime/worker.Dockerfile"
+watchPatterns = [
+  "/apps/worker/**",
+  "/packages/contracts/**",
+  "/packages/runtime-auth/**",
+  "/packages/db/**",
+  "/package.json",
+  "/package-lock.json",
+  "/tsconfig.json",
+  "/tsconfig.base.json",
+  "/apps/worker/package.json",
+  "/packages/contracts/package.json",
+  "/packages/runtime-auth/package.json",
+  "/packages/db/package.json",
+  "/deploy/decision-runtime/worker.Dockerfile",
+  "/deploy/decision-runtime/worker.railway.toml",
+  "/.dockerignore"
+]
 
 [deploy]
 healthcheckPath = "/health"
