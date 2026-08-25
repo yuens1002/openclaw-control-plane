@@ -27,9 +27,21 @@ describe("MCP application configuration", () => {
       loadMcpAppConfig({
         ...baseEnvironment(),
         MCP_TRANSPORT: "streamable-http",
-        MCP_INBOUND_BEARER_TOKEN: "separate-bridge-secret"
-      }).hosted.bearerToken
-    ).toBe("separate-bridge-secret");
+        MCP_INBOUND_BEARER_TOKEN: "separate-bridge-secret",
+        MCP_ALLOWED_ORIGINS: "https://one.example,https://two.example"
+      }).hosted
+    ).toMatchObject({
+      bearerToken: "separate-bridge-secret",
+      allowedOrigins: ["https://one.example", "https://two.example"]
+    });
+    expect(() =>
+      loadMcpAppConfig({
+        ...baseEnvironment(),
+        MCP_TRANSPORT: "streamable-http",
+        MCP_INBOUND_BEARER_TOKEN: "separate-bridge-secret",
+        MCP_ALLOWED_ORIGINS: "https://one.example/path"
+      })
+    ).toThrow(/without credentials or paths/);
   });
 
   it("fails unsafe production transport and permits explicit local development", () => {

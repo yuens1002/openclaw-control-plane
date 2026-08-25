@@ -280,7 +280,7 @@ describe("Decision Runtime MCP module", () => {
         type: "text",
         text: JSON.stringify({
           error: {
-            message: "Runtime request was rejected.",
+            message: "Downstream request was rejected.",
             status: 409,
             code: "runtime.approval_required",
             request_id: "request-approval"

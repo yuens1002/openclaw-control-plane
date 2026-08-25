@@ -10,6 +10,18 @@ import { afterEach, describe, expect, it } from "vitest";
 const root = fileURLToPath(new URL("..", import.meta.url));
 const servers: Server[] = [];
 const children: ChildProcess[] = [];
+const EXPECTED_TOOLS = [
+  "create_runtime_approval",
+  "create_runtime_event",
+  "create_runtime_work_item",
+  "execute_runtime_command",
+  "get_runtime_edges",
+  "get_runtime_projection",
+  "get_runtime_record",
+  "list_runtime_audit",
+  "list_runtime_registrations",
+  "list_runtime_stream_records"
+];
 
 afterEach(async () => {
   await Promise.all(children.splice(0).map(stopChild));
@@ -53,7 +65,16 @@ describe("Decision Runtime MCP hosted process", () => {
       { requestInit: { headers: { authorization: "Bearer example-bridge-secret" } } }
     );
     await client.connect(transport as unknown as Transport);
-    expect((await client.listTools()).tools).toHaveLength(10);
+    const listed = await client.listTools();
+    expect(listed.tools.map((tool) => tool.name).sort()).toEqual(EXPECTED_TOOLS);
+    expect(
+      listed.tools.find((tool) => tool.name === "execute_runtime_command")?.annotations
+    ).toMatchObject({
+      readOnlyHint: false,
+      idempotentHint: true,
+      destructiveHint: true,
+      openWorldHint: true
+    });
     expect(
       (await client.callTool({ name: "list_runtime_registrations", arguments: {} }))
         .structuredContent

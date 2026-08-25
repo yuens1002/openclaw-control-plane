@@ -51,6 +51,9 @@ local process account and filesystem/environment permissions.
 
 Hosted mode uses stateless Streamable HTTP at `/mcp`. It requires
 `MCP_INBOUND_BEARER_TOKEN`, checked before request parsing or downstream access.
+Non-browser clients normally omit `Origin`. Requests that include `Origin` are
+rejected unless the exact value is listed in `MCP_ALLOWED_ORIGINS`, protecting
+the endpoint from DNS rebinding.
 That deployment credential only gates the bridge. The module separately uses
 OAuth 2.0 client credentials to obtain the identity token presented to the
 Decision Runtime.
@@ -68,13 +71,15 @@ Required service variables:
 | `OIDC_AUDIENCE` | Optional provider audience parameter |
 | `OIDC_CLIENT_AUTH_METHOD` | `client_secret_basic` or `client_secret_post` |
 | `MCP_INBOUND_BEARER_TOKEN` | Hosted bridge credential; not used by stdio |
+| `MCP_ALLOWED_ORIGINS` | Optional comma-separated browser origins accepted by hosted MCP |
 | `MCP_HOST`, `MCP_PORT` | Optional hosted bind and port; `PORT` is also honored |
 | `MCP_REQUEST_TIMEOUT_MS` | Bound for token and Decision Runtime HTTP requests |
 
 Production requires HTTPS runtime and token endpoints. Plain HTTP is accepted
 only for loopback hosts and requires `NODE_ENV=development` plus
-`MCP_ALLOW_INSECURE_TRANSPORT=true` for disposable local fixtures. Inject secrets through the process or deployment secret
-store; do not commit them to OpenClaw configuration.
+`MCP_ALLOW_INSECURE_TRANSPORT=true` for disposable local fixtures. Inject
+secrets through the process or deployment secret store; do not commit them to
+OpenClaw configuration.
 
 ## OpenClaw Configuration
 

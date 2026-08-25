@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import {
   createMcpServiceHost,
+  McpServiceError,
   type McpServiceModule,
   type McpToolCallContext
 } from "@openclaw-control-plane/mcp-service";
@@ -32,6 +33,13 @@ describe("reusable MCP service host", () => {
         modules: [fixtureModule("one", "same"), fixtureModule("two", "same")]
       })
     ).toThrow("Duplicate MCP tool name: same");
+    expect(() =>
+      createMcpServiceHost({
+        name: "test-host",
+        version: "1.0.0",
+        modules: [fixtureModule("same-module", "one"), fixtureModule("same-module", "two")]
+      })
+    ).toThrow("Duplicate MCP module ID: same-module");
   });
 
   it("provides server-owned context and compatible structured/text results", async () => {
@@ -84,6 +92,52 @@ describe("reusable MCP service host", () => {
     await close();
   });
 
+  it("emits only schema-bounded structured error fields", async () => {
+    const safe = fixtureModule("safe", "safe_error");
+    safe.tools[0]!.handler = async () => {
+      throw new McpServiceError("downstream_rejected", {
+        status: 409,
+        code: "runtime.idempotency_conflict",
+        requestId: "request-1"
+      });
+    };
+    const unsafe = fixtureModule("unsafe", "unsafe_error");
+    unsafe.tools[0]!.handler = async () => {
+      throw new McpServiceError(
+        "downstream_rejected",
+        { status: 409, token: "sentinel-secret" } as never
+      );
+    };
+    const host = createMcpServiceHost({
+      name: "test-host",
+      version: "1.0.0",
+      modules: [safe, unsafe],
+      onDiagnostic: vi.fn()
+    });
+    const { client, close } = await connectInMemory(host.buildServer("stdio"));
+
+    const safeResult = await client.callTool({ name: "safe_error", arguments: { value: "x" } });
+    expect(safeResult.content).toEqual([
+      {
+        type: "text",
+        text: JSON.stringify({
+          error: {
+            message: "Downstream request was rejected.",
+            status: 409,
+            code: "runtime.idempotency_conflict",
+            request_id: "request-1"
+          }
+        })
+      }
+    ]);
+    const unsafeResult = await client.callTool({
+      name: "unsafe_error",
+      arguments: { value: "x" }
+    });
+    expect(JSON.stringify(unsafeResult)).not.toContain("sentinel-secret");
+    await close();
+  });
+
   it("gates hosted MCP before parsing and serves official-client calls statelessly", async () => {
     const contexts: McpToolCallContext[] = [];
     const module = fixtureModule("example", "echo", (context) => contexts.push(context));
@@ -96,7 +150,11 @@ describe("reusable MCP service host", () => {
       modules: [module],
       onDiagnostic: vi.fn()
     });
-    const running = await host.startHttp({ port: 0, bearerToken: "bridge-secret" });
+    const running = await host.startHttp({
+      port: 0,
+      bearerToken: "bridge-secret",
+      allowedOrigins: ["https://trusted.example"]
+    });
     const address = running.address()!;
     const endpoint = `http://127.0.0.1:${address.port}`;
 
@@ -108,6 +166,26 @@ describe("reusable MCP service host", () => {
       });
       expect(denied.status).toBe(401);
     }
+    expect(handler).not.toHaveBeenCalled();
+
+    const invalidOrigin = await fetch(`${endpoint}/mcp`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer bridge-secret",
+        origin: "https://attacker.example"
+      },
+      body: "not-json"
+    });
+    expect(invalidOrigin.status).toBe(403);
+    const allowedOrigin = await fetch(`${endpoint}/mcp`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer bridge-secret",
+        origin: "https://trusted.example"
+      },
+      body: "not-json"
+    });
+    expect(allowedOrigin.status).toBe(400);
     expect(handler).not.toHaveBeenCalled();
 
     const client = new Client({ name: "http-test", version: "1.0.0" });

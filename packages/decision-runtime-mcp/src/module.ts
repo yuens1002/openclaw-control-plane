@@ -261,16 +261,14 @@ function translateRuntimeError(error: unknown) {
       {
         status: error.status,
         ...(error.code ? { code: error.code } : {}),
-        ...(error.requestId ? { request_id: error.requestId } : {})
-      },
-      "Runtime request was rejected."
+        ...(error.requestId ? { requestId: error.requestId } : {})
+      }
     );
   }
   if (error instanceof ControlPlaneTransportError) {
     return new McpServiceError(
       "downstream_unavailable",
-      { code: "runtime.transport_error" },
-      "Runtime service is unavailable."
+      { code: "runtime.transport_error" }
     );
   }
   return error;

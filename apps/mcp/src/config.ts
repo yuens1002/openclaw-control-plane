@@ -17,6 +17,7 @@ const EnvironmentSchema = z
     MCP_PORT: z.coerce.number().int().min(0).max(65_535).optional(),
     PORT: z.coerce.number().int().min(0).max(65_535).optional(),
     MCP_INBOUND_BEARER_TOKEN: z.string().min(16).optional(),
+    MCP_ALLOWED_ORIGINS: z.string().optional(),
     RUNTIME_API_URL: z.string().url(),
     OIDC_TOKEN_ENDPOINT: z.string().url(),
     OIDC_CLIENT_ID: z.string().min(1),
@@ -69,6 +70,21 @@ export function loadMcpAppConfig(environment: NodeJS.ProcessEnv) {
     requestTimeoutMs: parsed.MCP_REQUEST_TIMEOUT_MS,
     allowInsecureTransport
   });
+  const allowedOrigins = (parsed.MCP_ALLOWED_ORIGINS ?? "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+    .map((origin) => {
+      try {
+        const parsedOrigin = new URL(origin);
+        if (parsedOrigin.origin !== origin) throw new Error();
+        return parsedOrigin.origin;
+      } catch {
+        throw new Error(
+          "MCP allowed origins must be absolute origins without credentials or paths."
+        );
+      }
+    });
   return {
     mode: parsed.MCP_TRANSPORT,
     hosted: {
@@ -76,7 +92,8 @@ export function loadMcpAppConfig(environment: NodeJS.ProcessEnv) {
       port: parsed.MCP_PORT ?? parsed.PORT ?? 3001,
       ...(parsed.MCP_INBOUND_BEARER_TOKEN
         ? { bearerToken: parsed.MCP_INBOUND_BEARER_TOKEN }
-        : {})
+        : {}),
+      allowedOrigins
     },
     runtime: {
       baseUrl: parsed.RUNTIME_API_URL,

@@ -27,7 +27,8 @@ export async function startMcpApp(config: McpAppConfig = loadMcpAppConfig(proces
       : await host.startHttp({
           hostname: config.hosted.hostname,
           port: config.hosted.port,
-          bearerToken: config.hosted.bearerToken!
+          bearerToken: config.hosted.bearerToken!,
+          allowedOrigins: config.hosted.allowedOrigins
         });
   let closed = false;
   return {

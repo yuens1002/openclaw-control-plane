@@ -56,6 +56,7 @@ export interface HostedMcpOptions {
   mcpPath?: string;
   healthPath?: string;
   maxBodyBytes?: number;
+  allowedOrigins?: readonly string[];
 }
 
 export interface RunningMcpService {
@@ -67,14 +68,40 @@ export interface RunningHostedMcpService extends RunningMcpService {
   address: () => { address: string; port: number } | null;
 }
 
+const PublicErrorDetailsSchema = z
+  .object({
+    status: z.number().int().min(400).max(599).optional(),
+    code: z
+      .string()
+      .min(3)
+      .max(128)
+      .regex(/^[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)+$/)
+      .optional(),
+    requestId: z
+      .string()
+      .min(1)
+      .max(256)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._:@/-]*$/)
+      .optional()
+  })
+  .strict();
+
+type McpServiceErrorClassification = "downstream_rejected" | "downstream_unavailable";
+
 export class McpServiceError extends Error {
+  readonly details: z.infer<typeof PublicErrorDetailsSchema>;
+
   constructor(
-    readonly classification: string,
-    readonly details: Record<string, string | number>,
-    message = "Tool execution failed."
+    readonly classification: McpServiceErrorClassification,
+    details: z.input<typeof PublicErrorDetailsSchema>
   ) {
-    super(message);
+    super(
+      classification === "downstream_rejected"
+        ? "Downstream request was rejected."
+        : "Downstream service is unavailable."
+    );
     this.name = "McpServiceError";
+    this.details = PublicErrorDetailsSchema.parse(details);
   }
 }
 
@@ -144,6 +171,7 @@ export function createMcpServiceHost(options: McpServiceHostOptions) {
     if (!config.bearerToken.trim()) throw new Error("Hosted MCP bearer token is required.");
     const mcpPath = config.mcpPath ?? "/mcp";
     const healthPath = config.healthPath ?? "/health";
+    const allowedOrigins = validateAllowedOrigins(config.allowedOrigins ?? []);
     const active = new Set<McpServer>();
     const httpServer = createServer(async (request, response) => {
       try {
@@ -156,6 +184,11 @@ export function createMcpServiceHost(options: McpServiceHostOptions) {
         }
         if (path !== mcpPath) {
           response.writeHead(404).end();
+          return;
+        }
+        if (!hasAllowedOrigin(request, allowedOrigins)) {
+          response.writeHead(403, { "content-type": "application/json" });
+          response.end(JSON.stringify({ error: "invalid_origin" }));
           return;
         }
         if (!hasBearer(request, config.bearerToken)) {
@@ -176,12 +209,12 @@ export function createMcpServiceHost(options: McpServiceHostOptions) {
         // exactOptionalPropertyTypes-compatible, so keep the cast at this boundary.
         const transport = new StreamableHTTPServerTransport();
         active.add(server);
-        await server.connect(transport as unknown as Transport);
-        await transport.handleRequest(request, response, body);
         response.once("close", () => {
           active.delete(server);
           void server.close();
         });
+        await server.connect(transport as unknown as Transport);
+        await transport.handleRequest(request, response, body);
       } catch (error) {
         diagnose(`MCP HTTP request failed: ${classifyError(error)}`);
         if (!response.headersSent) {
@@ -227,9 +260,12 @@ export function createMcpServiceHost(options: McpServiceHostOptions) {
 
 function collectTools(modules: readonly McpServiceModule[]) {
   const names = new Set<string>();
+  const moduleIds = new Set<string>();
   const collected: Array<{ module: McpServiceModule; tool: McpServiceTool }> = [];
   for (const module of modules) {
     if (!module.id.trim()) throw new Error("MCP module ID is required.");
+    if (moduleIds.has(module.id)) throw new Error(`Duplicate MCP module ID: ${module.id}`);
+    moduleIds.add(module.id);
     for (const tool of module.tools) {
       if (names.has(tool.name)) throw new Error(`Duplicate MCP tool name: ${tool.name}`);
       names.add(tool.name);
@@ -262,6 +298,25 @@ function hasBearer(request: IncomingMessage, expected: string) {
   return supplied.length === wanted.length && timingSafeEqual(supplied, wanted);
 }
 
+function validateAllowedOrigins(origins: readonly string[]) {
+  return new Set(
+    origins.map((origin) => {
+      try {
+        const parsed = new URL(origin);
+        if (parsed.origin !== origin) throw new Error();
+        return parsed.origin;
+      } catch {
+        throw new Error("MCP allowed origins must be absolute origins without credentials or paths.");
+      }
+    })
+  );
+}
+
+function hasAllowedOrigin(request: IncomingMessage, allowed: ReadonlySet<string>) {
+  const origin = request.headers.origin;
+  return origin === undefined || allowed.has(origin);
+}
+
 async function readJsonBody(request: IncomingMessage, limit: number) {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -285,7 +340,14 @@ function classifyError(error: unknown) {
 
 function publicError(error: unknown) {
   if (error instanceof McpServiceError) {
-    return JSON.stringify({ error: { message: error.message, ...error.details } });
+    const { requestId, ...details } = error.details;
+    return JSON.stringify({
+      error: {
+        message: error.message,
+        ...details,
+        ...(requestId ? { request_id: requestId } : {})
+      }
+    });
   }
   if (error instanceof z.ZodError) return "Tool input or output failed validation.";
   if (error instanceof Error && /returned 4\d\d/.test(error.message)) return "Downstream request was rejected.";
