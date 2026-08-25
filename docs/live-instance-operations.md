@@ -369,7 +369,9 @@ recorded decision to accept the risk. G6 was also tracked in issue #47
 and remains open: it needs design agreement on a client registry (or
 an equivalent independent source of truth) before any code, which is
 out of scope for the gap-closure bundle that closed the other three.
-G4 was tracked in issue #45 and is closed below. An entry here that
+Issue #47 stays open for G6 rather than closing on merge of the PR
+that dispositions the other three. G4 was tracked in issue #45 and is
+closed below. An entry here that
 says "still open" with no decision attached is a bug in this document,
 not a neutral state -- that is how the stale entries corrected in #46
 arose.
@@ -421,12 +423,14 @@ the GET-to-POST window this gap is actually about. A concurrent writer
 whose change this function's own POST clobbers leaves the
 verification read matching exactly what this function wrote — the
 clobber it exists to catch produces no divergence for it to see. It
-would only catch a *different, near-zero-width* race (something else
+catches a different, near-zero-width race instead (something else
 writing in the instant between this function's own POST and its
-immediately-following, un-delayed verification GET), not the gap
-description's actual race. Renaming the recommended fix to "detection"
-without fixing which window it watches would have shipped a check that
-reports nothing on the exact failure it was named for.
+immediately-following, un-delayed verification GET) — and, separately
+from any race, a non-concurrent divergence such as the server
+normalizing or re-serializing the document on write. Neither is the
+gap description's actual race. Renaming the recommended fix to
+"detection" without fixing which window it watches would have shipped
+a check that reports nothing on the exact failure it was named for.
 
 A real fix for the window that matters needs either a provider-side
 conditional write (the CLI exposes none, verified under G4) or a lock
@@ -463,9 +467,11 @@ two invocations can both read the same value, both pass the check, and
 both write -- last one wins. What it reliably catches is drift that
 already existed at read time, which is the common case. Genuine
 serialization would need a provider-side conditional write (the Railway
-CLI exposes none) or a lock shared by every writer; that remains open,
-alongside the same unresolved concurrency question on the CORS patch in
-G5. And they now wait on the
+CLI exposes none) or a lock shared by every writer -- this entry's own
+non-atomicity remains open and is not tracked by issue #47, the same
+structural gap G5 has, whose config-patch instance of it was closed as
+an accepted risk under that issue rather than fixed. And they now wait
+on the
 auth-gated `/setup/api/status` after the redeploy -- the same signal the
 provisioning path uses -- because a container can report a finished
 deployment while not yet answering authenticated requests. That last part
