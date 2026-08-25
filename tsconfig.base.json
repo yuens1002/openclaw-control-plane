@@ -29,6 +29,7 @@
       "@openclaw-control-plane/openclaw-railway-installer/template-lock": ["packages/openclaw-railway-installer/src/template-lock.ts"],
       "@openclaw-control-plane/openclaw-railway-installer/verify-proof": ["packages/openclaw-railway-installer/src/verify-proof.ts"],
       "@openclaw-control-plane/openclaw-adapter": ["packages/openclaw-adapter/src/index.ts"],
+      "@openclaw-control-plane/mcp-service": ["packages/mcp-service/src/index.ts"],
       "@openclaw-control-plane/openclaw-setup-applier/profile-schema": ["packages/openclaw-setup-applier/src/profile-schema.ts"],
       "@openclaw-control-plane/openclaw-setup-applier/setup-api-client": ["packages/openclaw-setup-applier/src/setup-api-client.ts"],
       "@openclaw-control-plane/openclaw-setup-applier/railway-variables": ["packages/openclaw-setup-applier/src/railway-variables.ts"],

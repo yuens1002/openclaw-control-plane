@@ -12,6 +12,7 @@
     { "path": "../packages/runtime-auth" },
     { "path": "../packages/db" },
     { "path": "../packages/openclaw-adapter" },
+    { "path": "../packages/mcp-service" },
     { "path": "../packages/openclaw-railway-installer" },
     { "path": "../packages/openclaw-setup-applier" },
     { "path": "../apps/api" }
