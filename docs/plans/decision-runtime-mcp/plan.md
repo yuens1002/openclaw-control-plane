@@ -2,7 +2,7 @@
 
 Issue: https://github.com/yuens1002/openclaw-control-plane/issues/63
 Branch: `feat/decision-runtime-mcp`
-Status: approved for AC authoring; implementation begins after Gate 1/2 pre-check
+Status: approved; AC Gate 1/2 passed and implementation is authorized
 
 ## Delivery Process
 
