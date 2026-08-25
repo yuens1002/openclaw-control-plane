@@ -1,36 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  installOpenClawOnRailway,
-  type CommandResult,
-  type RailwayRunner
-} from "@openclaw-control-plane/openclaw-railway-installer";
+import { installOpenClawOnRailway } from "@openclaw-control-plane/openclaw-railway-installer";
 import { createFakeConfigStore } from "./fixtures/fake-config-store.js";
+import { FakeRailwayRunner } from "./fixtures/fake-railway-runner.js";
 
-class FakeRailwayRunner implements RailwayRunner {
-  private serviceListResponses: unknown[];
-
-  constructor(serviceListResponses: unknown[]) {
-    this.serviceListResponses = [...serviceListResponses];
-  }
-
-  async run(args: string[]): Promise<CommandResult> {
-    const key = args.slice(0, 2).join(" ");
-    if (args[0] === "deploy") {
-      return { stdout: "" };
-    }
-    if (key === "service list") {
-      return { stdout: JSON.stringify(this.serviceListResponses.shift() ?? []) };
-    }
-    if (key === "domain list") {
-      return {
-        stdout: JSON.stringify({
-          domains: [{ domain: "example-openclaw.example.com", type: "service", targetPort: 8080 }]
-        })
-      };
-    }
-    throw new Error(`Unexpected command: ${args.join(" ")}`);
-  }
+function newRunner(serviceListResponses: unknown[][]): FakeRailwayRunner {
+  const runner = new FakeRailwayRunner(serviceListResponses);
+  runner.setDomainList({
+    domains: [{ domain: "example-openclaw.example.com", type: "service", targetPort: 8080 }]
+  });
+  return runner;
 }
 
 function service(status: "BUILDING" | "SUCCESS") {
@@ -43,7 +22,7 @@ function service(status: "BUILDING" | "SUCCESS") {
 
 describe("installOpenClawOnRailway readiness check", () => {
   it("polls the authenticated /setup/api/status endpoint with the resolved credentials, not /setup/healthz", async () => {
-    const runner = new FakeRailwayRunner([[], [service("BUILDING")], [service("SUCCESS")]]);
+    const runner = newRunner([[], [service("BUILDING")], [service("SUCCESS")]]);
     const readinessCalls: { url: string; auth: { username: string; password: string } }[] = [];
 
     await installOpenClawOnRailway(
@@ -76,7 +55,7 @@ describe("installOpenClawOnRailway readiness check", () => {
   });
 
   it("fails the install when the authenticated readiness check does not return 200", async () => {
-    const runner = new FakeRailwayRunner([[], [service("SUCCESS")]]);
+    const runner = newRunner([[], [service("SUCCESS")]]);
 
     await expect(
       installOpenClawOnRailway(
@@ -101,7 +80,7 @@ describe("installOpenClawOnRailway readiness check", () => {
   });
 
   it("retries the readiness check on transient non-200 responses until it succeeds", async () => {
-    const runner = new FakeRailwayRunner([[], [service("SUCCESS")]]);
+    const runner = newRunner([[], [service("SUCCESS")]]);
     let attempts = 0;
 
     const result = await installOpenClawOnRailway(
@@ -131,7 +110,7 @@ describe("installOpenClawOnRailway readiness check", () => {
 
 describe("installOpenClawOnRailway post-deploy step order and result reporting", () => {
   it("runs readiness -> allowedOrigins patch -> device approve in order and reports what happened", async () => {
-    const runner = new FakeRailwayRunner([[], [service("SUCCESS")]]);
+    const runner = newRunner([[], [service("SUCCESS")]]);
     const order: string[] = [];
 
     const result = await installOpenClawOnRailway(
@@ -177,7 +156,7 @@ describe("installOpenClawOnRailway post-deploy step order and result reporting",
   });
 
   it("reports no patch and no approval when there's nothing to do", async () => {
-    const runner = new FakeRailwayRunner([[], [service("SUCCESS")]]);
+    const runner = newRunner([[], [service("SUCCESS")]]);
 
     const result = await installOpenClawOnRailway(
       {
