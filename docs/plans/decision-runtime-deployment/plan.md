@@ -4,12 +4,16 @@ Issue: https://github.com/yuens1002/openclaw-control-plane/issues/53
 Branch: `feat/decision-runtime-deployment`
 Status: approved for implementation
 
+> Historical scope note: issue #53 deliberately shipped before transport
+> authentication. Issue #39 later supplied the production OIDC/policy boundary;
+> the current service contract lives in `docs/runtime-authentication.md`.
+
 ## Outcome
 
 Ship a dedicated production target for the private decision-runtime API without
 changing the root OpenClaw deployment. The service owns PostgreSQL migrations,
 registry synchronization, and durable runtime access while operational writes
-remain fail-closed until authenticated command-context wiring is delivered.
+remained fail-closed pending the separately scoped authentication work.
 
 ## Deliverables
 

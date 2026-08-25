@@ -9,7 +9,9 @@
   "include": ["**/*.ts", "fixtures/**/*.json"],
   "references": [
     { "path": "../packages/contracts" },
+    { "path": "../packages/runtime-auth" },
     { "path": "../packages/db" },
+    { "path": "../packages/openclaw-adapter" },
     { "path": "../packages/openclaw-railway-installer" },
     { "path": "../packages/openclaw-setup-applier" },
     { "path": "../apps/api" }

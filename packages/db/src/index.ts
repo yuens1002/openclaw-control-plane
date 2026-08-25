@@ -4,5 +4,6 @@ export * from "./migrations.js";
 export * from "./runtime-registry.js";
 export * from "./runtime-repository.js";
 export * from "./runtime-bootstrap.js";
+export * from "./runtime-api-service.js";
 export * from "./runtime-service.js";
 export * from "./schema.js";
