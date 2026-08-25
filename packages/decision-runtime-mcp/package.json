@@ -1,0 +1,16 @@
+{
+  "name": "@openclaw-control-plane/decision-runtime-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./token-provider": "./src/token-provider.ts"
+  },
+  "dependencies": {
+    "@openclaw-control-plane/contracts": "file:../contracts",
+    "@openclaw-control-plane/mcp-service": "file:../mcp-service",
+    "@openclaw-control-plane/openclaw-adapter": "file:../openclaw-adapter",
+    "zod": "^3.25.1"
+  }
+}
