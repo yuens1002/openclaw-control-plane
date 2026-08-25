@@ -57,11 +57,11 @@ handoff passwords, or private operational URLs. Put local-only values in ignored
 files such as `.env.local` or generated `*.local.md` handoff files.
 
 Public deployment evidence records behavior, not the operator's implementation.
-Use generic roles and placeholders for configured principals and actors, service
-names, domains, deployment IDs, generated record IDs, and private workflow
-names. Exact values belong in the deployment owner's private operational
-record. It is still useful to state that readiness passed, attribution was
-preserved, replay was idempotent, or provenance was traversable.
+Use generic roles and placeholders for configured principals and actors,
+deployment-specific service names, domains, deployment IDs, generated record
+IDs, and private workflow names. Exact values belong in the deployment owner's
+private operational record. It is still useful to state that readiness passed,
+attribution was preserved, replay was idempotent, or provenance was traversable.
 
 Public docs should describe OpenClaw Control Plane as a workflow-neutral
 baseline. Business workflows, connectors, credentials, and client automations

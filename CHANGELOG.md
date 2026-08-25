@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 This project follows the spirit of [Keep a Changelog](https://keepachangelog.com/)
-and uses semantic versioning once releases begin.
+and uses semantic versioning.
 
 ## [Unreleased]
 
