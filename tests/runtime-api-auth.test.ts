@@ -41,10 +41,44 @@ describe("authenticated runtime API", () => {
         body: JSON.stringify({ padding: "x".repeat(257 * 1024) })
       }
     );
+    const malformedResponses = await Promise.all(
+      ["events", "work-items", "approvals", "commands"].map((route) =>
+        createControlPlaneApp(dependencies).request(`/v1/runtime/${route}`, {
+          method: "POST",
+          headers: { authorization: "Bearer valid", "content-type": "application/json" },
+          body: "{not-json"
+        })
+      )
+    );
 
     expect(unauthenticated.status).toBe(401);
     expect(oversized.status).toBe(413);
+    for (const response of malformedResponses) {
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: { code: "runtime.invalid_request", message: "Request body must contain valid JSON." }
+      });
+    }
     expect(dependencies.runtimeApiService!.createIntake).not.toHaveBeenCalled();
+    expect(dependencies.runtimeApiService!.createApproval).not.toHaveBeenCalled();
+    expect(dependencies.runtimeApiService!.executeCommand).not.toHaveBeenCalled();
+  });
+
+  it("rejects an oversized delegation principal header before authorization", async () => {
+    const dependencies = createDependencies();
+    const response = await createControlPlaneApp(dependencies).request(
+      "/v1/runtime/registrations",
+      {
+        headers: {
+          authorization: "Bearer valid",
+          "x-on-behalf-of-principal": `principal://${"a".repeat(502)}`
+        }
+      }
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code: "runtime.invalid_request" } });
+    expect(dependencies.runtimeApiService!.listRegistrations).not.toHaveBeenCalled();
   });
 
   it("creates a typed event with server-derived context", async () => {

@@ -15,6 +15,7 @@ import {
   RuntimeRecordQuerySchema,
   SafeLocalIdentifierSchema,
   SafeNamespacedIdentifierSchema,
+  TrustedCommandContextSchema,
   type PipelineState,
   type TrustedCommandContext
 } from "@openclaw-control-plane/contracts";
@@ -178,7 +179,7 @@ export function createControlPlaneApp(
 
   app.post("/v1/runtime/events", async (context) => {
     const request = RuntimeIntakeRequestSchema.parse({
-      ...(await context.req.json()),
+      ...(await parseRuntimeJsonObject(context)),
       kind: "event"
     });
     const trusted = await authorizeRequest(context, dependencies, {
@@ -192,7 +193,7 @@ export function createControlPlaneApp(
 
   app.post("/v1/runtime/work-items", async (context) => {
     const request = RuntimeIntakeRequestSchema.parse({
-      ...(await context.req.json()),
+      ...(await parseRuntimeJsonObject(context)),
       kind: "work_item"
     });
     const trusted = await authorizeRequest(context, dependencies, {
@@ -205,7 +206,7 @@ export function createControlPlaneApp(
   });
 
   app.post("/v1/runtime/approvals", async (context) => {
-    const request = RuntimeApprovalRequestSchema.parse(await context.req.json());
+    const request = RuntimeApprovalRequestSchema.parse(await parseRuntimeJsonObject(context));
     const trusted = await authorizeRequest(context, dependencies, {
       action: "runtime.command.approve",
       resource: request.target,
@@ -217,7 +218,7 @@ export function createControlPlaneApp(
 
   app.post("/v1/runtime/commands", async (context) => {
     const runtime = requireRuntimeApi(dependencies);
-    const request = RuntimeCommandRequestSchema.parse(await context.req.json());
+    const request = RuntimeCommandRequestSchema.parse(await parseRuntimeJsonObject(context));
     const operation = runtime.describeOperation(
       request.operation_type,
       request.operation_schema_version
@@ -493,6 +494,23 @@ function createOperatorAuthMiddleware(): MiddlewareHandler | null {
   });
 }
 
+async function parseRuntimeJsonObject(
+  context: Context<AppEnvironment>
+): Promise<Record<string, unknown>> {
+  try {
+    const body: unknown = await context.req.json();
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw new RuntimeRequestError("Request body must contain a JSON object.");
+    }
+    return body as Record<string, unknown>;
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new RuntimeRequestError("Request body must contain valid JSON.");
+    }
+    throw error;
+  }
+}
+
 async function authorizeRequest(
   context: Context<AppEnvironment>,
   dependencies: ControlPlaneDependencies,
@@ -513,14 +531,12 @@ async function authorizeRequest(
     throw new HTTPException(429, { message: "Authorization request rate limit exceeded." });
   }
   const onBehalfOf = context.req.header("x-on-behalf-of-principal");
-  if (onBehalfOf && !/^principal:\/\/[A-Za-z0-9][A-Za-z0-9._:@/-]*$/.test(onBehalfOf)) {
-    throw new z.ZodError([
-      { code: "custom", path: ["x-on-behalf-of-principal"], message: "Invalid principal reference." }
-    ]);
-  }
+  const validatedOnBehalfOf = onBehalfOf
+    ? TrustedCommandContextSchema.shape.authenticated_principal_ref.parse(onBehalfOf)
+    : undefined;
   const trusted = dependencies.trustedContextCoordinator.authorize({
     authenticated_principal: authenticated,
-    ...(onBehalfOf ? { on_behalf_of_principal_id: onBehalfOf } : {}),
+    ...(validatedOnBehalfOf ? { on_behalf_of_principal_id: validatedOnBehalfOf } : {}),
     action: request.action,
     resource: request.resource,
     request_origin: request.requestOrigin ?? "http"

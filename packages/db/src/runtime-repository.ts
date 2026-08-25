@@ -1508,10 +1508,7 @@ function validateAppendCommand(
       (effect) => (effect.kind ?? "result") === kind
     );
     const persisted = effects.filter((record) => record.kind === kind);
-    if (
-      (kind === "result" && persisted.length !== declared.length) ||
-      (kind === "artifact" && persisted.length < declared.length)
-    ) {
+    if (persisted.length !== declared.length) {
       throw new Error("Persisted outputs do not match canonical declared effects.");
     }
     for (const [index, effect] of declared.entries()) {

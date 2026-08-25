@@ -545,6 +545,19 @@ describePostgres("PostgreSQL durable runtime repository", () => {
     );
     await expect(repository.appendCommand(alteredEffectType)).rejects.toThrow();
 
+    const extraArtifact = lifecycleCommand(
+      "extra-artifact-stream",
+      "extra-artifact-key-001"
+    );
+    const artifact = extraArtifact.records.find((record) => record.kind === "artifact")!;
+    extraArtifact.records = [
+      ...extraArtifact.records,
+      { ...artifact, record_id: "00000000-0000-4000-8000-000000000108" }
+    ];
+    await expect(repository.appendCommand(extraArtifact)).rejects.toThrow(
+      /canonical declared effects/i
+    );
+
     for (const [name, mutate] of [
       ["work-item", (payload: Record<string, unknown>) => ({ ...payload, work_item_id: randomUUID() })],
       ["handler", (payload: Record<string, unknown>) => ({ ...payload, handler_id: "other-handler" })],
@@ -859,6 +872,14 @@ function lifecycleCommand(streamId: string, idempotencyKey: string): AppendRunti
         schema_ref: "example://schemas/reconciliation-delta/v1",
         target: { type: "example.environment", id: "production" },
         payload: { changed: true }
+      },
+      {
+        kind: "artifact" as const,
+        result_type: "example.report",
+        schema_version: 1,
+        schema_ref: "example://schemas/report/v1",
+        target: { type: "example.environment", id: "production" },
+        payload: { content_ref: "artifact://example/report-001" }
       }
     ]
   };

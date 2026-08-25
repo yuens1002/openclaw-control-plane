@@ -348,7 +348,7 @@ export const exampleOperationRegistrations: readonly RuntimeOperationRegistratio
       additionalProperties: false,
       properties: { desired: { type: "object" } }
     },
-    allowed_result_types: ["example.reconciliation.delta"],
+    allowed_result_types: ["example.reconciliation.delta", "example.report"],
     handler_id: "example-reconcile-handler",
     handler_version: 1,
     authorization_action: "state.reconcile",
