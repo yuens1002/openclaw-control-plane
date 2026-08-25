@@ -221,6 +221,20 @@ describe("authenticated runtime API", () => {
     });
   });
 
+  it("keeps the audit record kind fixed when a caller supplies a kind query", async () => {
+    const dependencies = createDependencies();
+    const response = await createControlPlaneApp(dependencies).request(
+      "/v1/runtime/audit?kind=result&limit=25",
+      { headers: { authorization: "Bearer valid" } }
+    );
+
+    expect(response.status).toBe(200);
+    expect(dependencies.runtimeApiService!.listRecords).toHaveBeenCalledWith({
+      kind: "audit_entry",
+      limit: 25
+    });
+  });
+
   it("returns a stable client error for unknown or retired operation registrations", async () => {
     const dependencies = createDependencies();
     dependencies.runtimeApiService!.describeOperation = vi.fn(() => {

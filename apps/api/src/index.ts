@@ -577,11 +577,11 @@ function parseRecordQuery(
   fixed: { stream_id?: string; kind?: "audit_entry" }
 ) {
   return RuntimeRecordQuerySchema.parse({
-    ...fixed,
     ...(query.kind ? { kind: query.kind } : {}),
     ...(query.type ? { type: query.type } : {}),
     ...(query.cursor ? { cursor: query.cursor } : {}),
-    ...(query.limit ? { limit: Number(query.limit) } : {})
+    ...(query.limit ? { limit: Number(query.limit) } : {}),
+    ...fixed
   });
 }
 
