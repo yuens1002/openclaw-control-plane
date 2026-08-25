@@ -2,7 +2,7 @@
 
 Plan: `docs/plans/decision-runtime-mcp/plan.md`
 
-Rebased implementation SHA: `dd2e4dd2f2413ddd66ef9107fd98b669e582d9e8`
+Current PR implementation SHA: `e48df6c0ac80af93689cb737ba9951ed0a66d39c`
 
 Original independently reviewed SHA:
 `ee7c7ec2c8036ecae7c61d9cbf4fafb4cca7cdcd`
@@ -46,6 +46,7 @@ branch and transcribed the evidence into `ACs.md`.
 | --- | --- |
 | Focused MCP conformance | 39/39 passed |
 | Full suite with disposable PostgreSQL | 408/408 passed after rebase; zero skips |
+| Clean-checkout CI command | `npm test` built workspaces first; 380 passed and only 28 PostgreSQL tests skipped without a configured database |
 | Separate PostgreSQL suite | 28/28 passed; disposable container removed |
 | TypeScript | `npm run typecheck` and `npm run build` passed |
 | Production dependencies | `npm audit --omit=dev` reported zero vulnerabilities |
@@ -74,6 +75,8 @@ corrected and regression-tested:
 6. Enforced hosted MCP Origin allowlisting against DNS rebinding.
 7. Replaced arbitrary structured errors with a strict non-secret public schema.
 8. Rejected duplicate module IDs before health dimensions can collide.
+9. Made `npm test` build workspace entrypoints before process-level conformance
+   so clean CI checkouts do not depend on pre-existing `dist` output.
 
 ## Residual Risks
 
