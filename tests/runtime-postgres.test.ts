@@ -52,6 +52,33 @@ describePostgres("PostgreSQL durable runtime repository", () => {
       CASCADE`);
   });
 
+  it("adds a new operation version without mutating the persisted version", async () => {
+    await pool.query(
+      `DELETE FROM operation_registrations
+       WHERE operation_type = 'example.state.reconcile_with_approval'
+         AND command_schema_version = 2`
+    );
+
+    await new PostgresRuntimeRepository(pool, registry).synchronizeRegistry();
+
+    const registrations = await pool.query<{
+      command_schema_version: number;
+      allowed_result_types: string[];
+    }>(
+      `SELECT command_schema_version, allowed_result_types
+       FROM operation_registrations
+       WHERE operation_type = 'example.state.reconcile_with_approval'
+       ORDER BY command_schema_version`
+    );
+    expect(registrations.rows).toEqual([
+      { command_schema_version: 1, allowed_result_types: ["example.reconciliation.delta"] },
+      {
+        command_schema_version: 2,
+        allowed_result_types: ["example.reconciliation.delta", "example.report"]
+      }
+    ]);
+  });
+
   afterAll(async () => {
     await pool.end();
     await adminPool.query(
@@ -96,7 +123,7 @@ describePostgres("PostgreSQL durable runtime repository", () => {
     expect(event?.record_sequence).toBe(1);
     expect(attempt).toMatchObject({
       operation_type: "example.state.reconcile_with_approval",
-      operation_schema_version: 1,
+      operation_schema_version: 2,
       command_context: {
         authenticated_principal_ref: "principal://service/runtime-test",
         effective_actor: { type: "service", id: "runtime-test" },
@@ -657,7 +684,8 @@ describePostgres("PostgreSQL durable runtime repository", () => {
           "example://schemas/reconciliation-delta/v1",
           { changed: true }
         ),
-        operation_type: "example.state.reconcile"
+        operation_type: "example.state.reconcile",
+        operation_schema_version: 1
       }
     ];
     invalidProducer.edges = [{
@@ -680,7 +708,7 @@ describePostgres("PostgreSQL durable runtime repository", () => {
       exampleOperationRegistrations
     );
     retiredRegistry.retireType("event", "example.observation", 1);
-    retiredRegistry.retireOperation("example.state.reconcile_with_approval", 1);
+    retiredRegistry.retireOperation("example.state.reconcile_with_approval", 2);
     const retiredRepository = new PostgresRuntimeRepository(pool, retiredRegistry);
     await retiredRepository.synchronizeRegistry();
     const statuses = await pool.query<{ type_status: string; operation_status: string }>(`
@@ -688,7 +716,7 @@ describePostgres("PostgreSQL durable runtime repository", () => {
         (SELECT status FROM type_registrations
          WHERE kind = 'event' AND type = 'example.observation' AND schema_version = 1) AS type_status,
         (SELECT status FROM operation_registrations
-         WHERE operation_type = 'example.state.reconcile_with_approval' AND command_schema_version = 1) AS operation_status
+         WHERE operation_type = 'example.state.reconcile_with_approval' AND command_schema_version = 2) AS operation_status
     `);
     expect(statuses.rows[0]).toEqual({ type_status: "retired", operation_status: "retired" });
     await expect(
@@ -903,7 +931,7 @@ function lifecycleCommand(streamId: string, idempotencyKey: string): AppendRunti
   const canonicalCommand = {
     canonicalization_version: "jcs-rfc8785-v1" as const,
     operation_type: "example.state.reconcile_with_approval",
-    operation_schema_version: 1,
+    operation_schema_version: 2,
     work_item_id: ids.work,
     action_revision: 1,
     target: { type: "example.environment", id: "production" },
@@ -930,7 +958,7 @@ function lifecycleCommand(streamId: string, idempotencyKey: string): AppendRunti
   return {
     stream_id: streamId,
     operation_type: "example.state.reconcile_with_approval",
-    operation_schema_version: 1,
+    operation_schema_version: 2,
     idempotency_key: idempotencyKey,
     canonicalization_version: "jcs-rfc8785-v1",
     command_digest: digest,
@@ -1050,6 +1078,7 @@ function singleEventCommand(
   return {
     ...base,
     operation_type: "example.state.reconcile",
+    operation_schema_version: 1,
     canonical_command: canonicalCommand,
     command_digest: commandDigest(canonicalCommand),
     command_arguments: canonicalCommand.arguments,
@@ -1058,7 +1087,8 @@ function singleEventCommand(
         ...record(recordId, "event", "example.observation", "example://schemas/observation/v1", {
           statement: idempotencyKey
         }),
-        operation_type: "example.state.reconcile"
+        operation_type: "example.state.reconcile",
+        operation_schema_version: 1
       }
     ],
     edges: [],
@@ -1083,7 +1113,7 @@ function record(
     payload,
     occurred_at: "2026-08-23T12:00:00.000Z",
     operation_type: "example.state.reconcile_with_approval",
-    operation_schema_version: 1
+    operation_schema_version: 2
   } as const;
 }
 

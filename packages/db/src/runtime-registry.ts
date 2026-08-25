@@ -348,6 +348,22 @@ export const exampleOperationRegistrations: readonly RuntimeOperationRegistratio
       additionalProperties: false,
       properties: { desired: { type: "object" } }
     },
+    allowed_result_types: ["example.reconciliation.delta"],
+    handler_id: "example-reconcile-handler",
+    handler_version: 1,
+    authorization_action: "state.reconcile",
+    approval_required: true,
+    status: "active"
+  },
+  {
+    operation_type: "example.state.reconcile_with_approval",
+    command_schema_version: 2,
+    command_schema_ref: "example://schemas/reconcile-command/v1",
+    command_schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: { desired: { type: "object" } }
+    },
     allowed_result_types: ["example.reconciliation.delta", "example.report"],
     handler_id: "example-reconcile-handler",
     handler_version: 1,
