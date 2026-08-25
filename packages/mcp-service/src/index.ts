@@ -67,6 +67,17 @@ export interface RunningHostedMcpService extends RunningMcpService {
   address: () => { address: string; port: number } | null;
 }
 
+export class McpServiceError extends Error {
+  constructor(
+    readonly classification: string,
+    readonly details: Record<string, string | number>,
+    message = "Tool execution failed."
+  ) {
+    super(message);
+    this.name = "McpServiceError";
+  }
+}
+
 export function createMcpServiceHost(options: McpServiceHostOptions) {
   const tools = collectTools(options.modules);
   const invocationId = options.createInvocationId ?? randomUUID;
@@ -265,6 +276,7 @@ async function readJsonBody(request: IncomingMessage, limit: number) {
 }
 
 function classifyError(error: unknown) {
+  if (error instanceof McpServiceError) return error.classification;
   if (error instanceof z.ZodError) return "validation_error";
   if (error instanceof Error && /returned 4\d\d/.test(error.message)) return "downstream_rejected";
   if (error instanceof Error && /returned 5\d\d/.test(error.message)) return "downstream_unavailable";
@@ -272,6 +284,9 @@ function classifyError(error: unknown) {
 }
 
 function publicError(error: unknown) {
+  if (error instanceof McpServiceError) {
+    return JSON.stringify({ error: { message: error.message, ...error.details } });
+  }
   if (error instanceof z.ZodError) return "Tool input or output failed validation.";
   if (error instanceof Error && /returned 4\d\d/.test(error.message)) return "Downstream request was rejected.";
   if (error instanceof Error && /returned 5\d\d/.test(error.message)) return "Downstream service is unavailable.";

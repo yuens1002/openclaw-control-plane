@@ -13,7 +13,8 @@ export async function startMcpApp(config: McpAppConfig = loadMcpAppConfig(proces
   const decisionRuntime = createDecisionRuntimeMcpModule({
     runtimeBaseUrl: config.runtime.baseUrl,
     tokenProvider,
-    allowInsecureTransport: config.runtime.allowInsecureTransport
+    allowInsecureTransport: config.runtime.allowInsecureTransport,
+    requestTimeoutMs: config.runtime.requestTimeoutMs
   });
   const host = createMcpServiceHost({
     name: "openclaw-control-plane",

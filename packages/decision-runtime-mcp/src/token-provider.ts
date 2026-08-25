@@ -29,7 +29,10 @@ export const ClientCredentialsConfigSchema = z
   .strict()
   .superRefine((config, context) => {
     const endpoint = new URL(config.tokenEndpoint);
-    if (endpoint.protocol !== "https:" && !config.allowInsecureTransport) {
+    if (
+      endpoint.protocol !== "https:" &&
+      (!config.allowInsecureTransport || !isLoopbackUrl(endpoint))
+    ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["tokenEndpoint"],
@@ -64,7 +67,9 @@ export function createClientCredentialsTokenProvider(
       "content-type": "application/x-www-form-urlencoded"
     };
     if (config.authMethod === "client_secret_basic") {
-      headers.authorization = `Basic ${Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64")}`;
+      const clientId = formEncode(config.clientId);
+      const clientSecret = formEncode(config.clientSecret);
+      headers.authorization = `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`;
     } else {
       body.set("client_id", config.clientId);
       body.set("client_secret", config.clientSecret);
@@ -122,4 +127,12 @@ export function createClientCredentialsTokenProvider(
   }
 
   return { getToken, invalidate, status };
+}
+
+export function isLoopbackUrl(value: URL) {
+  return ["localhost", "127.0.0.1", "[::1]", "::1"].includes(value.hostname.toLowerCase());
+}
+
+function formEncode(value: string) {
+  return new URLSearchParams({ value }).toString().slice("value=".length);
 }

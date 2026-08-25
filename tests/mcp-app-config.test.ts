@@ -56,6 +56,16 @@ describe("MCP application configuration", () => {
         MCP_ALLOW_INSECURE_TRANSPORT: "true"
       }).runtime.allowInsecureTransport
     ).toBe(true);
+
+    expect(() =>
+      loadMcpAppConfig({
+        ...baseEnvironment(),
+        NODE_ENV: "development",
+        RUNTIME_API_URL: "http://runtime.remote.example",
+        OIDC_TOKEN_ENDPOINT: "http://issuer.remote.example/token",
+        MCP_ALLOW_INSECURE_TRANSPORT: "true"
+      })
+    ).toThrow(/requires HTTPS/);
   });
 
   it("does not include literal secrets in configuration failures", () => {

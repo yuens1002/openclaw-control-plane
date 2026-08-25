@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createOpenClawControlPlaneTools } from "@openclaw-control-plane/openclaw-adapter";
+import {
+  ControlPlaneApiError,
+  ControlPlaneTransportError,
+  createOpenClawControlPlaneTools
+} from "@openclaw-control-plane/openclaw-adapter";
 
 describe("authenticated runtime tool adapter", () => {
   it("rejects bearer tokens over plaintext transport unless explicitly enabled", () => {
@@ -81,6 +85,54 @@ describe("authenticated runtime tool adapter", () => {
       "Control plane API returned 403"
     );
     await expect(tools.list_runtime_registrations()).rejects.not.toThrow(/super-secret-token/);
+  });
+
+  it("preserves only the runtime's validated safe error code and request ID", async () => {
+    const tools = createOpenClawControlPlaneTools({
+      baseUrl: "https://control-plane.example",
+      fetchImpl: vi.fn(async () =>
+        Response.json(
+          {
+            error: {
+              code: "runtime.idempotency_conflict",
+              message: "The idempotency key is already bound.",
+              request_id: "request-1"
+            }
+          },
+          { status: 409 }
+        )
+      )
+    });
+
+    const error = await tools.list_runtime_registrations().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ControlPlaneApiError);
+    expect(error).toMatchObject({
+      status: 409,
+      code: "runtime.idempotency_conflict",
+      requestId: "request-1"
+    });
+    expect(String(error)).not.toContain("already bound");
+  });
+
+  it("bounds non-responsive runtime requests", async () => {
+    const fetchImpl = vi.fn(
+      async (_url: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+            once: true
+          });
+        })
+    );
+    const tools = createOpenClawControlPlaneTools({
+      baseUrl: "https://control-plane.example",
+      fetchImpl,
+      requestTimeoutMs: 20
+    });
+
+    await expect(tools.list_runtime_registrations()).rejects.toBeInstanceOf(
+      ControlPlaneTransportError
+    );
+    expect(fetchImpl.mock.calls[0]![1]?.signal).toBeInstanceOf(AbortSignal);
   });
 
   it("rejects malformed API responses instead of trusting a TypeScript cast", async () => {

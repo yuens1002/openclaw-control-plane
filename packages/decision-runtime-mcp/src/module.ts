@@ -14,13 +14,15 @@ import {
   SafeLocalIdentifierSchema,
   SafeNamespacedIdentifierSchema
 } from "@openclaw-control-plane/contracts";
-import type {
-  McpServiceModule,
-  McpServiceTool,
-  McpToolCallContext
+import {
+  McpServiceError,
+  type McpServiceModule,
+  type McpServiceTool,
+  type McpToolCallContext
 } from "@openclaw-control-plane/mcp-service";
 import {
   ControlPlaneApiError,
+  ControlPlaneTransportError,
   createOpenClawControlPlaneTools
 } from "@openclaw-control-plane/openclaw-adapter";
 import { z } from "zod";
@@ -34,6 +36,7 @@ export interface DecisionRuntimeMcpModuleOptions {
   tokenProvider: TokenProvider;
   fetchImpl?: typeof fetch;
   allowInsecureTransport?: boolean;
+  requestTimeoutMs?: number;
 }
 
 const EmptyInputSchema = z.object({}).strict();
@@ -87,14 +90,23 @@ export function createDecisionRuntimeMcpModule(
         ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
         ...(options.allowInsecureTransport !== undefined
           ? { allowInsecureTransport: options.allowInsecureTransport }
+          : {}),
+        ...(options.requestTimeoutMs !== undefined
+          ? { requestTimeoutMs: options.requestTimeoutMs }
           : {})
       });
     try {
       return await call(createTools());
     } catch (error) {
-      if (!(error instanceof ControlPlaneApiError) || error.status !== 401) throw error;
-      options.tokenProvider.invalidate();
-      return call(createTools());
+      if (error instanceof ControlPlaneApiError && error.status === 401) {
+        options.tokenProvider.invalidate();
+        try {
+          return await call(createTools());
+        } catch (retryError) {
+          throw translateRuntimeError(retryError);
+        }
+      }
+      throw translateRuntimeError(error);
     }
   };
 
@@ -220,8 +232,48 @@ export function createDecisionRuntimeMcpModule(
   return {
     id: "decision-runtime",
     tools,
-    health: () => ({ ready: options.tokenProvider.status().ready })
+    health: async () => {
+      try {
+        await invoke(healthContext(), (adapter) => adapter.list_runtime_registrations());
+        return { ready: true };
+      } catch {
+        return { ready: false, detail: "upstream_unavailable" };
+      }
+    }
   };
+}
+
+function healthContext(): McpToolCallContext {
+  return {
+    invocationId: "health-check",
+    moduleId: "decision-runtime",
+    toolName: "list_runtime_registrations",
+    transport: "streamable-http",
+    startedAt: new Date().toISOString()
+  };
+}
+
+function translateRuntimeError(error: unknown) {
+  if (error instanceof McpServiceError) return error;
+  if (error instanceof ControlPlaneApiError) {
+    return new McpServiceError(
+      "downstream_rejected",
+      {
+        status: error.status,
+        ...(error.code ? { code: error.code } : {}),
+        ...(error.requestId ? { request_id: error.requestId } : {})
+      },
+      "Runtime request was rejected."
+    );
+  }
+  if (error instanceof ControlPlaneTransportError) {
+    return new McpServiceError(
+      "downstream_unavailable",
+      { code: "runtime.transport_error" },
+      "Runtime service is unavailable."
+    );
+  }
+  return error;
 }
 
 function withoutUndefined<T extends Record<string, unknown>>(value: T) {

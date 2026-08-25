@@ -3,7 +3,11 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { createDecisionRuntimeMcpModule } from "@openclaw-control-plane/decision-runtime-mcp";
-import { createMcpServiceHost } from "@openclaw-control-plane/mcp-service";
+import {
+  createMcpServiceHost,
+  type McpServiceModule
+} from "@openclaw-control-plane/mcp-service";
+import { z } from "zod";
 
 const RECORD_ID = "00000000-0000-4000-8000-000000000012";
 const WORK_ITEM_ID = "00000000-0000-4000-8000-000000000010";
@@ -53,6 +57,15 @@ describe("Decision Runtime MCP module", () => {
     expect(
       listed.tools.find((tool) => tool.name === "get_runtime_record")?.annotations
     ).toMatchObject({ readOnlyHint: true, destructiveHint: false });
+    for (const tool of listed.tools) {
+      expect(tool.annotations).toMatchObject({
+        idempotentHint: true,
+        openWorldHint: tool.name === "execute_runtime_command"
+      });
+      if (tool.name.startsWith("get_") || tool.name.startsWith("list_")) {
+        expect(tool.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false });
+      }
+    }
 
     await client.callTool({ name: "list_runtime_registrations", arguments: {} });
     await client.callTool({ name: "create_runtime_event", arguments: intakeInput(RECORD_ID) });
@@ -92,6 +105,18 @@ describe("Decision Runtime MCP module", () => {
       "/v1/runtime/audit",
       "/v1/runtime/projections/example.current/example.environment/production"
     ]);
+    expect(requests.map(({ init }) => init.method)).toEqual([
+      "GET",
+      "POST",
+      "POST",
+      "POST",
+      "POST",
+      "GET",
+      "GET",
+      "GET",
+      "GET",
+      "GET"
+    ]);
     expect(new URL(requests[7]!.url).search).toBe("?kind=result&limit=25");
     expect(new URL(requests[9]!.url).search).toBe(
       "?stream_id=stream-1&projection_version=1"
@@ -120,11 +145,63 @@ describe("Decision Runtime MCP module", () => {
     });
     const { client, close } = await connect(host);
 
-    const result = await client.callTool({ name: "execute_runtime_command", arguments: {} });
-
-    expect(result.isError).toBe(true);
+    for (const name of [
+      "list_runtime_registrations",
+      "create_runtime_event",
+      "create_runtime_work_item",
+      "create_runtime_approval",
+      "execute_runtime_command",
+      "get_runtime_record",
+      "get_runtime_edges",
+      "list_runtime_stream_records",
+      "list_runtime_audit",
+      "get_runtime_projection"
+    ]) {
+      const result = await client.callTool({ name, arguments: { unexpected: true } });
+      expect(result.isError).toBe(true);
+    }
     expect(tokenProvider.getToken).not.toHaveBeenCalled();
     expect(fetchImpl).not.toHaveBeenCalled();
+    await close();
+  });
+
+  it("composes beside another reviewed first-party module without host duplication", async () => {
+    const runtime = createDecisionRuntimeMcpModule({
+      runtimeBaseUrl: "https://runtime.example",
+      tokenProvider: provider(),
+      fetchImpl: vi.fn(async () => Response.json({ types: [], operations: [] }))
+    });
+    const fixture: McpServiceModule = {
+      id: "example",
+      tools: [
+        {
+          name: "example_ping",
+          description: "Return fixture readiness.",
+          inputSchema: z.object({}).strict(),
+          outputSchema: z.object({ ok: z.boolean() }).strict(),
+          annotations: {
+            readOnlyHint: true,
+            idempotentHint: true,
+            destructiveHint: false,
+            openWorldHint: false
+          },
+          handler: async () => ({ ok: true })
+        }
+      ]
+    };
+    const host = createMcpServiceHost({
+      name: "composed",
+      version: "1.0.0",
+      modules: [runtime, fixture]
+    });
+    const { client, close } = await connect(host);
+
+    const tools = (await client.listTools()).tools.map((tool) => tool.name);
+    expect(tools).toHaveLength(11);
+    expect(tools).toContain("example_ping");
+    expect(
+      (await client.callTool({ name: "example_ping", arguments: {} })).structuredContent
+    ).toEqual({ ok: true });
     await close();
   });
 
@@ -158,6 +235,63 @@ describe("Decision Runtime MCP module", () => {
     expect(denied.isError).toBe(true);
     expect(fetchImpl).toHaveBeenCalledTimes(3);
     expect(tokenProvider.invalidate).toHaveBeenCalledOnce();
+    await close();
+  });
+
+  it("returns safe structured runtime errors and probes both dependencies for readiness", async () => {
+    const tokenProvider = provider();
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ types: [], operations: [] }))
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            error: {
+              code: "runtime.approval_required",
+              message: "Approval is required.",
+              request_id: "request-approval"
+            }
+          },
+          { status: 409 }
+        )
+      )
+      .mockRejectedValueOnce(new Error("offline"));
+    const module = createDecisionRuntimeMcpModule({
+      runtimeBaseUrl: "https://runtime.example",
+      tokenProvider,
+      fetchImpl,
+      requestTimeoutMs: 100
+    });
+
+    await expect(module.health?.()).resolves.toEqual({ ready: true });
+    expect(tokenProvider.getToken).toHaveBeenCalledOnce();
+
+    const host = createMcpServiceHost({
+      name: "decision-runtime",
+      version: "1.0.0",
+      modules: [module],
+      onDiagnostic: vi.fn()
+    });
+    const { client, close } = await connect(host);
+    const denied = await client.callTool({ name: "list_runtime_registrations", arguments: {} });
+    expect(denied.isError).toBe(true);
+    expect(denied.content).toEqual([
+      {
+        type: "text",
+        text: JSON.stringify({
+          error: {
+            message: "Runtime request was rejected.",
+            status: 409,
+            code: "runtime.approval_required",
+            request_id: "request-approval"
+          }
+        })
+      }
+    ]);
+    await expect(module.health?.()).resolves.toEqual({
+      ready: false,
+      detail: "upstream_unavailable"
+    });
     await close();
   });
 });

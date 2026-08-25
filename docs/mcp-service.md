@@ -69,10 +69,11 @@ Required service variables:
 | `OIDC_CLIENT_AUTH_METHOD` | `client_secret_basic` or `client_secret_post` |
 | `MCP_INBOUND_BEARER_TOKEN` | Hosted bridge credential; not used by stdio |
 | `MCP_HOST`, `MCP_PORT` | Optional hosted bind and port; `PORT` is also honored |
+| `MCP_REQUEST_TIMEOUT_MS` | Bound for token and Decision Runtime HTTP requests |
 
-Production requires HTTPS runtime and token endpoints. Plain HTTP requires
-`NODE_ENV=development` and `MCP_ALLOW_INSECURE_TRANSPORT=true` for disposable
-local fixtures only. Inject secrets through the process or deployment secret
+Production requires HTTPS runtime and token endpoints. Plain HTTP is accepted
+only for loopback hosts and requires `NODE_ENV=development` plus
+`MCP_ALLOW_INSECURE_TRANSPORT=true` for disposable local fixtures. Inject secrets through the process or deployment secret
 store; do not commit them to OpenClaw configuration.
 
 ## OpenClaw Configuration
@@ -158,8 +159,9 @@ docker build -f deploy/decision-runtime-mcp/Dockerfile \
 
 Railway users select
 `/deploy/decision-runtime-mcp/railway.toml` as the service config-as-code path.
-The service needs no PostgreSQL variables. `/health` reports the aggregate MCP
-module readiness contract; `/mcp` is the authenticated protocol endpoint.
+The service needs no PostgreSQL variables. `/health` actively checks token
+acquisition and the runtime registration endpoint and reports aggregate module
+readiness; `/mcp` is the authenticated protocol endpoint.
 
 Before adoption, use a disposable service identity and non-production runtime
 to list tools and execute representative allowed, denied, and approval-required

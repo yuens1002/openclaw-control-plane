@@ -85,8 +85,10 @@ describe("reusable MCP service host", () => {
   });
 
   it("gates hosted MCP before parsing and serves official-client calls statelessly", async () => {
-    const handler = vi.fn(async (input: Record<string, unknown>) => input);
-    const module = fixtureModule("example", "echo");
+    const contexts: McpToolCallContext[] = [];
+    const module = fixtureModule("example", "echo", (context) => contexts.push(context));
+    const originalHandler = module.tools[0]!.handler;
+    const handler = vi.fn(originalHandler);
     module.tools[0]!.handler = handler;
     const host = createMcpServiceHost({
       name: "test-host",
@@ -98,12 +100,14 @@ describe("reusable MCP service host", () => {
     const address = running.address()!;
     const endpoint = `http://127.0.0.1:${address.port}`;
 
-    const denied = await fetch(`${endpoint}/mcp`, {
-      method: "POST",
-      headers: { authorization: "Bearer wrong" },
-      body: "not-json"
-    });
-    expect(denied.status).toBe(401);
+    for (const authorization of [undefined, "Basic wrong", "Bearer", "Bearer wrong"]) {
+      const denied = await fetch(`${endpoint}/mcp`, {
+        method: "POST",
+        ...(authorization ? { headers: { authorization } } : {}),
+        body: "not-json"
+      });
+      expect(denied.status).toBe(401);
+    }
     expect(handler).not.toHaveBeenCalled();
 
     const client = new Client({ name: "http-test", version: "1.0.0" });
@@ -115,6 +119,12 @@ describe("reusable MCP service host", () => {
     expect(
       (await client.callTool({ name: "echo", arguments: { value: "remote" } })).structuredContent
     ).toEqual({ value: "remote" });
+    await client.callTool({ name: "echo", arguments: { value: "again" } });
+    expect(contexts).toHaveLength(2);
+    expect(contexts.every((context) => context.transport === "streamable-http")).toBe(true);
+    expect(contexts[0]!.invocationId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(contexts[1]!.invocationId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(contexts[0]!.invocationId).not.toBe(contexts[1]!.invocationId);
 
     const health = await fetch(`${endpoint}/health`);
     expect(health.status).toBe(200);

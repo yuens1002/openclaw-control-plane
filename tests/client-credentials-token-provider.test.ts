@@ -10,6 +10,12 @@ describe("OIDC client-credentials token provider", () => {
     expect(() =>
       createProvider({ tokenEndpoint: "http://127.0.0.1/token", allowInsecureTransport: true })
     ).not.toThrow();
+    expect(() =>
+      createProvider({
+        tokenEndpoint: "http://issuer.remote.example/token",
+        allowInsecureTransport: true
+      })
+    ).toThrow(/requires HTTPS/);
   });
 
   it("uses Basic client authentication with optional scope and audience", async () => {
@@ -31,6 +37,25 @@ describe("OIDC client-credentials token provider", () => {
     expect(String(init?.body)).toBe(
       "grant_type=client_credentials&scope=runtime.execute&audience=control-plane"
     );
+  });
+
+  it("form-encodes OAuth client passwords before Basic encoding", async () => {
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      expect(new Headers(init?.headers).get("authorization")).toBe(
+        `Basic ${Buffer.from("client%3Aid:s+e%25%3A%E9%9B%AA").toString("base64")}`
+      );
+      return Response.json({ access_token: "encoded", token_type: "Bearer", expires_in: 60 });
+    });
+    const provider = createClientCredentialsTokenProvider(
+      {
+        tokenEndpoint: "https://issuer.example/token",
+        clientId: "client:id",
+        clientSecret: "s e%:雪"
+      },
+      { fetchImpl }
+    );
+
+    await expect(provider.getToken()).resolves.toBe("encoded");
   });
 
   it("supports form client authentication without an authorization header", async () => {

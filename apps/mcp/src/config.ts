@@ -1,4 +1,7 @@
-import { ClientCredentialsConfigSchema } from "@openclaw-control-plane/decision-runtime-mcp";
+import {
+  ClientCredentialsConfigSchema,
+  isLoopbackUrl
+} from "@openclaw-control-plane/decision-runtime-mcp";
 import { z } from "zod";
 
 const BooleanStringSchema = z
@@ -49,7 +52,10 @@ export function loadMcpAppConfig(environment: NodeJS.ProcessEnv) {
   const parsed = EnvironmentSchema.parse(environment);
   const allowInsecureTransport = parsed.MCP_ALLOW_INSECURE_TRANSPORT;
   const runtimeUrl = new URL(parsed.RUNTIME_API_URL);
-  if (runtimeUrl.protocol !== "https:" && !allowInsecureTransport) {
+  if (
+    runtimeUrl.protocol !== "https:" &&
+    (!allowInsecureTransport || !isLoopbackUrl(runtimeUrl))
+  ) {
     throw new Error("Decision Runtime API requires HTTPS.");
   }
   const token = ClientCredentialsConfigSchema.parse({
@@ -74,7 +80,8 @@ export function loadMcpAppConfig(environment: NodeJS.ProcessEnv) {
     },
     runtime: {
       baseUrl: parsed.RUNTIME_API_URL,
-      allowInsecureTransport
+      allowInsecureTransport,
+      requestTimeoutMs: parsed.MCP_REQUEST_TIMEOUT_MS
     },
     token
   };
