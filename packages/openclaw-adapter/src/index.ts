@@ -237,31 +237,40 @@ function createApiCaller(options: OpenClawAdapterOptions) {
       requestInit.body = JSON.stringify(request.body);
     }
 
-    requestInit.signal = AbortSignal.timeout(options.requestTimeoutMs ?? 20_000);
-    let response: Response;
+    const abortController = new AbortController();
+    const timeout = setTimeout(
+      () => abortController.abort(),
+      options.requestTimeoutMs ?? 20_000
+    );
+    requestInit.signal = abortController.signal;
     try {
-      response = await fetchImpl(`${baseUrl}${path}`, requestInit);
-    } catch {
-      throw new ControlPlaneTransportError();
-    }
-
-    if (!response.ok) {
-      let safeError: { error: { code: string; request_id: string } } | undefined;
+      let response: Response;
       try {
-        const parsed = RuntimeErrorSchema.safeParse(await response.json());
-        if (parsed.success) safeError = parsed.data;
+        response = await fetchImpl(`${baseUrl}${path}`, requestInit);
       } catch {
-        // A reverse proxy may return a non-runtime error body; retain the status.
+        throw new ControlPlaneTransportError();
       }
-      throw new ControlPlaneApiError(
-        response.status,
-        safeError?.error.code,
-        safeError?.error.request_id
-      );
-    }
 
-    const body = await response.json();
-    return responseSchema ? responseSchema.parse(body) : (body as TResponse);
+      if (!response.ok) {
+        let safeError: { error: { code: string; request_id: string } } | undefined;
+        try {
+          const parsed = RuntimeErrorSchema.safeParse(await response.json());
+          if (parsed.success) safeError = parsed.data;
+        } catch {
+          // A reverse proxy may return a non-runtime error body; retain the status.
+        }
+        throw new ControlPlaneApiError(
+          response.status,
+          safeError?.error.code,
+          safeError?.error.request_id
+        );
+      }
+
+      const body = await response.json();
+      return responseSchema ? responseSchema.parse(body) : (body as TResponse);
+    } finally {
+      clearTimeout(timeout);
+    }
   };
 }
 

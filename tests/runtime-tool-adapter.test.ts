@@ -135,6 +135,23 @@ describe("authenticated runtime tool adapter", () => {
     expect(fetchImpl.mock.calls[0]![1]?.signal).toBeInstanceOf(AbortSignal);
   });
 
+  it("clears the request timeout after a responsive call", async () => {
+    vi.useFakeTimers();
+    try {
+      const tools = createOpenClawControlPlaneTools({
+        baseUrl: "https://control-plane.example",
+        fetchImpl: vi.fn(async () => Response.json({ types: [], operations: [] })),
+        requestTimeoutMs: 20_000
+      });
+
+      await tools.list_runtime_registrations();
+
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("rejects malformed API responses instead of trusting a TypeScript cast", async () => {
     const tools = createOpenClawControlPlaneTools({
       baseUrl: "https://control-plane.example",
