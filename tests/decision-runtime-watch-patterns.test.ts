@@ -34,7 +34,10 @@ function deriveExpectedPatterns(dockerfileText: string, extras: string[]): Set<s
     const copyMatch = line.match(/^COPY\s+(.+)$/);
     const copySources = copyMatch?.[1];
     if (!copySources || copySources.includes("--from=")) continue;
-    const tokens = copySources.trim().split(/\s+/);
+    const tokens = copySources
+      .trim()
+      .split(/\s+/)
+      .filter((token) => !token.startsWith("--"));
     if (tokens.length < 2) continue;
     for (const source of tokens.slice(0, -1)) {
       const basename = source.split("/").pop() ?? source;
@@ -182,5 +185,19 @@ describe("decision runtime watch patterns", () => {
       expect(pattern).not.toContain("/app/");
       expect(pattern).not.toContain("dist");
     }
+  });
+
+  it("ignores build-stage COPY flags like --chown when deriving sources", () => {
+    const dockerfileWithChown = [
+      "FROM node:22-bookworm-slim AS build",
+      "WORKDIR /app",
+      "COPY --chown=node:node package.json ./",
+      "COPY --chown=node:node apps/api apps/api",
+      "RUN npm ci"
+    ].join("\n");
+
+    const expected = deriveExpectedPatterns(dockerfileWithChown, []);
+
+    expect(expected).toEqual(new Set(["/package.json", "/apps/api/**"]));
   });
 });
