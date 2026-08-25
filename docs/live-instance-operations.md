@@ -363,10 +363,16 @@ two together catch both.
 ## 7. Gap Register and Disposition
 
 Open gaps are tracked on GitHub so they survive the session that found
-them: G3 / G5's concurrency half / G6 / G8 in issue #47. G4 was tracked
-in issue #45 and is closed below. An entry here that says "still open"
-with no decision attached is a bug in this document, not a neutral
-state -- that is how the stale entries corrected in #46 arose.
+them. G3, G5's concurrency half, and G8 were tracked in issue #47 and
+are dispositioned below — G3 and G8 by fix, G5's concurrency half by a
+recorded decision to accept the risk. G6 was also tracked in issue #47
+and remains open: it needs design agreement on a client registry (or
+an equivalent independent source of truth) before any code, which is
+out of scope for the gap-closure bundle that closed the other three.
+G4 was tracked in issue #45 and is closed below. An entry here that
+says "still open" with no decision attached is a bug in this document,
+not a neutral state -- that is how the stale entries corrected in #46
+arose.
 
 Every gap found by the research pass behind this document, dispositioned
 exactly once. See
@@ -388,41 +394,55 @@ for the plan these dispositions came from.
 
 ### Named follow-ups, with the recommended fix — not built here
 
-**G5 — post-write verification: CLOSED. Concurrency control: still
-open.** The verification half was this document's first recommended
-follow-up, because §2.5's idempotent-write rule requires *both*
-compare-then-write and post-write verification while
-`packages/openclaw-railway-installer/src/patch-allowed-origins.ts`
+**G5 — post-write verification: CLOSED. Concurrency: CLOSED, accepted
+risk, decided under issue #47.** The verification half was this
+document's first recommended follow-up, because §2.5's idempotent-write
+rule requires *both* compare-then-write and post-write verification
+while `packages/openclaw-railway-installer/src/patch-allowed-origins.ts`
 had only the first — the protocol documented a rule its own most-cited
-example did not satisfy. That half is now fixed: the function re-reads
-the raw config after the POST and throws if the origin is absent,
-mirroring `applyProfile`'s post-run status re-read. No wait precedes
-that read, deliberately — `/setup/api/config/raw` is served by the
-wrapper from the config file and never proxied to the gateway, so the
-POST's gateway restart does not gate it.
+example did not satisfy. That half is fixed: the function re-reads the
+raw config after the POST and throws if the origin is absent, mirroring
+`applyProfile`'s post-run status re-read. No wait precedes that read,
+deliberately — `/setup/api/config/raw` is served by the wrapper from
+the config file and never proxied to the gateway, so the POST's gateway
+restart does not gate it.
 
-*Still open, and renamed to what it actually is:* **concurrent-loss
-detection, not concurrency control.** The read-modify-write window
-between the GET and the POST means a concurrent write to the same
-config is silently lost, last-write-wins over the whole document.
+**Concurrent-loss detection, not concurrency control** (renamed from
+the original "concurrency control" filing, which overstated it). The
+read-modify-write window between the GET and the POST means a
+concurrent write to the same config is silently lost, last-write-wins
+over the whole document.
 
-The previously recommended fix -- compare the document read during
-verification against what was written, and fail on divergence -- was
-filed under "concurrency control" and does not deserve that name. It
-reports a clobber *after* it has happened; the other writer's change is
-already gone by the time it fires. Detection is still worth more than
-silence, but calling it control overstates it, and this document has
-been wrong about exactly this class of claim before.
+*Previously recommended fix, withdrawn:* compare the document read
+during post-write verification against what was written, and fail on
+divergence. Re-examined under issue #47 and rejected on the merits, not
+just on urgency: that comparison watches the POST-to-verify window, not
+the GET-to-POST window this gap is actually about. A concurrent writer
+whose change this function's own POST clobbers leaves the
+verification read matching exactly what this function wrote — the
+clobber it exists to catch produces no divergence for it to see. It
+would only catch a *different, near-zero-width* race (something else
+writing in the instant between this function's own POST and its
+immediately-following, un-delayed verification GET), not the gap
+description's actual race. Renaming the recommended fix to "detection"
+without fixing which window it watches would have shipped a check that
+reports nothing on the exact failure it was named for.
 
-Genuine prevention needs a provider-side conditional write (the CLI
-exposes none, verified under G4) or a lock shared by every writer --
-the same wall G1 hit.
+A real fix for the window that matters needs either a provider-side
+conditional write (the CLI exposes none, verified under G4) or a lock
+shared by every writer — the same wall G1 hit — or a second GET
+immediately before the POST to detect drift in the GET-to-POST window
+itself, not the POST-to-verify one. None of those are built here.
 
-*Exposure looks low:* the writers of this config are the provisioning
-path, the applier, and manual edits, and those are sequential in
-practice -- one operator, one run at a time. Absent evidence of real
-concurrent writers, detection-after-the-fact is a reasonable place to
-stop. Reprioritise if that assumption stops holding.
+*Accepted instead, on exposure:* the writers of this config are the
+provisioning path, the applier, and manual edits, and those are
+sequential in practice — one operator, one run at a time. Absent
+evidence of real concurrent writers, and given that the one fix already
+on record for this gap doesn't actually address it, leaving the window
+open with this reasoning recorded is preferred over shipping a check
+that would read as protection without being any. Reprioritise, and
+build one of the real options above, if that exposure assumption stops
+holding.
 
 **G1 — CLOSED.** The client-ref update functions performed an
 unconditional variable write with a hardcoded auto-confirmed redeploy,
@@ -475,11 +495,12 @@ no production callers; not low urgency the day it gains one.
 *That deferral's trigger is now enforced, not just documented.*
 "Fix it when it gains a caller" previously depended on whoever wired
 it up having read this register first, which is precisely the kind of
-precondition that gets missed. `tests/openclaw-railway-import-workspace-
-files.test.ts`'s "importWorkspaceFiles has no production callers" suite
-source-scans every file under `apps/*/src`, `packages/*/src`, and
-`workers/*/src` for an import specifier naming `import-workspace-files`
-and fails if one appears — same source-text-scan shape as the G4
+precondition that gets missed.
+`tests/openclaw-railway-import-workspace-files.test.ts`'s
+"importWorkspaceFiles has no production callers" suite source-scans
+every file under `apps/*/src`, `packages/*/src`, and `workers/*/src`
+for an import specifier naming `import-workspace-files` and fails if
+one appears — same source-text-scan shape as the G4
 closure's equivalent check, with the same known limitation (it cannot
 catch a future re-export under an unrelated name). The day someone
 wires this module into a provisioning path, that test fails and points
@@ -625,6 +646,24 @@ differently-versioned target, not against hitting the wrong target.
 *Recommended fix:* validate the named service against an independent
 source of truth -- a client registry the caller does not supply -- so
 the check has something real to disagree with. Future work.
+
+*Investigated under issue #47, still open by decision, not oversight.*
+One candidate independent source of truth was checked before deferring
+further: `provisionClientInstance`'s `--client-name` resolves to a
+service via `selectSoleService` against the named client's linked
+project, which is real (caller-independent) validation, not circular.
+But `client-cli.ts`'s `update-ref` and `update-openclaw-ref`
+subcommands do not go through that path -- `parseUpdateRefArgs` and
+`parseUpdateOpenClawRefArgs` both require `--service` directly, with no
+`--client-name` flag and no linked-project resolution, so there is
+nothing on those two paths today for a caller-declared service name to
+disagree with. Building the registry this entry recommends therefore
+means either adding new persistent state (a client-name -> service
+mapping the update paths don't currently have any way to look up) or
+changing the update CLI's parameter model to take `--client-name`
+instead of `--service` and resolve it the way `provision` does --
+either is a real design decision, not a mechanical fix, so this stays
+open rather than being built inside a gap-closure bundle.
 
 ### Explicitly excluded from this document's scope, but fixed via issue #47
 
