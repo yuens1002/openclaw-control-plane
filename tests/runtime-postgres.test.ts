@@ -558,6 +558,40 @@ describePostgres("PostgreSQL durable runtime repository", () => {
       /canonical declared effects/i
     );
 
+    const reorderedOutputs = lifecycleCommand(
+      "reordered-outputs-stream",
+      "reordered-outputs-key-001"
+    );
+    const resultIndex = reorderedOutputs.records.findIndex((record) => record.kind === "result");
+    const artifactIndex = reorderedOutputs.records.findIndex((record) => record.kind === "artifact");
+    const reorderedRecords = [...reorderedOutputs.records];
+    [reorderedRecords[resultIndex], reorderedRecords[artifactIndex]] = [
+      reorderedRecords[artifactIndex]!,
+      reorderedRecords[resultIndex]!
+    ];
+    reorderedOutputs.records = reorderedRecords.map((record) =>
+      record.kind === "action_attempt"
+        ? {
+            ...record,
+            payload: {
+              ...record.payload,
+              result_refs: [
+                { kind: "artifact", id: ids.artifact },
+                { kind: "result", id: ids.result }
+              ]
+            }
+          }
+        : record
+    );
+    reorderedOutputs.edges = (reorderedOutputs.edges ?? []).map((edge) =>
+      edge.relation === "produced"
+        ? { ...edge, ordinal: edge.to_record_id === ids.artifact ? 0 : 1 }
+        : edge
+    );
+    await expect(repository.appendCommand(reorderedOutputs)).rejects.toThrow(
+      /canonical declared effect/i
+    );
+
     for (const [name, mutate] of [
       ["work-item", (payload: Record<string, unknown>) => ({ ...payload, work_item_id: randomUUID() })],
       ["handler", (payload: Record<string, unknown>) => ({ ...payload, handler_id: "other-handler" })],

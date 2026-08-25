@@ -157,6 +157,26 @@ describePostgres("authenticated runtime HTTP PostgreSQL conformance", () => {
       idempotency_key: "approval-command-1",
       operation_type: "example.state.reconcile_with_approval"
     };
+    const invalidApproval = await app.request("/v1/runtime/approvals", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        operation_type: command.operation_type,
+        operation_schema_version: command.operation_schema_version,
+        work_item_id: command.work_item_id,
+        action_revision: command.action_revision,
+        target: command.target,
+        arguments: command.arguments,
+        declared_effects: command.declared_effects.map((effect) => ({
+          ...effect,
+          schema_ref: "example://schemas/wrong/v1"
+        })),
+        decision: "approved"
+      })
+    });
+    expect(invalidApproval.status).toBe(400);
+    expect(await runtime.repository.listStreamRecords(`approval:${workId}`)).toHaveLength(0);
+
     const approval = await app.request("/v1/runtime/approvals", {
       method: "POST",
       headers,

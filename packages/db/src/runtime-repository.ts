@@ -1503,30 +1503,25 @@ function validateAppendCommand(
   const effects = command.records.filter(
     (record) => record.kind === "result" || record.kind === "artifact"
   );
-  for (const kind of ["result", "artifact"] as const) {
-    const declared = canonicalCommand.declared_effects.filter(
-      (effect) => (effect.kind ?? "result") === kind
-    );
-    const persisted = effects.filter((record) => record.kind === kind);
-    if (persisted.length !== declared.length) {
-      throw new Error("Persisted outputs do not match canonical declared effects.");
+  if (effects.length !== canonicalCommand.declared_effects.length) {
+    throw new Error("Persisted outputs do not match canonical declared effects.");
+  }
+  for (const [index, effect] of canonicalCommand.declared_effects.entries()) {
+    const output = effects[index]!;
+    if (!operation.allowed_result_types.includes(effect.result_type)) {
+      throw new Error(
+        `Result type ${effect.result_type} is not allowed for ${command.operation_type}.`
+      );
     }
-    for (const [index, effect] of declared.entries()) {
-      const output = persisted[index]!;
-      if (!operation.allowed_result_types.includes(effect.result_type)) {
-        throw new Error(
-          `Result type ${effect.result_type} is not allowed for ${command.operation_type}.`
-        );
-      }
-      if (
-        output.type !== effect.result_type ||
-        output.schema_version !== effect.schema_version ||
-        output.schema_ref !== effect.schema_ref ||
-        jsonDigest(output.subject) !== jsonDigest(effect.target) ||
-        jsonDigest(output.payload) !== jsonDigest(effect.payload)
-      ) {
-        throw new Error("Persisted output does not match its canonical declared effect.");
-      }
+    if (
+      output.kind !== (effect.kind ?? "result") ||
+      output.type !== effect.result_type ||
+      output.schema_version !== effect.schema_version ||
+      output.schema_ref !== effect.schema_ref ||
+      jsonDigest(output.subject) !== jsonDigest(effect.target) ||
+      jsonDigest(output.payload) !== jsonDigest(effect.payload)
+    ) {
+      throw new Error("Persisted output does not match its canonical declared effect.");
     }
   }
   const terminalStatus = command.terminal_status ?? "succeeded";

@@ -111,13 +111,7 @@ export class RuntimeApiService {
       arguments: request.arguments,
       declared_effects: request.declared_effects
     };
-    registryRequest(() =>
-      this.registry.validateCommand(
-        command.operation_type,
-        command.operation_schema_version,
-        command.arguments
-      )
-    );
+    this.validateExecutableCommand(command);
     const digest = commandDigest(command);
     const recordId = this.createId();
     const decidedAt = this.now();
@@ -168,37 +162,7 @@ export class RuntimeApiService {
       arguments: request.arguments,
       declared_effects: request.declared_effects
     };
-    const operation = registryRequest(() =>
-      this.registry.requireOperation(command.operation_type, command.operation_schema_version)
-    );
-    registryRequest(() =>
-      this.registry.validateCommand(
-        command.operation_type,
-        command.operation_schema_version,
-        command.arguments
-      )
-    );
-    for (const effect of command.declared_effects) {
-      if (!operation.allowed_result_types.includes(effect.result_type)) {
-        throw new RuntimeRequestError("A declared effect is not allowed for this operation.");
-      }
-      const kind = effect.kind ?? "result";
-      const registration = registryRequest(() =>
-        this.registry.requireType(kind, effect.result_type, effect.schema_version)
-      );
-      if (registration.schema_ref !== effect.schema_ref) {
-        throw new RuntimeRequestError("A declared effect has an invalid schema reference.");
-      }
-      registryRequest(() =>
-        this.registry.validateHistoricalPayload(
-          kind,
-          effect.result_type,
-          effect.schema_version,
-          effect.schema_ref,
-          effect.payload
-        )
-      );
-    }
+    const operation = this.validateExecutableCommand(command);
     const digest = commandDigest(command);
     const approval = request.approval_id
       ? await this.resolveApproval(request.approval_id)
@@ -268,6 +232,46 @@ export class RuntimeApiService {
 
   recordCommandDenial(input: Parameters<PostgresRuntimeRepository["recordAuthorizationDecision"]>[0]) {
     return this.repository.recordAuthorizationDecision(input);
+  }
+
+  private validateExecutableCommand(
+    command: Pick<
+      RuntimeCommandRequest,
+      "operation_type" | "operation_schema_version" | "arguments" | "declared_effects"
+    >
+  ) {
+    const operation = registryRequest(() =>
+      this.registry.requireOperation(command.operation_type, command.operation_schema_version)
+    );
+    registryRequest(() =>
+      this.registry.validateCommand(
+        command.operation_type,
+        command.operation_schema_version,
+        command.arguments
+      )
+    );
+    for (const effect of command.declared_effects) {
+      if (!operation.allowed_result_types.includes(effect.result_type)) {
+        throw new RuntimeRequestError("A declared effect is not allowed for this operation.");
+      }
+      const kind = effect.kind ?? "result";
+      const registration = registryRequest(() =>
+        this.registry.requireType(kind, effect.result_type, effect.schema_version)
+      );
+      if (registration.schema_ref !== effect.schema_ref) {
+        throw new RuntimeRequestError("A declared effect has an invalid schema reference.");
+      }
+      registryRequest(() =>
+        this.registry.validateHistoricalPayload(
+          kind,
+          effect.result_type,
+          effect.schema_version,
+          effect.schema_ref,
+          effect.payload
+        )
+      );
+    }
+    return operation;
   }
 
   private async resolveApproval(recordId: string): Promise<RuntimeApprovalEvidence> {
