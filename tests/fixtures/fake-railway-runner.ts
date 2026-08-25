@@ -114,11 +114,17 @@ export class FakeRailwayRunner implements RailwayRunner {
 export function writesOf(runner: FakeRailwayRunner): Array<{ name: string; value?: string; skipDeploys: boolean }> {
   return runner.calls
     .filter((call) => call.args[0] === "variable" && call.args[1] === "set")
-    .map((call) => ({
-      name: call.args[2] as string,
-      skipDeploys: call.args.includes("--skip-deploys"),
-      ...(call.stdin !== undefined ? { value: call.stdin } : {})
-    }));
+    .map((call) => {
+      const name = call.args[2];
+      if (name === undefined) {
+        throw new Error(`Recorded "variable set" call is missing its variable name: ${call.args.join(" ")}`);
+      }
+      return {
+        name,
+        skipDeploys: call.args.includes("--skip-deploys"),
+        ...(call.stdin !== undefined ? { value: call.stdin } : {})
+      };
+    });
 }
 
 export function serviceDomain(targetPort: number) {
