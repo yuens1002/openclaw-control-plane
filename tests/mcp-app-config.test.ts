@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
+import { createRequire } from "node:module";
 
-import { loadMcpAppConfig } from "@openclaw-control-plane/mcp";
+import { CONTROL_PLANE_VERSION, loadMcpAppConfig } from "@openclaw-control-plane/mcp";
+
+const rootPackage = createRequire(import.meta.url)("../package.json") as { version: string };
 
 describe("MCP application configuration", () => {
+  it("advertises the control-plane release version", () => {
+    expect(CONTROL_PLANE_VERSION).toBe(rootPackage.version);
+  });
+
   it("loads stdio without hosted credentials and keeps concerns separate", () => {
     const config = loadMcpAppConfig(baseEnvironment());
 

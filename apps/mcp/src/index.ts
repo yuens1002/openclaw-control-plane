@@ -1,3 +1,5 @@
+import { createRequire } from "node:module";
+
 import {
   createClientCredentialsTokenProvider,
   createDecisionRuntimeMcpModule
@@ -7,6 +9,10 @@ import { createMcpServiceHost } from "@openclaw-control-plane/mcp-service";
 import { loadMcpAppConfig, type McpAppConfig } from "./config.js";
 
 export * from "./config.js";
+
+const rootPackage = createRequire(import.meta.url)("../../../package.json") as { version: string };
+
+export const CONTROL_PLANE_VERSION = rootPackage.version;
 
 export async function startMcpApp(config: McpAppConfig = loadMcpAppConfig(process.env)) {
   const tokenProvider = createClientCredentialsTokenProvider(config.token);
@@ -18,7 +24,7 @@ export async function startMcpApp(config: McpAppConfig = loadMcpAppConfig(proces
   });
   const host = createMcpServiceHost({
     name: "openclaw-control-plane",
-    version: "1.0.0",
+    version: CONTROL_PLANE_VERSION,
     modules: [decisionRuntime]
   });
   const running =
