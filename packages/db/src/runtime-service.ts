@@ -53,6 +53,7 @@ export interface ExecuteRuntimeCommandInput {
 }
 
 export interface RuntimeApprovalEvidence {
+  record_id?: string;
   work_item_id: string;
   operation_type: string;
   action_revision: number;
@@ -116,13 +117,14 @@ export class PrincipalAwareRuntimeService {
       ? validateApprovalEvidence(input.approval_evidence, command, computedDigest)
       : undefined;
     for (const effect of command.declared_effects) {
+      const effectKind = effect.kind ?? "result";
       if (!operation.allowed_result_types.includes(effect.result_type)) {
         throw new Error(
           `Result type ${effect.result_type} is not allowed for ${command.operation_type}.`
         );
       }
       const registration = this.registry.requireType(
-        "result",
+        effectKind,
         effect.result_type,
         effect.schema_version
       );
@@ -130,7 +132,7 @@ export class PrincipalAwareRuntimeService {
         throw new Error(`Schema reference for ${effect.result_type} does not match its registration.`);
       }
       this.registry.validatePayload(
-        "result",
+        effectKind,
         effect.result_type,
         effect.schema_version,
         effect.payload
@@ -138,12 +140,12 @@ export class PrincipalAwareRuntimeService {
     }
 
     const actionRecordId = this.createId();
-    const approvalRecordId = approval ? this.createId() : undefined;
+    const approvalRecordId = approval?.record_id ?? (approval ? this.createId() : undefined);
     const resultRecords = command.declared_effects.map(
       (effect) =>
         ({
           record_id: this.createId(),
-          kind: "result" as const,
+          kind: effect.kind ?? "result",
           type: effect.result_type,
           schema_version: effect.schema_version,
           schema_ref: effect.schema_ref,
@@ -175,7 +177,7 @@ export class PrincipalAwareRuntimeService {
       started_at: input.action.started_at,
       finished_at: input.action.finished_at,
       outcome: input.action.outcome,
-      result_refs: resultRecords.map((record) => ({ kind: "result" as const, id: record.record_id }))
+      result_refs: resultRecords.map((record) => ({ kind: record.kind, id: record.record_id }))
     });
     const { command_context: _trustedContext, id: _id, ...unvalidatedActionPayload } =
       actionAttribution;
@@ -192,6 +194,7 @@ export class PrincipalAwareRuntimeService {
       canonical_command: command,
       command_context: context,
       ...(approval ? { approval_context: approval.context } : {}),
+      ...(approval?.record_id ? { approval_record_id: approval.record_id } : {}),
       records: [
         {
           record_id: actionRecordId,
@@ -205,7 +208,7 @@ export class PrincipalAwareRuntimeService {
           operation_type: command.operation_type,
           operation_schema_version: command.operation_schema_version
         },
-        ...(approval && approvalRecordId
+        ...(approval && approvalRecordId && !approval.record_id
           ? [
               {
                 record_id: approvalRecordId,
@@ -279,6 +282,7 @@ function validateApprovalEvidence(
   command: CanonicalCommandEnvelope,
   computedDigest: string
 ): {
+  record_id?: string;
   decided_at: string;
   payload: RuntimePayload;
   context: TrustedCommandContext;
@@ -321,5 +325,10 @@ function validateApprovalEvidence(
     throw new Error("Approver authorization action must be runtime.command.approve.");
   }
 
-  return { decided_at: payload.decided_at, payload, context: approverContext };
+  return {
+    ...(evidence.record_id ? { record_id: evidence.record_id } : {}),
+    decided_at: payload.decided_at,
+    payload,
+    context: approverContext
+  };
 }

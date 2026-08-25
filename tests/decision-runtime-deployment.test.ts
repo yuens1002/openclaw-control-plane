@@ -16,6 +16,7 @@ describe("decision runtime deployment", () => {
 
     expect(dockerfile).toContain('CMD ["node", "apps/api/dist/server.js"]');
     expect(dockerfile).toContain("packages/db/migrations");
+    expect(dockerfile).toContain("packages/runtime-auth/dist");
     expect(dockerfile).not.toContain("src/server.js");
     expect(config).toContain('dockerfilePath = "deploy/decision-runtime/Dockerfile"');
     expect(config).toContain('healthcheckPath = "/health"');
@@ -23,6 +24,21 @@ describe("decision runtime deployment", () => {
     expect(config).toContain("/deploy/decision-runtime/railway.toml");
     expect(docs).toContain("config-as-code file path to the absolute repository");
     expect(docs).toContain("`/deploy/decision-runtime/railway.toml`");
+  });
+
+  it("ships an independently deployable workflow-neutral worker", async () => {
+    const [dockerfile, config, worker, docs] = await Promise.all([
+      read("deploy/decision-runtime/worker.Dockerfile"),
+      read("deploy/decision-runtime/worker.railway.toml"),
+      read("apps/worker/src/index.ts"),
+      read("docs/decision-runtime-deployment.md")
+    ]);
+
+    expect(dockerfile).toContain('CMD ["node", "apps/worker/dist/index.js"]');
+    expect(config).toContain('healthcheckPath = "/health"');
+    expect(worker).toContain("workflows: []");
+    expect(worker).toContain("checkIdentityReadiness");
+    expect(docs).toContain("Optional worker");
   });
 
   it("keeps local secrets and generated files out of the Docker context", async () => {
@@ -50,6 +66,29 @@ describe("decision runtime deployment", () => {
     expect(server).toContain("process.env.DATABASE_URL_UNPOOLED");
     expect(docs).toContain("`DATABASE_URL` to the pooled connection");
     expect(docs).toContain("`DATABASE_URL_UNPOOLED` to the direct connection");
-    expect(docs).toContain("Operational\nwrite routes remain fail-closed");
+    expect(docs).toContain("`RUNTIME_AUTH_CONFIG_JSON`");
+  });
+
+  it("documents production authentication, smoke, backup, restore, and rollback", async () => {
+    const [server, authDocs, deployDocs, packageJson, verifier] = await Promise.all([
+      read("apps/api/src/server.ts"),
+      read("docs/runtime-authentication.md"),
+      read("docs/decision-runtime-deployment.md"),
+      read("package.json"),
+      read("scripts/verify-decision-runtime.mjs")
+    ]);
+
+    expect(server).toContain("RUNTIME_AUTH_CONFIG_JSON");
+    expect(server).toContain("Development Basic Authentication cannot be enabled in production");
+    expect(authDocs).toContain("OIDC JWT bearer tokens in production");
+    expect(authDocs).toContain("Key rotation");
+    expect(deployDocs).toContain("Smoke verification");
+    expect(deployDocs).toContain("pg_dump");
+    expect(deployDocs).toContain("pg_restore");
+    expect(deployDocs).toContain("data rollback");
+    expect(packageJson).toContain("verify:decision-runtime");
+    expect(verifier).toContain("pg_dump");
+    expect(verifier).toContain("pg_restore");
+    expect(verifier).toContain("degraded_readiness");
   });
 });

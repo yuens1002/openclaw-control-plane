@@ -205,6 +205,7 @@ export type OperationRegistration = z.infer<
 
 export const DeclaredEffectSchema = z
   .object({
+    kind: z.enum(["result", "artifact"]).optional(),
     result_type: SafeNamespacedIdentifierSchema,
     schema_version: z.number().int().positive(),
     schema_ref: z.string().min(1).max(2048),

@@ -7,6 +7,19 @@ and uses semantic versioning once releases begin.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-24
+
+- Add the authenticated, versioned Decision Runtime API with OIDC identity,
+  static RBAC, delegation, immutable approvals, typed commands and queries,
+  bounded audit, and server-derived action attribution.
+- Add durable PostgreSQL runtime records, registrations, provenance edges,
+  idempotency, projections, migration coverage, and backup/restore verification.
+- Add the bearer-authenticated OpenClaw tool adapter, production API and worker
+  targets, independent readiness dimensions, and a public container conformance
+  verifier covering TLS/JWKS, restart, replay, and recovery.
+- Add public Decision Runtime architecture, API, usage, authentication, and
+  deployment documentation with workflow-neutral `example.*` fixtures.
+
 - 2026-08-23 - docs(ops): close protocol gap G4 by narrowing its scope rather than building a shared guard (closes #45)
 - 2026-08-23 - docs(hygiene): drop private client-profile repo name from the ADR, four plan docs, a deploy doc, and a source comment; add the audit report
 - 2026-08-23 - docs(adr): ADR 0001 no longer names which GitHub auth mechanism any tenant currently runs
