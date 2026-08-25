@@ -2,7 +2,7 @@
 
 Plan: `docs/plans/decision-runtime-mcp/plan.md`
 
-Current PR implementation SHA: `e48df6c0ac80af93689cb737ba9951ed0a66d39c`
+Current PR implementation SHA: `b4fd9d180d7e7479ca84e0f223eaa2ebcdb7e910`
 
 Original independently reviewed SHA:
 `ee7c7ec2c8036ecae7c61d9cbf4fafb4cca7cdcd`
@@ -77,6 +77,8 @@ corrected and regression-tested:
 8. Rejected duplicate module IDs before health dimensions can collide.
 9. Made `npm test` build workspace entrypoints before process-level conformance
    so clean CI checkouts do not depend on pre-existing `dist` output.
+10. Closed each hosted per-request MCP server on both successful response
+    `finish` and aborted response `close`, with one idempotent cleanup path.
 
 ## Residual Risks
 
