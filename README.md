@@ -52,6 +52,9 @@ OpenClaw manages the system; it does not become the system.
 - `packages/contracts`: shared schemas and TypeScript types
 - `packages/db`: migrations and typed persistence primitives
 - `packages/openclaw-adapter`: OpenClaw-facing API wrappers
+- `packages/mcp-service`: reusable first-party MCP module host and transports
+- `packages/decision-runtime-mcp`: Decision Runtime MCP tools and OIDC client
+- `apps/mcp`: independently deployable MCP composition service
 - `workers/vending`: fake/manual example worker package
 - `deploy/openclaw-railway`: OpenClaw Railway template installer and
   agency-controlled per-client provisioning
@@ -70,6 +73,11 @@ extension path. Then use
 [Runtime Authentication And Authorization](docs/runtime-authentication.md) and
 [Private Decision Runtime Deployment](docs/decision-runtime-deployment.md) for
 the trust and operating contracts.
+
+Agents can discover the same authenticated boundary through the
+[MCP Service Host And Decision Runtime Module](docs/mcp-service.md). MCP is the
+agent-facing transport; HTTP remains the service API and runtime authorization
+remains authoritative.
 
 ## Local Setup
 

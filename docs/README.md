@@ -46,6 +46,8 @@ Examples:
 - [Private Decision Runtime Deployment](decision-runtime-deployment.md):
   service topology, readiness, smoke, backup/restore, and rollback.
 - [OpenClaw Tools](openclaw-tools.md): typed adapter surface exposed to agents.
+- [MCP Service Host](mcp-service.md): reusable module contract, Decision Runtime
+  tools, OpenClaw configuration, deployment, and rollback.
 
 ## Public-Repo Rule
 
