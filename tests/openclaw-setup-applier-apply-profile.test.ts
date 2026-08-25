@@ -8,7 +8,7 @@ import {
   printDryRunResult
 } from "@openclaw-control-plane/openclaw-setup-applier/apply-profile";
 import { createSetupApiClient } from "@openclaw-control-plane/openclaw-setup-applier/setup-api-client";
-import { FakeRailwayRunner } from "./fixtures/fake-railway-runner.js";
+import { FakeRailwayRunner, writesOf } from "./fixtures/fake-railway-runner.js";
 
 const SENTINEL_SECRET = "sk-test-DO-NOT-LOG-9f8e7d";
 const SENTINEL_MINTED = "sk-test-DO-NOT-LOG-minted-key";
@@ -18,17 +18,6 @@ function runnerWithVariables(variables: Record<string, string>): FakeRailwayRunn
   const runner = new FakeRailwayRunner();
   runner.setVariableListResponse(variables);
   return runner;
-}
-
-/** Reduces the shared fixture's raw `calls` down to the `variable set` writes this file asserts on. */
-function writesOf(runner: FakeRailwayRunner): Array<{ name: string; value?: string; skipDeploys: boolean }> {
-  return runner.calls
-    .filter((call) => call.args[0] === "variable" && call.args[1] === "set")
-    .map((call) => ({
-      name: call.args[2] as string,
-      skipDeploys: call.args.includes("--skip-deploys"),
-      ...(call.stdin !== undefined ? { value: call.stdin } : {})
-    }));
 }
 
 /**

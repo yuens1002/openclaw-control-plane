@@ -110,6 +110,17 @@ export class FakeRailwayRunner implements RailwayRunner {
   }
 }
 
+/** Reduces a fixture's recorded `calls` down to just the `variable set` writes. */
+export function writesOf(runner: FakeRailwayRunner): Array<{ name: string; value?: string; skipDeploys: boolean }> {
+  return runner.calls
+    .filter((call) => call.args[0] === "variable" && call.args[1] === "set")
+    .map((call) => ({
+      name: call.args[2] as string,
+      skipDeploys: call.args.includes("--skip-deploys"),
+      ...(call.stdin !== undefined ? { value: call.stdin } : {})
+    }));
+}
+
 export function serviceDomain(targetPort: number) {
   return {
     domain: "acme-openclaw.example.com",

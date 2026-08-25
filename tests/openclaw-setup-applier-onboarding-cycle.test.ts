@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { RailwayRunner } from "@openclaw-control-plane/openclaw-railway-installer";
 import { bootstrapOnboardingCycle, runRegressionCheck } from "@openclaw-control-plane/openclaw-setup-applier/onboarding-cycle";
 import { createFakeConfigStore } from "./fixtures/fake-config-store.js";
-import { FakeRailwayRunner } from "./fixtures/fake-railway-runner.js";
+import { FakeRailwayRunner, writesOf } from "./fixtures/fake-railway-runner.js";
 
 const SENTINEL_MINTED = "sk-test-DO-NOT-LOG-minted-key";
 const SENTINEL_MINTED_HASH = "hash-test-minted-abc123";
@@ -16,13 +16,17 @@ function readFixture(name: string): unknown {
 }
 
 /**
- * `provisionClientInstance` calls `service list` exactly three times when
- * creating a new service: once before `up` (empty), once after `up` to
- * diff the newly created service in, and once more inside
- * `pollServiceUntilSuccess`'s first poll iteration. The shared fixture
- * holds its last queued response once exhausted, so `[[], [created]]`
- * reproduces that sequence -- same pattern as
- * tests/openclaw-railway-provision-client.test.ts's `freshService`.
+ * `provisionClientInstance` calls `service list` at least twice when
+ * creating a new service -- once before `up` (empty) and once after `up`
+ * to diff the newly created service in -- plus at least once more inside
+ * `pollServiceUntilSuccess`'s poll loop. The shared fixture holds its
+ * last queued response once exhausted, so `[[], [created]]` tolerates any
+ * call count from the poll loop as long as the first two calls land in
+ * that order -- same pattern as
+ * tests/openclaw-railway-provision-client.test.ts's `freshService`. The
+ * "provisions, dry-runs, then applies" test below pins the exact count
+ * (3, today) so a future change to that call count is caught here rather
+ * than silently tolerated by the hold-last fallback.
  */
 function newRunner(variables: Record<string, string> = {}, options: { createdServiceName?: string } = {}): FakeRailwayRunner {
   const runner =
@@ -38,16 +42,6 @@ function newRunner(variables: Record<string, string> = {}, options: { createdSer
 
 function createdService(name: string) {
   return { id: "svc_new", name, latestDeployment: { id: "dep_new", status: "SUCCESS" as const } };
-}
-
-function writesOf(runner: FakeRailwayRunner): Array<{ name: string; value?: string; skipDeploys: boolean }> {
-  return runner.calls
-    .filter((call) => call.args[0] === "variable" && call.args[1] === "set")
-    .map((call) => ({
-      name: call.args[2] as string,
-      skipDeploys: call.args.includes("--skip-deploys"),
-      ...(call.stdin !== undefined ? { value: call.stdin } : {})
-    }));
 }
 
 describe("runRegressionCheck", () => {
@@ -326,5 +320,11 @@ describe("bootstrapOnboardingCycle", () => {
     expect(calls).not.toContain("delete");
     expect(calls.indexOf("status")).toBeLessThan(calls.indexOf("mint"));
     expect(calls.indexOf("mint")).toBeLessThan(calls.indexOf("run"));
+    // Pins the `service list` call count the `newRunner` comment above
+    // depends on: exactly 3 (before `up`, after `up`, and
+    // pollServiceUntilSuccess's first poll). If a future change to
+    // provisionClientInstance changes that count, this fails here instead
+    // of silently relying on hold-last semantics masking the difference.
+    expect(runner.calls.filter((call) => call.args[0] === "service" && call.args[1] === "list")).toHaveLength(3);
   });
 });
