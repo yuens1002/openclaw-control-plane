@@ -2,7 +2,7 @@
 
 Issue: https://github.com/yuens1002/openclaw-control-plane/issues/63
 Branch: `feat/decision-runtime-mcp`
-Status: approved; AC Gate 1/2 passed and implementation is authorized
+Status: implementation and independent verification complete; human approval pending
 
 ## Delivery Process
 
