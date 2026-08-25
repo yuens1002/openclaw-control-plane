@@ -127,13 +127,19 @@ describe("importWorkspaceFiles has no production callers", () => {
   // catch a future re-export of this module under an unrelated name.
   const forbiddenImportPattern = /(?:from\s+|import\s*\(\s*|import\s+)["'`][^"'`]*import-workspace-files[^"'`]*["'`]/;
   const productionSourceRoots = ["apps", "packages", "workers"];
+  // Excluded by its exact path, not by bare filename -- a filename-only
+  // exclusion would silently skip any *future* file elsewhere in the tree
+  // that happened to share this name, defeating the tripwire for exactly
+  // the case it exists to catch.
+  const moduleUnderTestPath = join("packages", "openclaw-railway-installer", "src", "import-workspace-files.ts");
 
   async function listProductionTsFiles(root: string): Promise<string[]> {
     const entries = await readdir(root, { withFileTypes: true, recursive: true });
     return entries
-      .filter((entry) => entry.isFile() && entry.name.endsWith(".ts") && entry.name !== "import-workspace-files.ts")
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
       .map((entry) => join(entry.parentPath ?? entry.path, entry.name))
-      .filter((path) => path.split(/[\\/]/).includes("src"));
+      .filter((path) => path.split(/[\\/]/).includes("src"))
+      .filter((path) => !path.endsWith(moduleUnderTestPath));
   }
 
   it("no file under apps/*/src, packages/*/src, or workers/*/src imports import-workspace-files.js", async () => {
