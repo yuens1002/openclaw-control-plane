@@ -4,8 +4,16 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./token-provider": "./src/token-provider.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./token-provider": {
+      "types": "./dist/token-provider.d.ts",
+      "import": "./dist/token-provider.js",
+      "default": "./dist/token-provider.js"
+    }
   },
   "dependencies": {
     "@openclaw-control-plane/contracts": "file:../contracts",

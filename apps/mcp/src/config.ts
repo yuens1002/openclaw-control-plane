@@ -11,7 +11,8 @@ const EnvironmentSchema = z
     NODE_ENV: z.enum(["development", "test", "production"]).default("production"),
     MCP_TRANSPORT: z.enum(["stdio", "streamable-http"]).default("stdio"),
     MCP_HOST: z.string().min(1).default("0.0.0.0"),
-    MCP_PORT: z.coerce.number().int().min(0).max(65_535).default(3001),
+    MCP_PORT: z.coerce.number().int().min(0).max(65_535).optional(),
+    PORT: z.coerce.number().int().min(0).max(65_535).optional(),
     MCP_INBOUND_BEARER_TOKEN: z.string().min(16).optional(),
     RUNTIME_API_URL: z.string().url(),
     OIDC_TOKEN_ENDPOINT: z.string().url(),
@@ -66,7 +67,7 @@ export function loadMcpAppConfig(environment: NodeJS.ProcessEnv) {
     mode: parsed.MCP_TRANSPORT,
     hosted: {
       hostname: parsed.MCP_HOST,
-      port: parsed.MCP_PORT,
+      port: parsed.MCP_PORT ?? parsed.PORT ?? 3001,
       ...(parsed.MCP_INBOUND_BEARER_TOKEN
         ? { bearerToken: parsed.MCP_INBOUND_BEARER_TOKEN }
         : {})
