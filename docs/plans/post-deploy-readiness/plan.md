@@ -10,7 +10,7 @@ run and recorded manually rather than blocked mechanically). Follows
 ## Goal
 
 Automate the three post-deploy finalization steps found during the
-agency-first-client-dogfood live rebuild that a freshly-deployed OpenClaw
+reference live onboarding exercise that a freshly-deployed OpenClaw
 Railway instance needs to reach a genuinely working, paired dashboard, so a
 real client onboarding doesn't require manual API calls after the shell
 install succeeds. Resolves items 3, 4, 5 of GitHub issue #18.

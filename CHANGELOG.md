@@ -3,9 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 This project follows the spirit of [Keep a Changelog](https://keepachangelog.com/)
-and uses semantic versioning once releases begin.
+and uses semantic versioning.
 
 ## [Unreleased]
+
+## [0.4.2] - 2026-08-25
+
+- Generalize public deployment evidence and historical planning references,
+  and extend the Public-Repo Rule to issue/PR comments and operational IDs.
 
 ## [0.4.1] - 2026-08-25
 
