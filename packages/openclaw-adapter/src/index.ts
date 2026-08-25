@@ -212,7 +212,7 @@ function createApiCaller(options: OpenClawAdapterOptions) {
     }
     const requestInit: RequestInit = { method: request.method, headers };
 
-    if (request.body) {
+    if ("body" in request) {
       headers["content-type"] = "application/json";
       requestInit.body = JSON.stringify(request.body);
     }

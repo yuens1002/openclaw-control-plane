@@ -843,16 +843,18 @@ export class PostgresRuntimeRepository {
       payload: input.record.payload,
       authenticated_principal_ref: input.command_context.authenticated_principal_ref
     };
-    const expectedSources = (input.source_refs ?? []).map((source) => source.id);
-    const existingSources = (await this.listEdges(existing.record_id))
-      .filter(
-        (edge) => edge.from_record_id === existing.record_id && edge.relation === "derived_from"
-      )
-      .sort((left, right) => left.ordinal - right.ordinal)
-      .map((edge) => edge.to_record_id);
+    const expectedSources = input.source_refs ?? [];
+    const existingSources = await this.pool.query<{ id: string; kind: RuntimeKind }>(
+      `SELECT source.record_id AS id, source.kind
+       FROM record_edges edge
+       JOIN runtime_records source ON source.record_id = edge.to_record_id
+       WHERE edge.from_record_id = $1 AND edge.relation = 'derived_from'
+       ORDER BY edge.ordinal`,
+      [existing.record_id]
+    );
     if (
       jsonDigest(comparableExisting) !== jsonDigest(comparableInput) ||
-      jsonDigest(existingSources) !== jsonDigest(expectedSources)
+      jsonDigest(existingSources.rows) !== jsonDigest(expectedSources)
     ) {
       throw new IdempotencyConflictError();
     }

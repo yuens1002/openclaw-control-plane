@@ -797,21 +797,30 @@ describePostgres("PostgreSQL durable runtime repository", () => {
       record: event,
       command_context: context
     });
+    const workItem = {
+      record_id: ids.work,
+      kind: "work_item" as const,
+      type: "example.state.reconcile",
+      schema_version: 1,
+      schema_ref: "example://schemas/state-reconcile/v1",
+      subject: { type: "example.environment", id: "production" },
+      payload: { requested_state: { ready: true } },
+      occurred_at: "2026-08-23T12:00:01.000Z"
+    };
     await repository.appendIntakeRecord({
       stream_id: "intake-stream",
-      record: {
-        record_id: ids.work,
-        kind: "work_item",
-        type: "example.state.reconcile",
-        schema_version: 1,
-        schema_ref: "example://schemas/state-reconcile/v1",
-        subject: { type: "example.environment", id: "production" },
-        payload: { requested_state: { ready: true } },
-        occurred_at: "2026-08-23T12:00:01.000Z"
-      },
+      record: workItem,
       source_refs: [{ kind: "event", id: ids.event }],
       command_context: context
     });
+    await expect(
+      repository.appendIntakeRecord({
+        stream_id: "intake-stream",
+        record: workItem,
+        source_refs: [{ kind: "work_item", id: ids.event }],
+        command_context: context
+      })
+    ).rejects.toThrow(IdempotencyConflictError);
     const firstPage = await repository.listRecords({ stream_id: "intake-stream", limit: 1 });
     const secondPage = await repository.listRecords({
       stream_id: "intake-stream",

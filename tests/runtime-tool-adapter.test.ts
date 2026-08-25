@@ -54,6 +54,22 @@ describe("authenticated runtime tool adapter", () => {
     );
   });
 
+  it("serializes a supplied falsy JSON body", async () => {
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) =>
+      Response.json({ status: "inserted", event: false })
+    );
+    const tools = createOpenClawControlPlaneTools({
+      baseUrl: "https://control-plane.example",
+      fetchImpl
+    });
+
+    await tools.ingest_event(false as never);
+
+    const request = fetchImpl.mock.calls[0]![1]!;
+    expect(new Headers(request.headers).get("content-type")).toBe("application/json");
+    expect(request.body).toBe("false");
+  });
+
   it("does not include bearer tokens in API errors", async () => {
     const tools = createOpenClawControlPlaneTools({
       baseUrl: "https://control-plane.example",
