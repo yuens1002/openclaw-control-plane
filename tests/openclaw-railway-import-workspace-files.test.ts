@@ -110,3 +110,51 @@ describe("importWorkspaceFiles", () => {
     expect(callCount).toBe(1);
   });
 });
+
+describe("importWorkspaceFiles has no production callers", () => {
+  // Gap G3 (docs/live-instance-operations.md §7): this module POSTs
+  // unconditionally with no pre-read comparison, deferred as low-urgency
+  // *because* it is currently unwired from both provisioning paths. That
+  // deferral only holds while the premise does -- "fix it when it gains a
+  // caller" otherwise depends on whoever wires it up having read the
+  // register first. This makes the premise a tripwire: the day a
+  // production module imports this one, this test fails and points here
+  // instead of the caller finding out from an incident.
+  //
+  // Source-text scan across every production src tree (apps/*/src,
+  // packages/*/src, workers/*/src), not an import-graph walk -- same
+  // known limitation as the G4 closure's equivalent check: it cannot
+  // catch a future re-export of this module under an unrelated name.
+  const forbiddenImportPattern = /(?:from\s+|import\s*\(\s*|import\s+)["'`][^"'`]*import-workspace-files[^"'`]*["'`]/;
+  const productionSourceRoots = ["apps", "packages", "workers"];
+  // Excluded by its exact path, not by bare filename -- a filename-only
+  // exclusion would silently skip any *future* file elsewhere in the tree
+  // that happened to share this name, defeating the tripwire for exactly
+  // the case it exists to catch.
+  const moduleUnderTestPath = join("packages", "openclaw-railway-installer", "src", "import-workspace-files.ts");
+
+  async function listProductionTsFiles(root: string): Promise<string[]> {
+    const entries = await readdir(root, { withFileTypes: true, recursive: true });
+    return entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
+      .map((entry) => join(entry.parentPath ?? entry.path, entry.name))
+      .filter((path) => path.split(/[\\/]/).includes("src"))
+      .filter((path) => !path.endsWith(moduleUnderTestPath));
+  }
+
+  it("no file under apps/*/src, packages/*/src, or workers/*/src imports import-workspace-files.js", async () => {
+    const files = (
+      await Promise.all(productionSourceRoots.map((root) => listProductionTsFiles(root)))
+    ).flat();
+    expect(files.length).toBeGreaterThan(0);
+
+    const offenders: string[] = [];
+    for (const file of files) {
+      const source = await readFile(file, "utf8");
+      if (forbiddenImportPattern.test(source)) {
+        offenders.push(file);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+});
