@@ -57,6 +57,21 @@ OpenClaw deploy behavior is intentionally untouched.
   `.claude/verification-status.json` exist in this repo (same structural
   exception as `railway-cli-spawn-contract`, `setup-api-basic-auth`, and
   `client-template-pinning`). Gate 1/2 are performed manually below.
+- Checked for in-progress-branch collisions before starting (retro lesson —
+  a prior plan flagged a same-file conflict but didn't re-check it before
+  handoff, and the conflict landed after human approval): a local
+  `feat/decision-runtime-mcp` branch exists (no open PR) and genuinely
+  overlaps this plan's D4/D5 targets — it adds new bullets/sections to
+  `docs/architecture.md` (its own `packages/mcp-service`,
+  `packages/decision-runtime-mcp`, `apps/mcp` entries, plus an MCP paragraph
+  under Runtime Boundary) and `docs/README.md` (a new MCP Service Host Start
+  Here bullet). Diffed both files against that branch: no line-range overlap
+  with this plan's insertions today (its architecture.md edits land in
+  `## Packages`/`## Runtime Boundary`, before this plan's new `## Deployment
+  Topology` section; its docs/README.md edit adds a bullet after this plan's
+  edited line). Re-check `git diff origin/main...feat/decision-runtime-mcp`
+  against both files again immediately before Phase 5 handoff, in case it
+  has merged and the line ranges have shifted.
 
 ## Approach
 
@@ -103,7 +118,7 @@ OpenClaw deploy behavior is intentionally untouched.
 | D1 | `deploy/decision-runtime/railway.toml` — add `build.watchPatterns` covering the API image's complete transitive build input | config | `/devops` | 1 |
 | D2 | `deploy/decision-runtime/worker.railway.toml` — add `build.watchPatterns` covering the worker image's complete transitive build input | config | `/devops` | 1 |
 | D3 | `tests/decision-runtime-watch-patterns.test.ts` — derives each service's expected pattern set from its Dockerfile, asserts set-equality (config parity) and drift detection, and asserts representative changed-path sets match/don't match per service | test | `/test-engineer` | 1 |
-| D4 | `docs/architecture.md` — add a deployment-topology / build-lifecycle section: independent Railway services, per-service source/build/deploy boundaries, non-cascading deploys, runtime HTTP/DB relationships | doc | `/devops` | 1 |
+| D4 | `docs/architecture.md` — add a deployment-topology / build-lifecycle section: independent Railway services, per-service source/build/deploy boundaries, non-cascading deploys, runtime HTTP/DB relationships; `docs/README.md`'s Architecture one-liner updated to match (discovered mid-Implement — the docs index restates each doc's scope and would otherwise go stale) | doc | `/devops` | 1 |
 | D5 | `docs/decision-runtime-deployment.md` — add Railway watch-path behavior, the API/worker trigger matrix, the watch-pattern maintenance rule, and a generic hosted-verification procedure | doc | `/devops` | 1 |
 | D6 | `docs/plans/decision-runtime-watch-patterns/plan.md` — this plan | doc | `/project-manager` | 1 |
 | D7 | `docs/plans/decision-runtime-watch-patterns/ACs.md` — structured AC table with Plan-ref and Role columns | doc | `/project-manager` | 1 |
@@ -152,6 +167,8 @@ OpenClaw deploy behavior is intentionally untouched.
 - `deploy/decision-runtime/railway.toml` (D1)
 - `deploy/decision-runtime/worker.railway.toml` (D2)
 - `docs/architecture.md` (D4)
+- `docs/README.md` (D4 — Architecture one-liner kept in sync; discovered
+  mid-Implement)
 - `docs/decision-runtime-deployment.md` (D5)
 
 ## Sessions
