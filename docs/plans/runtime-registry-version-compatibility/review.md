@@ -3,7 +3,7 @@
 Issue: https://github.com/yuens1002/openclaw-control-plane/issues/57
 Branch: `fix/runtime-registry-version-57`
 Status: local review complete; pending external PR and live verification
-Reviewed implementation SHA: pending
+Reviewed implementation SHA: `745754ca34c547d2843a2e9aad9f3196d98d87f0`
 
 ## Review Scope
 
