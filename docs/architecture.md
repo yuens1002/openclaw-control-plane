@@ -53,3 +53,49 @@ handlers, identity policy, connectors, and private credentials.
 
 External connectors and consumer-specific workflows remain out of scope for the
 public baseline.
+
+## Deployment Topology
+
+The repository builds and deploys three independent Railway services from one
+Git history. Each service owns its own project boundary, build boundary,
+deployment boundary, and runtime boundary — they are not phases of one release.
+
+- **Project boundary**: one repository, one default branch, three services.
+- **Service boundary**: each service selects its own config-as-code file
+  (`railway.toml` for OpenClaw at the repository root;
+  `deploy/decision-runtime/railway.toml` for the API;
+  `deploy/decision-runtime/worker.railway.toml` for the worker) and its own
+  `dockerfilePath`. Railway otherwise discovers the root `railway.toml` by
+  default, so every non-root service must point at its file explicitly.
+- **Build boundary**: every Dockerfile shares the same Docker build context
+  (the repository root, filtered by `.dockerignore`), but each Dockerfile's
+  `COPY` instructions name a distinct, narrower set of source paths — its
+  app directory plus the shared packages and root manifests it actually
+  compiles against. A service's build boundary is exactly what its
+  Dockerfile copies, nothing more.
+- **Deployment boundary**: each service declares `build.watchPatterns`
+  matching its own Dockerfile's build boundary. A commit that touches only
+  paths outside a service's watch patterns does not create a deployment for
+  that service — **rebuilding one sibling service does not rebuild
+  another**. See [Private Decision Runtime
+  Deployment](decision-runtime-deployment.md) for the API/worker trigger
+  matrix.
+- **Runtime boundary**: OpenClaw and the decision-runtime services do not
+  call each other directly at deploy time. The API and worker share one
+  PostgreSQL database; OpenClaw reaches the Decision Runtime only through the
+  authenticated `/v1/runtime` HTTP boundary described in [Decision
+  Runtime](decision-runtime.md), never through shared process state or a
+  build-time dependency.
+
+```text
+repo (one default branch)
+ ├─ railway.toml                              → OpenClaw service
+ │                                               (no watchPatterns; deploys
+ │                                                on every commit)
+ ├─ deploy/decision-runtime/railway.toml       → decision-runtime API service
+ │                                               (watchPatterns scoped to its
+ │                                                Dockerfile's build input)
+ └─ deploy/decision-runtime/worker.railway.toml → decision-runtime worker service
+                                                   (watchPatterns scoped to its
+                                                    Dockerfile's build input)
+```

@@ -42,6 +42,54 @@ and allow its migrations to complete before starting the optional worker. Keep
 one API and one worker replica until migrations are moved into a separate
 release job.
 
+## Build triggers
+
+Both `railway.toml` and `worker.railway.toml` declare `build.watchPatterns` —
+gitignore-style path patterns, evaluated from the repository root regardless
+of any root directory setting, that gate whether a commit creates a new
+deployment for that service. A commit matching none of a service's patterns
+skips a deployment for that service entirely; multiple patterns are OR'd
+together, and neither file uses a negation pattern.
+
+Each service's patterns cover exactly its Dockerfile's build-stage `COPY`
+sources: its own app directory, its own Dockerfile and `railway.toml`, the
+shared `packages/contracts`, `packages/runtime-auth`, and `packages/db`
+(including migrations), the root dependency manifests and shared TypeScript
+configuration, and `.dockerignore`. Root OpenClaw's `railway.toml` declares no
+`watchPatterns` and continues to deploy on every commit to the tracked branch
+— that is unchanged by this feature.
+
+| Changed path | API deploys | Worker deploys |
+| --- | --- | --- |
+| `apps/api/**` | Yes | No |
+| `apps/worker/**` | No | Yes |
+| `packages/contracts/**`, `packages/runtime-auth/**`, `packages/db/**` (incl. migrations) | Yes | Yes |
+| `package.json`, `package-lock.json`, `tsconfig.json`, `tsconfig.base.json`, `.dockerignore` | Yes | Yes |
+| `deploy/decision-runtime/railway.toml` or `Dockerfile` | Yes | No |
+| `deploy/decision-runtime/worker.railway.toml` or `worker.Dockerfile` | No | Yes |
+| Documentation, the OpenClaw wrapper, or an unrelated package | No | No |
+
+**Maintenance rule**: whenever either Dockerfile gains another copied
+source path — a new shared package, a new root manifest, a new build
+argument file — add that path to the same service's `watchPatterns` in the
+same change. An uncovered path silently stops triggering deployments for
+real build-input changes; `tests/decision-runtime-watch-patterns.test.ts`
+enforces this by deriving the expected pattern set directly from each
+Dockerfile's `COPY` sources and asserting it matches the declared patterns.
+
+**Verification procedure** (generic — run against any GitHub-connected
+decision-runtime service, replacing no identifiers below):
+
+1. Confirm both services' config-as-code path is set to their respective
+   `deploy/decision-runtime/*.railway.toml`.
+2. Push a commit touching only `apps/api/**` and confirm a new deployment
+   appears for the API service and not the worker service.
+3. Push a commit touching only `apps/worker/**` and confirm the reverse.
+4. Push a commit touching only `packages/db/**` and confirm both services
+   receive a new deployment.
+5. Push a commit touching only documentation (for example, this file) and
+   confirm neither service receives a new deployment.
+
 ## Smoke verification
 
 Run the public container, restart, and recovery verifier with:
