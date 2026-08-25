@@ -7,7 +7,9 @@ and uses semantic versioning.
 
 ## [Unreleased]
 
-- 2026-08-25 — build(railway): scope decision-runtime deploys with watch patterns
+## [0.4.3] - 2026-08-25
+
+- 2026-08-25 - build(railway): scope decision-runtime deploys with watch patterns
 
 ## [0.4.2] - 2026-08-25
 

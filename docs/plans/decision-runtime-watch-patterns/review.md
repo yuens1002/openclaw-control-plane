@@ -49,7 +49,7 @@ One process note: the plan's in-progress-branch collision check (local `feat/dec
 ## Recommendations
 
 1. None blocking.
-2. Non-blocking, out of this feature's scope: `AC-OPS-001`'s live hosted-smoke run (pushing representative commits to a provisioned decision-runtime service and confirming deploy/no-deploy behavior matches the trigger matrix) is deferred — no decision-runtime API/worker Railway service is currently provisioned, and the user confirmed provisioning one for this session's sake is out of scope. Worth doing once such a service exists, using the generic procedure already documented in `docs/decision-runtime-deployment.md`'s "Build triggers" section.
+2. Non-blocking, out of this feature's scope: `AC-OPS-001`'s live hosted-smoke run (pushing representative commits to a provisioned decision-runtime service and confirming deploy/no-deploy behavior matches the trigger matrix) is deferred — no decision-runtime API/worker Railway service is currently provisioned, and the user confirmed provisioning one for this session's sake is out of scope. Tracked by issue [#65](https://github.com/yuens1002/openclaw-control-plane/issues/65), using the generic procedure already documented in `docs/decision-runtime-deployment.md`'s "Build triggers" section.
 3. Non-blocking, flagged by the Phase 3 sub-agent: `deriveExpectedPatterns`'s file-vs-directory heuristic (a dot in the basename means "file") is correct for every path in both current Dockerfiles but is a basename guess, not a filesystem stat. It fails loudly (breaks set-equality) rather than silently if a future Dockerfile ever copies a directory with a dot in its name — acceptable as-is, but worth a one-line comment if this test file is next touched for an unrelated reason.
 
 ## Inputs for /retro

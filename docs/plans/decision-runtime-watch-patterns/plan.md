@@ -47,6 +47,8 @@ OpenClaw deploy behavior is intentionally untouched.
   follow-up rather than provisioning disposable services in this session. The
   **generic verification procedure** the AC also requires still ships in
   `docs/decision-runtime-deployment.md` (D5) regardless of that deferral.
+  Tracked by issue [#65](https://github.com/yuens1002/openclaw-control-plane/issues/65)
+  so the deferral has an open tracker independent of this PR closing #62.
 - Railway's Config as Code (`railway.toml`/`railway.json`) is deprecated in
   favor of Infrastructure as Code; existing files keep working for legacy
   services until **2026-12-01**. All three of this repo's Railway services
