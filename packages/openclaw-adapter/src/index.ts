@@ -32,6 +32,13 @@ export interface OpenClawAdapterOptions {
   allowInsecureTransport?: boolean;
 }
 
+export class ControlPlaneApiError extends Error {
+  constructor(readonly status: number) {
+    super(`Control plane API returned ${status}`);
+    this.name = "ControlPlaneApiError";
+  }
+}
+
 export function createOpenClawControlPlaneTools(options: OpenClawAdapterOptions) {
   const endpoint = new URL(options.baseUrl);
   if (options.tokenProvider && endpoint.protocol !== "https:" && !options.allowInsecureTransport) {
@@ -220,7 +227,7 @@ function createApiCaller(options: OpenClawAdapterOptions) {
     const response = await fetchImpl(`${baseUrl}${path}`, requestInit);
 
     if (!response.ok) {
-      throw new Error(`Control plane API returned ${response.status}`);
+      throw new ControlPlaneApiError(response.status);
     }
 
     const body = await response.json();
