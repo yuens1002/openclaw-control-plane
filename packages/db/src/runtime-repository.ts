@@ -422,6 +422,15 @@ export class PostgresRuntimeRepository {
       throw new Error("Denied authorization action does not match the registered operation action.");
     }
     const auditId = randomUUID();
+    const payload = RuntimePayloadSchema.parse(
+      AuthorizationDenialAuditPayloadSchema.parse({
+        request_id: input.request_id,
+        ...(input.tool_invocation_id ? { tool_invocation_id: input.tool_invocation_id } : {}),
+        decision_id: context.authorization.decision_id,
+        policy_version: context.authorization.policy_version,
+        reason_codes: context.authorization.reason_codes
+      })
+    );
     const canonicalCommand = CanonicalCommandEnvelopeSchema.parse({
       canonicalization_version: "jcs-rfc8785-v1",
       operation_type: input.operation_type,
@@ -456,13 +465,7 @@ export class PostgresRuntimeRepository {
           operation_type: input.operation_type,
           operation_schema_version: input.operation_schema_version,
           subject: input.target,
-          payload: {
-            request_id: input.request_id,
-            ...(input.tool_invocation_id ? { tool_invocation_id: input.tool_invocation_id } : {}),
-            decision_id: context.authorization.decision_id,
-            policy_version: context.authorization.policy_version,
-            reason_codes: context.authorization.reason_codes
-          },
+          payload,
           occurred_at: new Date().toISOString()
         }
       ]

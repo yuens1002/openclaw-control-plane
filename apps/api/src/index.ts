@@ -223,9 +223,11 @@ export function createControlPlaneApp(
       request.operation_type,
       request.operation_schema_version
     );
-    const toolInvocationId = context.req.header("x-tool-invocation-id")
-      ? SafeLocalIdentifierSchema.parse(context.req.header("x-tool-invocation-id"))
-      : undefined;
+    const toolInvocationHeader = context.req.header("x-tool-invocation-id");
+    const toolInvocationId =
+      toolInvocationHeader === undefined
+        ? undefined
+        : SafeLocalIdentifierSchema.parse(toolInvocationHeader);
     const trusted = await authorizeRequest(context, dependencies, {
       action: operation.authorization_action,
       resource: request.target,

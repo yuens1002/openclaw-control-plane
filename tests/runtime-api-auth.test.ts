@@ -237,21 +237,23 @@ describe("authenticated runtime API", () => {
     expect(denial).not.toHaveProperty("tool_invocation_id");
     expect(denial.command_context.request_origin).toBe("http");
 
-    const invalid = createDependencies({ deny: true });
-    const invalidResponse = await createControlPlaneApp(invalid).request(
-      "/v1/runtime/commands",
-      {
-        method: "POST",
-        headers: {
-          authorization: "Bearer valid",
-          "content-type": "application/json",
-          "x-tool-invocation-id": "invalid id"
-        },
-        body: JSON.stringify(commandRequest())
-      }
-    );
-    expect(invalidResponse.status).toBe(400);
-    expect(invalid.runtimeApiService!.recordCommandDenial).not.toHaveBeenCalled();
+    for (const invalidId of ["invalid id", ""]) {
+      const invalid = createDependencies({ deny: true });
+      const invalidResponse = await createControlPlaneApp(invalid).request(
+        "/v1/runtime/commands",
+        {
+          method: "POST",
+          headers: {
+            authorization: "Bearer valid",
+            "content-type": "application/json",
+            "x-tool-invocation-id": invalidId
+          },
+          body: JSON.stringify(commandRequest())
+        }
+      );
+      expect(invalidResponse.status, JSON.stringify(invalidId)).toBe(400);
+      expect(invalid.runtimeApiService!.recordCommandDenial).not.toHaveBeenCalled();
+    }
   });
 
   it("returns bounded stream pages through the authorized query boundary", async () => {
