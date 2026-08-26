@@ -155,14 +155,20 @@ RUN ! grep -qF '!req?.headers?.authorization' src/server.js
 # OPENCLAW_TEMPLATE_REF bump doesn't reintroduce the exposure. Fix: wait for
 # the process's actual `exit` event, escalating to SIGKILL after a timeout,
 # before considering the gateway slot free.
-RUN sed -i \
-  's#// Give it a moment to exit and release the port.#// Wait for the process to actually exit (escalating to SIGKILL after a timeout) before considering the restart complete.#' \
-  src/server.js
-RUN sed -i \
-  '\#// Wait for the process to actually exit#{n; s#.*#    const exited = new Promise((resolve) => gatewayProc.once("exit", () => resolve()));\n    const timedOut = await Promise.race([exited.then(() => false), sleep(5000).then(() => true)]);\n    if (timedOut) {\n      try {\n        gatewayProc.kill("SIGKILL");\n      } catch {\n        // ignore\n      }\n      await exited;\n    }#}' \
-  src/server.js
+# A real script rather than an inline `sed` one-liner: this is a multi-line
+# structural replacement (the old kill/wait/null block spans several lines),
+# and a multi-line `sed` pattern is fragile to get exactly right -- it's
+# already caught one real correctness bug from Copilot review on the first
+# `sed`-based version of this patch (a stale `gatewayProc` reference raced
+# against the wrapper's own pre-existing exit handler). An exact literal
+# block match via `String.prototype.replace` in scripts/patch-wrapper-restart-gateway.mjs
+# is not ambiguous the way a hand-escaped multi-line sed pattern is, and the
+# script fails loudly (non-zero exit) rather than silently no-op-ing if the
+# pinned wrapper's source ever changes shape.
+COPY scripts/patch-wrapper-restart-gateway.mjs ./patch-wrapper-restart-gateway.mjs
+RUN node patch-wrapper-restart-gateway.mjs src/server.js
 RUN grep -qF '// Wait for the process to actually exit' src/server.js
-RUN grep -qF 'gatewayProc.once("exit"' src/server.js
+RUN grep -qF 'proc.once("exit"' src/server.js
 RUN test "$(grep -cF 'await sleep(750);' src/server.js)" -eq 3
 RUN node --check src/server.js
 
