@@ -7,6 +7,10 @@ and uses semantic versioning.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-25
+
+- 2026-08-25 - feat(mcp): add reusable Decision Runtime bridge
+
 ## [0.4.3] - 2026-08-25
 
 - 2026-08-25 - build(railway): scope decision-runtime deploys with watch patterns
