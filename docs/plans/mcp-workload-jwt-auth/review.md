@@ -4,15 +4,17 @@ Plan: `docs/plans/mcp-workload-jwt-auth/plan.md`
 
 Current implementation SHA: `32369bcf75c439d90a01ab444c6bd48d01764797`
 
-Status: independent implementation review passed; Copilot corrections applied;
-exact-head Copilot re-review pending
+Reviewed PR head: `60af2d8a8ddc000de07983d741c452515445157d`
+
+Status: independent implementation review, CI, and Copilot correction
+re-review passed; final audit-record publication pending
 
 ## Verdict
 
-PASS for PR publication. No unresolved code, security, test, deployment-shape,
+PASS for merge. No unresolved code, security, test, deployment-shape,
 documentation, or public-repository blocker remains on the implementation SHA.
-Merge remains gated on the final published head's CI, Copilot review, and owner
-approval.
+CI passed and Copilot recommended approval with zero new comments on the
+corrected reviewed PR head. The operating owner retains the merge action.
 
 ## Executed Evidence
 
