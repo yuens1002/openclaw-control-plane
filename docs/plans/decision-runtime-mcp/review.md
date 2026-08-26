@@ -2,7 +2,7 @@
 
 Plan: `docs/plans/decision-runtime-mcp/plan.md`
 
-Current PR implementation SHA: `7037541898ee2e09959ad7dda5676d673021a5a3`
+Current PR implementation SHA: `ad8b9401249711ef25403f62a5ba53e26c9e6d0f`
 
 Original independently reviewed SHA:
 `ee7c7ec2c8036ecae7c61d9cbf4fafb4cca7cdcd`
@@ -44,9 +44,9 @@ branch and transcribed the evidence into `ACs.md`.
 
 | Gate | Result |
 | --- | --- |
-| Focused MCP conformance | 40/40 passed |
-| Full suite with disposable PostgreSQL | 410/410 passed after review fixes; zero skips |
-| Clean-checkout CI command | `npm test` built workspaces first; 382 passed and only 28 PostgreSQL tests skipped without a configured database |
+| Focused MCP conformance | 42/42 passed |
+| Full suite with disposable PostgreSQL | 412/412 passed after review fixes; zero skips |
+| Clean-checkout CI command | `npm test` built workspaces first; 384 passed and only 28 PostgreSQL tests skipped without a configured database |
 | Separate PostgreSQL suite | 28/28 passed; disposable container removed |
 | TypeScript | `npm run typecheck` and `npm run build` passed |
 | Production dependencies | `npm audit --omit=dev` reported zero vulnerabilities |
@@ -86,6 +86,11 @@ corrected and regression-tested:
     a timer cleared after response validation on every outcome.
 13. Sourced the MCP server's advertised version from root release metadata and
     verified the pruned production image reports `0.5.0`.
+14. Made signal-driven shutdown absorb close failures, emit one bounded
+    diagnostic, and set a failing process exit code without leaking details.
+15. Preserved configured refresh skew for normal tokens while clamping it to a
+    10% safety window when short token lifetimes would otherwise disable caching.
+16. Rejected blank and whitespace-only MCP tool names before registration.
 
 ## Residual Risks
 
