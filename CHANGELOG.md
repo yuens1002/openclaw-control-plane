@@ -7,6 +7,10 @@ and uses semantic versioning.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-26
+
+- 2026-08-26 - fix(runtime): wait for gateway process exit before restart respawns it
+
 ## [0.6.0] - 2026-08-26
 
 - Add a secret-backed asymmetric workload-JWT provider for MCP downstream
