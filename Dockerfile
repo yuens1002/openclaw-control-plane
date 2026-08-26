@@ -141,6 +141,37 @@ RUN sed -i \
 RUN grep -qF '  if (OPENCLAW_GATEWAY_TOKEN) {' src/server.js
 RUN ! grep -qF '!req?.headers?.authorization' src/server.js
 
+# restartGateway() sends SIGTERM to the wrapped OpenClaw gateway process, waits
+# a flat 750ms with no confirmation the process actually exited, then
+# unconditionally spawns a replacement. If OpenClaw's own shutdown (closing a
+# channel provider's persistent connection, flushing state, etc.) ever takes
+# longer than 750ms, the old and new gateway processes briefly run
+# concurrently. Filed upstream at
+# https://github.com/vignesh07/clawdbot-railway-template/issues/233. Observed
+# live: OpenClaw's Slack channel logged "socket mode reports 2 active
+# connections for this Slack app" -- structurally consistent with this
+# exact race, though not confirmed as its cause in that specific incident.
+# Patched here rather than waiting on upstream so every future
+# OPENCLAW_TEMPLATE_REF bump doesn't reintroduce the exposure. Fix: wait for
+# the process's actual `exit` event, escalating to SIGKILL after a timeout,
+# before considering the gateway slot free.
+# A real script rather than an inline `sed` one-liner: this is a multi-line
+# structural replacement (the old kill/wait/null block spans several lines),
+# and a multi-line `sed` pattern is fragile to get exactly right -- it's
+# already caught one real correctness bug from Copilot review on the first
+# `sed`-based version of this patch (a stale `gatewayProc` reference raced
+# against the wrapper's own pre-existing exit handler). An exact literal
+# block match via `String.prototype.replace` in scripts/patch-wrapper-restart-gateway.mjs
+# is not ambiguous the way a hand-escaped multi-line sed pattern is, and the
+# script fails loudly (non-zero exit) rather than silently no-op-ing if the
+# pinned wrapper's source ever changes shape.
+COPY scripts/patch-wrapper-restart-gateway.mjs ./patch-wrapper-restart-gateway.mjs
+RUN node patch-wrapper-restart-gateway.mjs src/server.js
+RUN grep -qF '// Wait for the process to actually exit' src/server.js
+RUN grep -qF 'proc.once("exit"' src/server.js
+RUN test "$(grep -cF 'await sleep(750);' src/server.js)" -eq 3
+RUN node --check src/server.js
+
 FROM node:22-bookworm AS openclaw-build
 
 RUN apt-get update \
