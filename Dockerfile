@@ -141,6 +141,31 @@ RUN sed -i \
 RUN grep -qF '  if (OPENCLAW_GATEWAY_TOKEN) {' src/server.js
 RUN ! grep -qF '!req?.headers?.authorization' src/server.js
 
+# restartGateway() sends SIGTERM to the wrapped OpenClaw gateway process, waits
+# a flat 750ms with no confirmation the process actually exited, then
+# unconditionally spawns a replacement. If OpenClaw's own shutdown (closing a
+# channel provider's persistent connection, flushing state, etc.) ever takes
+# longer than 750ms, the old and new gateway processes briefly run
+# concurrently. Filed upstream at
+# https://github.com/vignesh07/clawdbot-railway-template/issues/233. Observed
+# live: OpenClaw's Slack channel logged "socket mode reports 2 active
+# connections for this Slack app" -- structurally consistent with this
+# exact race, though not confirmed as its cause in that specific incident.
+# Patched here rather than waiting on upstream so every future
+# OPENCLAW_TEMPLATE_REF bump doesn't reintroduce the exposure. Fix: wait for
+# the process's actual `exit` event, escalating to SIGKILL after a timeout,
+# before considering the gateway slot free.
+RUN sed -i \
+  's#// Give it a moment to exit and release the port.#// Wait for the process to actually exit (escalating to SIGKILL after a timeout) before considering the restart complete.#' \
+  src/server.js
+RUN sed -i \
+  '\#// Wait for the process to actually exit#{n; s#.*#    const exited = new Promise((resolve) => gatewayProc.once("exit", () => resolve()));\n    const timedOut = await Promise.race([exited.then(() => false), sleep(5000).then(() => true)]);\n    if (timedOut) {\n      try {\n        gatewayProc.kill("SIGKILL");\n      } catch {\n        // ignore\n      }\n      await exited;\n    }#}' \
+  src/server.js
+RUN grep -qF '// Wait for the process to actually exit' src/server.js
+RUN grep -qF 'gatewayProc.once("exit"' src/server.js
+RUN test "$(grep -cF 'await sleep(750);' src/server.js)" -eq 3
+RUN node --check src/server.js
+
 FROM node:22-bookworm AS openclaw-build
 
 RUN apt-get update \
