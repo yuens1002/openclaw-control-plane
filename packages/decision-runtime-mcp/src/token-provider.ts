@@ -1,4 +1,17 @@
+import { createPrivateKey, randomUUID, type KeyObject } from "node:crypto";
+
+import { SignJWT } from "jose";
 import { z } from "zod";
+
+const WorkloadJwtAlgorithmSchema = z.enum([
+  "RS256",
+  "RS384",
+  "RS512",
+  "ES256",
+  "ES384",
+  "ES512",
+  "EdDSA"
+]);
 
 const TokenResponseSchema = z
   .object({
@@ -43,9 +56,114 @@ export const ClientCredentialsConfigSchema = z
 
 export type ClientCredentialsConfig = z.input<typeof ClientCredentialsConfigSchema>;
 
+export const WorkloadJwtConfigSchema = z
+  .object({
+    issuer: z.string().url().max(2048),
+    subject: z.string().min(1).max(512),
+    audience: z.string().min(1).max(2048),
+    keyId: z.string().min(1).max(256),
+    algorithm: WorkloadJwtAlgorithmSchema,
+    privateKeyPem: z
+      .string()
+      .min(1)
+      .max(32_768)
+      .refine(
+        (value) => value.includes("-----BEGIN PRIVATE KEY-----"),
+        "Workload JWT key must be PKCS#8 private key material."
+      ),
+    lifetimeSeconds: z.number().int().min(30).max(3_600).default(300),
+    refreshSkewSeconds: z.number().int().min(5).max(300).default(30),
+    allowInsecureTransport: z.boolean().default(false)
+  })
+  .strict()
+  .superRefine((config, context) => {
+    const issuer = new URL(config.issuer);
+    if (
+      issuer.protocol !== "https:" &&
+      (!config.allowInsecureTransport || !isLoopbackUrl(issuer))
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["issuer"],
+        message: "Workload JWT issuer requires HTTPS."
+      });
+    }
+    if (config.refreshSkewSeconds >= config.lifetimeSeconds) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["refreshSkewSeconds"],
+        message: "Workload JWT refresh skew must be shorter than its lifetime."
+      });
+    }
+  });
+
+export type WorkloadJwtConfig = z.input<typeof WorkloadJwtConfigSchema>;
+
 export interface ClientCredentialsTokenProviderOptions {
   fetchImpl?: typeof fetch;
   now?: () => number;
+}
+
+export interface WorkloadJwtTokenProviderOptions {
+  now?: () => number;
+  randomId?: () => string;
+}
+
+export function createWorkloadJwtTokenProvider(
+  input: WorkloadJwtConfig,
+  options: WorkloadJwtTokenProviderOptions = {}
+) {
+  const config = WorkloadJwtConfigSchema.parse(input);
+  const privateKey = parseWorkloadPrivateKey(config.privateKeyPem, config.algorithm);
+  const now = options.now ?? Date.now;
+  const randomId = options.randomId ?? randomUUID;
+  let cached: { token: string; refreshAt: number; expiresAt: number } | undefined;
+  let refresh: Promise<string> | undefined;
+
+  async function sign() {
+    const issuedAt = Math.floor(now() / 1000);
+    const expiresAtSeconds = issuedAt + config.lifetimeSeconds;
+    const token = await new SignJWT({})
+      .setProtectedHeader({ alg: config.algorithm, kid: config.keyId, typ: "JWT" })
+      .setIssuer(config.issuer)
+      .setSubject(config.subject)
+      .setAudience(config.audience)
+      .setIssuedAt(issuedAt)
+      .setExpirationTime(expiresAtSeconds)
+      .setJti(randomId())
+      .sign(privateKey);
+    const expiresAt = expiresAtSeconds * 1000;
+    cached = {
+      token,
+      expiresAt,
+      refreshAt: expiresAt - config.refreshSkewSeconds * 1000
+    };
+    return token;
+  }
+
+  async function getToken() {
+    const timestamp = now();
+    if (cached && timestamp < cached.refreshAt && timestamp < cached.expiresAt) return cached.token;
+    if (!refresh) {
+      refresh = sign().finally(() => {
+        refresh = undefined;
+      });
+    }
+    return refresh;
+  }
+
+  function invalidate(token?: string) {
+    if (!token || cached?.token === token) cached = undefined;
+  }
+
+  function status() {
+    return {
+      ready: true,
+      cached: Boolean(cached && now() < cached.expiresAt)
+    };
+  }
+
+  return { getToken, invalidate, status };
 }
 
 export function createClientCredentialsTokenProvider(
@@ -141,4 +259,39 @@ export function isLoopbackUrl(value: URL) {
 
 function formEncode(value: string) {
   return new URLSearchParams({ value }).toString().slice("value=".length);
+}
+
+function parseWorkloadPrivateKey(pem: string, algorithm: z.infer<typeof WorkloadJwtAlgorithmSchema>) {
+  let key: KeyObject;
+  try {
+    key = createPrivateKey({ key: pem, format: "pem", type: "pkcs8" });
+  } catch {
+    throw new Error("Invalid workload JWT private key.");
+  }
+  const keyType = key.asymmetricKeyType;
+  const expectedType = algorithm.startsWith("RS")
+    ? "rsa"
+    : algorithm.startsWith("ES")
+      ? "ec"
+      : "ed";
+  const matches =
+    expectedType === "rsa"
+      ? keyType === "rsa" && (key.asymmetricKeyDetails?.modulusLength ?? 0) >= 2048
+      : expectedType === "ec"
+        ? keyType === "ec" && matchesEcCurve(key, algorithm)
+        : keyType === "ed25519" || keyType === "ed448";
+  if (!matches) throw new Error("Workload JWT private key does not match its algorithm.");
+  return key;
+}
+
+function matchesEcCurve(
+  key: KeyObject,
+  algorithm: z.infer<typeof WorkloadJwtAlgorithmSchema>
+) {
+  const curve = key.asymmetricKeyDetails?.namedCurve;
+  return (
+    (algorithm === "ES256" && curve === "prime256v1") ||
+    (algorithm === "ES384" && curve === "secp384r1") ||
+    (algorithm === "ES512" && curve === "secp521r1")
+  );
 }

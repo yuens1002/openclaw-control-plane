@@ -31,6 +31,10 @@ describe("public MCP documentation", () => {
     expect(guide).toContain("deploy/decision-runtime-mcp/railway.toml");
     expect(guide).toContain("To roll back");
     expect(guide).toContain("MCP_INBOUND_BEARER_TOKEN");
+    expect(guide).toContain("MCP_DOWNSTREAM_AUTH_MODE");
+    expect(guide).toContain("MCP_WORKLOAD_JWT_PRIVATE_KEY");
+    expect(guide).toContain("credentials remain the default");
+    expect(guide).toContain("publish the new public JWK beside the current key");
     expect(guide).not.toMatch(/railway\.app|neon\.tech|principal:\/\/[^<`\s]*\/(?:em|sunny)/i);
   });
 

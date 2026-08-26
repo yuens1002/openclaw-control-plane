@@ -7,6 +7,13 @@ and uses semantic versioning.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-26
+
+- Add a secret-backed asymmetric workload-JWT provider for MCP downstream
+  authentication while retaining OAuth client credentials as the default.
+- Add mutually exclusive provider configuration, bounded token signing and
+  caching, runtime rejection conformance, and portable key-rotation guidance.
+
 ## [0.5.0] - 2026-08-25
 
 - 2026-08-25 - feat(mcp): add reusable Decision Runtime bridge

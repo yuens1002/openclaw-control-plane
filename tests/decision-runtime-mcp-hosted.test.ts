@@ -1,10 +1,12 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { generateKeyPairSync } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { fileURLToPath } from "node:url";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { jwtVerify } from "jose";
 import { afterEach, describe, expect, it } from "vitest";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -88,6 +90,69 @@ describe("Decision Runtime MCP hosted process", () => {
 
     await closeServer(runtimeServer);
     await expectHealth(appPort, 503, false);
+    await stopChild(child);
+  });
+
+  it("reaches ready and serves runtime reads with a signed workload identity", async () => {
+    const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    let verifiedSubject: string | undefined;
+    const runtimeServer = await listen(async (request, response) => {
+      const bearer = request.headers.authorization?.replace(/^Bearer /, "");
+      if (!bearer) {
+        response.writeHead(401).end();
+        return;
+      }
+      try {
+        const verified = await jwtVerify(bearer, publicKey, {
+          issuer: "https://issuer.example",
+          audience: "control-plane",
+          algorithms: ["RS256"]
+        });
+        verifiedSubject = verified.payload.sub;
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ types: [], operations: [] }));
+      } catch {
+        response.writeHead(401).end();
+      }
+    });
+    await expect(
+      fetch(`http://127.0.0.1:${addressPort(runtimeServer)}/v1/runtime/registrations`, {
+        headers: { authorization: "Bearer invalid-fixture-token" }
+      }).then((response) => response.status)
+    ).resolves.toBe(401);
+    const appPort = await reservePort();
+    const child = startApp({
+      NODE_ENV: "development",
+      MCP_TRANSPORT: "streamable-http",
+      MCP_HOST: "127.0.0.1",
+      MCP_PORT: String(appPort),
+      MCP_INBOUND_BEARER_TOKEN: "example-bridge-secret",
+      MCP_ALLOW_INSECURE_TRANSPORT: "true",
+      RUNTIME_API_URL: `http://127.0.0.1:${addressPort(runtimeServer)}`,
+      MCP_DOWNSTREAM_AUTH_MODE: "workload-jwt",
+      MCP_WORKLOAD_JWT_ISSUER: "https://issuer.example",
+      MCP_WORKLOAD_JWT_SUBJECT: "example-workload",
+      MCP_WORKLOAD_JWT_AUDIENCE: "control-plane",
+      MCP_WORKLOAD_JWT_KEY_ID: "workload-key-1",
+      MCP_WORKLOAD_JWT_ALGORITHM: "RS256",
+      MCP_WORKLOAD_JWT_PRIVATE_KEY: privateKey
+        .export({ format: "pem", type: "pkcs8" })
+        .toString(),
+      MCP_WORKLOAD_JWT_LIFETIME_SECONDS: "120"
+    });
+
+    await expectHealth(appPort, 200, true);
+    const client = new Client({ name: "workload-conformance", version: "1.0.0" });
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://127.0.0.1:${appPort}/mcp`),
+      { requestInit: { headers: { authorization: "Bearer example-bridge-secret" } } }
+    );
+    await client.connect(transport as unknown as Transport);
+    await expect(
+      client.callTool({ name: "list_runtime_registrations", arguments: {} })
+    ).resolves.toMatchObject({ structuredContent: { types: [], operations: [] } });
+    expect(verifiedSubject).toBe("example-workload");
+    await client.close();
     await stopChild(child);
   });
 });

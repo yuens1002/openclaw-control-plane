@@ -11,7 +11,7 @@ agent / MCP client
         v
 apps/mcp -> packages/mcp-service -> packages/decision-runtime-mcp
                                       |
-                                      | short-lived OIDC bearer token
+                                      | short-lived identity bearer token
                                       v
                          packages/openclaw-adapter -> /v1/runtime
 ```
@@ -54,32 +54,54 @@ Hosted mode uses stateless Streamable HTTP at `/mcp`. It requires
 Non-browser clients normally omit `Origin`. Requests that include `Origin` are
 rejected unless the exact value is listed in `MCP_ALLOWED_ORIGINS`, protecting
 the endpoint from DNS rebinding.
-That deployment credential only gates the bridge. The module separately uses
-OAuth 2.0 client credentials to obtain the identity token presented to the
-Decision Runtime.
+That deployment credential only gates the bridge. The module separately
+obtains the identity token presented to the Decision Runtime. OAuth 2.0 client
+credentials remain the default. A deployment that already operates an
+asymmetric issuer/JWKS trust boundary may instead sign short-lived workload
+JWTs from a secret-held PKCS#8 private key. The second mode is a caller
+credential, not an authorization server or credential broker.
 
-Required service variables:
+Service variables use the common transport/runtime fields plus exactly one
+downstream-provider set. OAuth fields are not required in workload mode, and
+workload fields are not valid in OAuth mode:
 
 | Variable | Purpose |
 | --- | --- |
 | `MCP_TRANSPORT` | `stdio` or `streamable-http` |
 | `RUNTIME_API_URL` | Base URL of the authenticated runtime API |
+| `MCP_DOWNSTREAM_AUTH_MODE` | `oidc-client-credentials` (default) or `workload-jwt` |
 | `OIDC_TOKEN_ENDPOINT` | OAuth token endpoint |
 | `OIDC_CLIENT_ID` | Downstream service client ID |
 | `OIDC_CLIENT_SECRET` | Downstream service client secret |
 | `OIDC_SCOPE` | Optional requested scope |
 | `OIDC_AUDIENCE` | Optional provider audience parameter |
 | `OIDC_CLIENT_AUTH_METHOD` | `client_secret_basic` or `client_secret_post` |
+| `MCP_WORKLOAD_JWT_ISSUER` | Exact HTTPS issuer already trusted by the runtime |
+| `MCP_WORKLOAD_JWT_SUBJECT` | Stable subject mapped to one runtime principal |
+| `MCP_WORKLOAD_JWT_AUDIENCE` | Exact runtime audience |
+| `MCP_WORKLOAD_JWT_KEY_ID` | Published JWKS key identifier |
+| `MCP_WORKLOAD_JWT_ALGORITHM` | `RS256`, `RS384`, `RS512`, `ES256`, `ES384`, `ES512`, or `EdDSA` |
+| `MCP_WORKLOAD_JWT_PRIVATE_KEY` | Secret-injected PKCS#8 asymmetric private key |
+| `MCP_WORKLOAD_JWT_LIFETIME_SECONDS` | Optional 30-3600 second lifetime; default 300 |
+| `MCP_WORKLOAD_JWT_REFRESH_SKEW_SECONDS` | Optional 5-300 second skew shorter than the lifetime |
 | `MCP_INBOUND_BEARER_TOKEN` | Hosted bridge credential; not used by stdio |
 | `MCP_ALLOWED_ORIGINS` | Optional comma-separated browser origins accepted by hosted MCP |
 | `MCP_HOST`, `MCP_PORT` | Optional hosted bind and port; `PORT` is also honored |
 | `MCP_REQUEST_TIMEOUT_MS` | Bound for token and Decision Runtime HTTP requests |
 
-Production requires HTTPS runtime and token endpoints. Plain HTTP is accepted
+Production requires an HTTPS runtime plus an HTTPS OAuth token endpoint or
+workload issuer, according to the selected provider. Plain HTTP is accepted
 only for loopback hosts and requires `NODE_ENV=development` plus
 `MCP_ALLOW_INSECURE_TRANSPORT=true` for disposable local fixtures. Inject
 secrets through the process or deployment secret store; do not commit them to
 OpenClaw configuration.
+
+Provider configuration is mutually exclusive. OAuth mode rejects workload-key
+variables, and workload mode rejects OAuth credentials. Workload mode validates
+the PKCS#8 key and its algorithm family before a transport starts. It signs
+only bounded `iss`, `sub`, `aud`, `iat`, `exp`, and `jti` claims with protected
+`alg`, `kid`, and `typ` headers; tokens and private keys remain in process
+memory and never enter readiness or public errors.
 
 ## OpenClaw Configuration
 
@@ -141,6 +163,24 @@ For an independently deployed service:
 }
 ```
 
+For a deployment with an existing reviewed JWKS boundary, set the hosted MCP
+service's downstream authentication variables through its secret store:
+
+```text
+MCP_DOWNSTREAM_AUTH_MODE=workload-jwt
+MCP_WORKLOAD_JWT_ISSUER=https://issuer.example
+MCP_WORKLOAD_JWT_SUBJECT=example-workload
+MCP_WORKLOAD_JWT_AUDIENCE=example-runtime
+MCP_WORKLOAD_JWT_KEY_ID=example-key-2
+MCP_WORKLOAD_JWT_ALGORITHM=RS256
+MCP_WORKLOAD_JWT_PRIVATE_KEY=<secret PKCS#8 PEM>
+```
+
+Publish only the matching public JWK. The runtime trust configuration must map
+the exact issuer and subject to a stable principal and grant only the required
+runtime actions and resources. Do not reuse the hosted MCP inbound bearer as
+the private key or as an OAuth client secret.
+
 Start with the smallest tool allowlist needed by the agent. Read-only visibility
 does not provision runtime permission, and enabling write tools does not bypass
 runtime approval or authorization.
@@ -172,6 +212,13 @@ Before adoption, use a disposable service identity and non-production runtime
 to list tools and execute representative allowed, denied, and approval-required
 calls. Confirm durable runtime attribution and provenance through runtime read
 tools.
+
+For workload-key rotation, publish the new public JWK beside the current key,
+wait for runtime readiness to confirm the JWKS, place the new private key and
+key ID on the MCP service, and verify an authenticated read. Retain the old
+public key until every old token has expired, then remove it. Roll back by
+restoring the prior key ID/private key while its public JWK remains published.
+Never log, download into a tracked workspace, or commit the private key.
 
 To roll back, disable or remove the OpenClaw `mcp.servers` entry first, then
 restore the prior MCP image or remove the independent service. No database
