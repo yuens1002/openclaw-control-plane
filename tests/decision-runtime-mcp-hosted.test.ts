@@ -102,15 +102,24 @@ describe("Decision Runtime MCP hosted process", () => {
         response.writeHead(401).end();
         return;
       }
-      const verified = await jwtVerify(bearer, publicKey, {
-        issuer: "https://issuer.example",
-        audience: "control-plane",
-        algorithms: ["RS256"]
-      });
-      verifiedSubject = verified.payload.sub;
-      response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ types: [], operations: [] }));
+      try {
+        const verified = await jwtVerify(bearer, publicKey, {
+          issuer: "https://issuer.example",
+          audience: "control-plane",
+          algorithms: ["RS256"]
+        });
+        verifiedSubject = verified.payload.sub;
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ types: [], operations: [] }));
+      } catch {
+        response.writeHead(401).end();
+      }
     });
+    await expect(
+      fetch(`http://127.0.0.1:${addressPort(runtimeServer)}/v1/runtime/registrations`, {
+        headers: { authorization: "Bearer invalid-fixture-token" }
+      }).then((response) => response.status)
+    ).resolves.toBe(401);
     const appPort = await reservePort();
     const child = startApp({
       NODE_ENV: "development",

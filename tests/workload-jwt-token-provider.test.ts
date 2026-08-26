@@ -12,7 +12,11 @@ import {
 describe("workload JWT token provider", () => {
   it.each([
     ["RS256", rsaKey()],
+    ["RS384", rsaKey()],
+    ["RS512", rsaKey()],
     ["ES256", ecKey()],
+    ["ES384", ecKey("secp384r1")],
+    ["ES512", ecKey("secp521r1")],
     ["EdDSA", edKey()]
   ] as const)("signs and verifies %s tokens with exact workload identity", async (algorithm, pair) => {
     const provider = createProvider(pair.privatePem, algorithm, {
@@ -168,7 +172,7 @@ describe("workload JWT token provider", () => {
 
 function createProvider(
   privateKeyPem: string,
-  algorithm: "RS256" | "ES256" | "EdDSA",
+  algorithm: "RS256" | "RS384" | "RS512" | "ES256" | "ES384" | "ES512" | "EdDSA",
   options: Parameters<typeof createWorkloadJwtTokenProvider>[1] = {},
   overrides: Record<string, unknown> = {}
 ) {
@@ -193,8 +197,8 @@ function rsaKey() {
   return keyFixture(pair);
 }
 
-function ecKey() {
-  const pair = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+function ecKey(namedCurve = "prime256v1") {
+  const pair = generateKeyPairSync("ec", { namedCurve });
   return keyFixture(pair);
 }
 
