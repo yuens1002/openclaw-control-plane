@@ -27,6 +27,11 @@ server-derived.
 See [Decision Runtime](decision-runtime.md#typed-tool-client) for setup and
 usage.
 
+For model-facing discovery, the same ten functions are exposed as reviewed MCP
+tools through the reusable host. See
+[MCP Service Host And Decision Runtime Module](mcp-service.md) for stdio,
+Streamable HTTP, OpenClaw filters, authentication, and deployment.
+
 ## Legacy Shell Surface
 
 The adapter retains the early shell methods for compatibility:

@@ -1,0 +1,10 @@
+# Select this file explicitly for the Decision Runtime MCP service. Other
+# services in this repository retain their own build configuration.
+[build]
+builder = "dockerfile"
+dockerfilePath = "deploy/decision-runtime-mcp/Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "on_failure"

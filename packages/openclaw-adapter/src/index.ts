@@ -16,6 +16,7 @@ import {
   RuntimeRecordPageResponseSchema,
   RuntimeRecordResponseSchema,
   RuntimeRegistrationCatalogSchema,
+  RuntimeErrorSchema,
   RuntimeCommandRequestSchema,
   RuntimeIntakeRequestSchema,
   RuntimeRecordQuerySchema,
@@ -30,6 +31,25 @@ export interface OpenClawAdapterOptions {
   tokenProvider?: () => string | Promise<string>;
   toolInvocationIdProvider?: () => string | Promise<string>;
   allowInsecureTransport?: boolean;
+  requestTimeoutMs?: number;
+}
+
+export class ControlPlaneApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code?: string,
+    readonly requestId?: string
+  ) {
+    super(`Control plane API returned ${status}`);
+    this.name = "ControlPlaneApiError";
+  }
+}
+
+export class ControlPlaneTransportError extends Error {
+  constructor() {
+    super("Control plane API request failed");
+    this.name = "ControlPlaneTransportError";
+  }
 }
 
 export function createOpenClawControlPlaneTools(options: OpenClawAdapterOptions) {
@@ -217,14 +237,40 @@ function createApiCaller(options: OpenClawAdapterOptions) {
       requestInit.body = JSON.stringify(request.body);
     }
 
-    const response = await fetchImpl(`${baseUrl}${path}`, requestInit);
+    const abortController = new AbortController();
+    const timeout = setTimeout(
+      () => abortController.abort(),
+      options.requestTimeoutMs ?? 20_000
+    );
+    requestInit.signal = abortController.signal;
+    try {
+      let response: Response;
+      try {
+        response = await fetchImpl(`${baseUrl}${path}`, requestInit);
+      } catch {
+        throw new ControlPlaneTransportError();
+      }
 
-    if (!response.ok) {
-      throw new Error(`Control plane API returned ${response.status}`);
+      if (!response.ok) {
+        let safeError: { error: { code: string; request_id: string } } | undefined;
+        try {
+          const parsed = RuntimeErrorSchema.safeParse(await response.json());
+          if (parsed.success) safeError = parsed.data;
+        } catch {
+          // A reverse proxy may return a non-runtime error body; retain the status.
+        }
+        throw new ControlPlaneApiError(
+          response.status,
+          safeError?.error.code,
+          safeError?.error.request_id
+        );
+      }
+
+      const body = await response.json();
+      return responseSchema ? responseSchema.parse(body) : (body as TResponse);
+    } finally {
+      clearTimeout(timeout);
     }
-
-    const body = await response.json();
-    return responseSchema ? responseSchema.parse(body) : (body as TResponse);
   };
 }
 

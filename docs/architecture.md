@@ -21,6 +21,10 @@ business-specific automations from private client repos or plugin packages.
   service/repository, provenance, idempotency, audit, and projections.
 - `packages/openclaw-adapter`: bearer-authenticated, schema-validated tools for
   the versioned runtime HTTP API.
+- `packages/mcp-service`: workflow-neutral MCP module host, transports, call
+  context, results/errors, hosted bearer gate, health, and lifecycle.
+- `packages/decision-runtime-mcp`: ten Decision Runtime MCP tools and the
+  short-lived downstream OIDC client-credentials provider.
 - `packages/openclaw-railway-installer`: shell-installs the OpenClaw Railway
   template and verifies the resulting proof instance — see
   [deploy/openclaw-railway](../deploy/openclaw-railway/README.md).
@@ -30,6 +34,8 @@ business-specific automations from private client repos or plugin packages.
 - `apps/api`: Hono API exposing public health, legacy shell compatibility, and
   the authenticated `/v1/runtime` command/query boundary.
 - `apps/worker`: Optional workflow-neutral worker/readiness process.
+- `apps/mcp`: Thin explicit composition of the MCP host and reviewed service
+  modules; independently deployable from the API and worker.
 - `workers/vending`: Fake/manual example worker package.
 
 ## Runtime Boundary
@@ -43,6 +49,12 @@ authentication and authorization before the runtime service validates a
 registration or executes a command. PostgreSQL stores ordered records and
 edges; agents access that state only through the API or typed adapter. See
 [Decision Runtime](decision-runtime.md) for the full architecture and usage.
+
+Agents may consume the runtime through the MCP service. MCP supplies discovery,
+schemas, annotations, and a server-generated tool invocation ID; the module
+delegates through the same HTTP adapter and adds no authority. See
+[MCP Service Host And Decision Runtime Module](mcp-service.md). The HTTP API
+remains the service boundary and PostgreSQL remains inaccessible to agents.
 
 ## Public Baseline
 

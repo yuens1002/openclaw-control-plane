@@ -1,0 +1,14 @@
+{
+  "name": "@openclaw-control-plane/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@openclaw-control-plane/decision-runtime-mcp": "file:../../packages/decision-runtime-mcp",
+    "@openclaw-control-plane/mcp-service": "file:../../packages/mcp-service",
+    "zod": "^3.25.1"
+  }
+}
