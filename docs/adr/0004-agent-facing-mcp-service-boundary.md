@@ -27,8 +27,9 @@ gating, tool-call context, schema-aware results, bounded errors, health, and
 shutdown. A module owns its tool vocabulary, schemas, annotations, credentials,
 and delegation to its service adapter.
 
-`packages/decision-runtime-mcp` is the first module. It obtains short-lived OIDC
-client-credentials tokens and delegates exactly ten tools through
+`packages/decision-runtime-mcp` is the first module. It obtains short-lived
+OAuth client-credentials tokens, or signs short-lived workload JWTs for an
+existing reviewed issuer/JWKS boundary, and delegates exactly ten tools through
 `packages/openclaw-adapter`. The Decision Runtime remains responsible for
 identity resolution, authorization, approvals, registrations, idempotency,
 execution, audit, and durable provenance. Tool discovery is not authorization.
@@ -46,8 +47,12 @@ model and is outside this decision.
 - New first-party modules can reuse transport and lifecycle behavior while
   retaining service-specific credentials and policy.
 - Stdio trusts the launching process boundary. Hosted MCP adds a separate
-  deployment bearer gate before MCP parsing; its outbound OIDC token identifies
-  the bridge to the downstream service.
+  deployment bearer gate before MCP parsing; its outbound identity token
+  identifies the bridge to the downstream service.
+- Deployments with no OAuth token endpoint may hold an asymmetric private key
+  in the MCP service's secret store and publish only its public JWK. This avoids
+  building an authorization server while preserving short-lived audience-bound
+  tokens and the runtime's existing identity boundary.
 - Operators must provision both the MCP inbound credential and the downstream
   service identity, then apply OpenClaw tool filters and agent policy separately.
 - Model behavior still requires consumer-owned policy and evaluation; protocol
