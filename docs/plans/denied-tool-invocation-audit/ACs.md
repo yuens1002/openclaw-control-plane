@@ -2,13 +2,13 @@
 
 Plan: `docs/plans/denied-tool-invocation-audit/plan.md`
 
-Status: local verification complete on `c4efe6d6021638a6bcff66863b59f227c5b73a6b`;
+Status: local verification complete on `03817e8878930864dd48d2fb059c4ea9973aa996`;
 independent QC and PR review pending
 
 | AC | Plan ref | Role | What | Pass condition | Agent | QC | Reviewer |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | AC-PLAN-001 | D1 | project-manager | Workflow contract | D1-D5, decisions, non-goals, sequence, and release gates are explicit before implementation. | PASS - contract authored before code changes. | pending | pending |
-| AC-CONTRACT-001 | D2 | backend-architect | Typed optional provenance | The denial input and typed audit payload accept a validated optional tool invocation ID and omit it when absent. | PASS - schema accepts valid optional IDs and rejects malformed values. | pending | pending |
+| AC-CONTRACT-001 | D2 | backend-architect | Typed optional provenance | The denial input and typed audit payload accept a validated optional tool invocation ID and omit it when absent. | PASS - schema and direct repository tests distinguish absence from malformed or empty values. | pending | pending |
 | AC-API-001 | D2 | security | Trusted header propagation | The API forwards only the validated `x-tool-invocation-id`; identity, actor, and authorization remain server-derived. | PASS - API tests cover tool, HTTP, malformed, and explicitly empty header paths. | pending | pending |
 | AC-DENIAL-001 | D3 | test-engineer | Tool-origin denial | A policy-denied registered command with the header returns `403` and persists request ID, invocation ID, trusted principal/actor, `request_origin: tool`, and denial evidence. | PASS - real PostgreSQL conformance retained every named field. | pending | pending |
 | AC-DENIAL-002 | D3 | test-engineer | Effect-free denial | The denied probe creates one audit entry and no action-attempt or result record. | PASS - one audit entry, zero action attempts, zero results. | pending | pending |

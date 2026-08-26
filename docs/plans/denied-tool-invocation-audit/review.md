@@ -2,7 +2,7 @@
 
 Plan: `docs/plans/denied-tool-invocation-audit/plan.md`
 
-Corrected implementation SHA: `c4efe6d6021638a6bcff66863b59f227c5b73a6b`
+Corrected implementation SHA: `03817e8878930864dd48d2fb059c4ea9973aa996`
 
 Status: local implementation verification passed; independent QC, CI, and PR
 review pending
@@ -37,6 +37,12 @@ not parse its payload before persistence, and an explicitly empty invocation
 header was treated as absent. The correction validates at the repository
 boundary, distinguishes header absence from an empty value, and adds direct
 repository plus API regression cases. Corrected focused and full suites pass.
+
+Copilot's re-review then found the repository's conditional construction still
+used truthiness, allowing a direct caller's empty value to be omitted before
+schema parsing. The final correction uses explicit `undefined` checks for both
+typed payload and canonical evidence, with direct PostgreSQL coverage for empty
+and malformed values. The 434-test full suite and runtime image build pass.
 
 ## Residual Risks
 
