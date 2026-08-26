@@ -2,7 +2,7 @@
 
 Plan: `docs/plans/denied-tool-invocation-audit/plan.md`
 
-Implementation SHA: `5705b166b94195998d9aee7a0fddcfffc132764d`
+Corrected implementation SHA: `c4efe6d6021638a6bcff66863b59f227c5b73a6b`
 
 Status: local implementation verification passed; independent QC, CI, and PR
 review pending
@@ -16,8 +16,8 @@ blocked on independent exact-head review and CI.
 
 | Gate | Result |
 | --- | --- |
-| Focused contract/API/PostgreSQL/MCP | 32/32 passed after final test tightening |
-| Full regression | 433/433 passed across 52 files with disposable PostgreSQL |
+| Focused contract/API/PostgreSQL/MCP | 50/50 passed after Copilot corrections |
+| Full regression | 434/434 passed across 52 files with disposable PostgreSQL |
 | TypeScript and build | `npm run typecheck` and `npm run build` passed |
 | Production dependency audit | `npm audit --omit=dev` found zero vulnerabilities |
 | Runtime image | Decision Runtime Docker image built; production prune found zero vulnerabilities |
@@ -31,6 +31,12 @@ The implementation preserves the validated optional identifier in the typed
 denial payload and canonical denial evidence. API tests prove malformed values
 fail before persistence, PostgreSQL proves tool and headerless compatibility,
 and the existing stdio MCP process test still proves server-generated IDs.
+
+Copilot's first review found two blockers: the command-denial constructor did
+not parse its payload before persistence, and an explicitly empty invocation
+header was treated as absent. The correction validates at the repository
+boundary, distinguishes header absence from an empty value, and adds direct
+repository plus API regression cases. Corrected focused and full suites pass.
 
 ## Residual Risks
 
