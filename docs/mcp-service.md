@@ -61,7 +61,9 @@ asymmetric issuer/JWKS trust boundary may instead sign short-lived workload
 JWTs from a secret-held PKCS#8 private key. The second mode is a caller
 credential, not an authorization server or credential broker.
 
-Required service variables:
+Service variables use the common transport/runtime fields plus exactly one
+downstream-provider set. OAuth fields are not required in workload mode, and
+workload fields are not valid in OAuth mode:
 
 | Variable | Purpose |
 | --- | --- |

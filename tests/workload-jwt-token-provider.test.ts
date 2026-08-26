@@ -89,6 +89,55 @@ describe("workload JWT token provider", () => {
     expect(randomCalls).toBe(3);
   });
 
+  it.each([
+    ["wrong issuer", { issuer: "https://other.example" }, {}, "unknown_issuer"],
+    ["wrong audience", { audience: "other-runtime" }, {}, "invalid_token"],
+    ["unknown subject", { subject: "unknown-workload" }, {}, "unknown_principal"],
+    ["unknown key ID", { keyId: "unknown-key" }, {}, "invalid_token"],
+    ["unsupported verifier algorithm", {}, { allowedAlgorithms: ["ES256"] }, "unsupported_algorithm"],
+    ["expired token", {}, { now: () => 1_000_000_000_000 }, "invalid_token"]
+  ] as const)("fails closed for %s", async (_name, tokenOverrides, authOverrides, code) => {
+    const pair = rsaKey();
+    const provider = createProvider(
+      pair.privatePem,
+      "RS256",
+      "now" in authOverrides ? { now: authOverrides.now } : {},
+      tokenOverrides
+    );
+    const token = await provider.getToken();
+    const publicJwk = {
+      ...(await exportJWK(pair.publicKey)),
+      kid: "workload-key-1",
+      alg: "RS256"
+    };
+    const config = {
+      ...exampleRuntimeAuthConfiguration,
+      issuers: [
+        {
+          ...exampleRuntimeAuthConfiguration.issuers[0]!,
+          audiences: ["control-plane"],
+          allowed_algorithms:
+            "allowedAlgorithms" in authOverrides
+              ? [...authOverrides.allowedAlgorithms]
+              : ["RS256" as const]
+        }
+      ],
+      principals: [
+        {
+          ...exampleRuntimeAuthConfiguration.principals[0]!,
+          subject: "example-workload"
+        }
+      ]
+    };
+    const authenticator = new OidcAuthenticator(config, {
+      createJwks: () => createLocalJWKSet({ keys: [publicJwk] })
+    });
+
+    await expect(authenticator.authenticateBearer(`Bearer ${token}`)).rejects.toMatchObject({
+      code
+    });
+  });
+
   it("fails unsafe, malformed, mismatched, and invalid lifetime configurations safely", () => {
     const rsa = rsaKey();
     const ec = ecKey();
