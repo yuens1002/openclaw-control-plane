@@ -3,7 +3,7 @@
 Plan: `docs/plans/mcp-workload-jwt-auth/plan.md`
 
 Status: implementation and independent QC complete against
-`3e4b00826be22aec9c2133850c66eafa6c5346c9`; external PR review pending
+`32369bcf75c439d90a01ab444c6bd48d01764797`; Copilot re-review pending
 
 | AC | Plan ref | Role | What | Pass condition | Agent | QC | Reviewer |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -16,6 +16,6 @@ Status: implementation and independent QC complete against
 | AC-CONFIG-002 | D3 | backend-architect | Thin composition | `apps/mcp` selects a provider and otherwise retains the same module, host, transport, health, and shutdown behavior. | PASS - composition adds only provider selection. | CONFIRMED - no host/module duplication found. | pending |
 | AC-INTEGRATION-001 | D4 | test-engineer | Runtime verification | A workload JWT is accepted by the real runtime authentication service and resolves the expected configured principal. | PASS - real authenticator mapped the expected principal. | CONFIRMED - wrong issuer/audience/subject/key/algorithm/expiry matrix fails closed. | pending |
 | AC-INTEGRATION-002 | D4 | test-engineer | Hosted readiness | The production-shaped hosted app reaches ready with workload JWT auth, serves a representative runtime read, and degrades safely on signing or upstream failure. | PASS - hosted official-client readiness/read and existing degraded-upstream flow passed. | CONFIRMED - workload subject reached the runtime stub through the production composition. | pending |
-| AC-REGRESSION-001 | D4 | test-engineer | OAuth and repository regression | Existing OAuth conformance plus full tests, typecheck, build, audit, Docker proof, and diff checks pass. | PASS - 426/426 database-backed tests, typecheck/build, zero production vulnerabilities, Docker build, and diff checks passed. | CONFIRMED - focused and full exact-head gates passed. | pending |
+| AC-REGRESSION-001 | D4 | test-engineer | OAuth and repository regression | Existing OAuth conformance plus full tests, typecheck, build, audit, Docker proof, and diff checks pass. | PASS - 430/430 database-backed tests, typecheck/build, zero production vulnerabilities, Docker build, and diff checks passed. | CONFIRMED - focused and full exact-head gates passed. | pending |
 | AC-DOCS-001 | D5 | project-manager | Portable guidance | Docs explain mode selection, variables, secret placement, key publication/rotation, health, and rollback without consumer-specific details. | PASS - guide, architecture, ADR, and documentation assertions passed. | CONFIRMED - provider-set wording and public-language scan passed. | pending |
-| AC-REVIEW-001 | D6 | test-engineer | Exact-head review | Review records exact SHA, commands, evidence, residual risks, and no unresolved blocker before PR publication or merge. | PASS - evidence recorded for implementation SHA `3e4b008`. | CONFIRMED - independent re-review found no blocker after corrections. | pending external PR review |
+| AC-REVIEW-001 | D6 | test-engineer | Exact-head review | Review records exact SHA, commands, evidence, residual risks, and no unresolved blocker before PR publication or merge. | PASS - evidence recorded for corrected implementation SHA `32369bc`. | CONFIRMED - local correction verification passed after Copilot findings. | pending Copilot re-review |
