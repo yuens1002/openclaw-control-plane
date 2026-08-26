@@ -40,6 +40,13 @@ describe("reusable MCP service host", () => {
         modules: [fixtureModule("same-module", "one"), fixtureModule("same-module", "two")]
       })
     ).toThrow("Duplicate MCP module ID: same-module");
+    expect(() =>
+      createMcpServiceHost({
+        name: "test-host",
+        version: "1.0.0",
+        modules: [fixtureModule("blank-tool", "   ")]
+      })
+    ).toThrow("MCP tool name is required.");
   });
 
   it("provides server-owned context and compatible structured/text results", async () => {

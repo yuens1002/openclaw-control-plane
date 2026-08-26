@@ -4,12 +4,18 @@ import { startMcpApp } from "./index.js";
 
 export async function main() {
   const running = await startMcpApp();
-  const shutdown = async () => {
+  process.once("SIGINT", () => void shutdownMcpApp(running));
+  process.once("SIGTERM", () => void shutdownMcpApp(running));
+}
+
+export async function shutdownMcpApp(running: { close(): Promise<void> }) {
+  try {
     await running.close();
     process.exitCode = 0;
-  };
-  process.once("SIGINT", () => void shutdown());
-  process.once("SIGTERM", () => void shutdown());
+  } catch {
+    process.stderr.write("MCP service failed to stop: shutdown_failed\n");
+    process.exitCode = 1;
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

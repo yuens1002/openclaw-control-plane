@@ -1,13 +1,30 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createRequire } from "node:module";
 
 import { CONTROL_PLANE_VERSION, loadMcpAppConfig } from "@openclaw-control-plane/mcp";
+import { shutdownMcpApp } from "../apps/mcp/src/server.js";
 
 const rootPackage = createRequire(import.meta.url)("../package.json") as { version: string };
 
 describe("MCP application configuration", () => {
   it("advertises the control-plane release version", () => {
     expect(CONTROL_PLANE_VERSION).toBe(rootPackage.version);
+  });
+
+  it("bounds shutdown failures without rejecting", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const priorExitCode = process.exitCode;
+    try {
+      await expect(
+        shutdownMcpApp({ close: async () => Promise.reject(new Error("sentinel-secret")) })
+      ).resolves.toBeUndefined();
+      expect(process.exitCode).toBe(1);
+      expect(stderr).toHaveBeenCalledWith("MCP service failed to stop: shutdown_failed\n");
+      expect(stderr).not.toHaveBeenCalledWith(expect.stringContaining("sentinel-secret"));
+    } finally {
+      process.exitCode = priorExitCode;
+      stderr.mockRestore();
+    }
   });
 
   it("loads stdio without hosted credentials and keeps concerns separate", () => {

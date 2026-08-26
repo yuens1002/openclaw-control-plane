@@ -100,6 +100,28 @@ describe("OIDC client-credentials token provider", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
+  it("caches short-lived tokens before a bounded safety window", async () => {
+    let timestamp = 1_000_000;
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({ access_token: "short-1", token_type: "Bearer", expires_in: 5 })
+      )
+      .mockResolvedValueOnce(
+        Response.json({ access_token: "short-2", token_type: "Bearer", expires_in: 5 })
+      );
+    const provider = createProvider({}, { fetchImpl, now: () => timestamp });
+
+    await expect(provider.getToken()).resolves.toBe("short-1");
+    timestamp += 4_499;
+    await expect(provider.getToken()).resolves.toBe("short-1");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    timestamp += 1;
+    await expect(provider.getToken()).resolves.toBe("short-2");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it("invalidates only the matching cached token", async () => {
     const fetchImpl = vi
       .fn<typeof fetch>()

@@ -275,6 +275,7 @@ function collectTools(modules: readonly McpServiceModule[]) {
     if (moduleIds.has(module.id)) throw new Error(`Duplicate MCP module ID: ${module.id}`);
     moduleIds.add(module.id);
     for (const tool of module.tools) {
+      if (!tool.name.trim()) throw new Error("MCP tool name is required.");
       if (names.has(tool.name)) throw new Error(`Duplicate MCP tool name: ${tool.name}`);
       names.add(tool.name);
       collected.push({ module, tool });

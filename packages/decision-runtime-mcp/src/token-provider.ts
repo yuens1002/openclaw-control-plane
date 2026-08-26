@@ -95,11 +95,17 @@ export function createClientCredentialsTokenProvider(
       throw new Error("OIDC token endpoint returned an invalid response.");
     }
     const acquiredAt = now();
-    const expiresAt = acquiredAt + parsed.expires_in * 1000;
+    const lifetimeMs = parsed.expires_in * 1000;
+    const expiresAt = acquiredAt + lifetimeMs;
+    const configuredSkewMs = config.refreshSkewSeconds * 1000;
+    const refreshSafetyMs =
+      configuredSkewMs < lifetimeMs
+        ? configuredSkewMs
+        : Math.max(1, Math.floor(lifetimeMs / 10));
     cached = {
       token: parsed.access_token,
       expiresAt,
-      refreshAt: Math.max(acquiredAt, expiresAt - config.refreshSkewSeconds * 1000)
+      refreshAt: expiresAt - refreshSafetyMs
     };
     return parsed.access_token;
   }
