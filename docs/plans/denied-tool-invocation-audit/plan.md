@@ -2,7 +2,7 @@
 
 Issue: https://github.com/yuens1002/openclaw-control-plane/issues/71
 Branch: `fix/denied-tool-invocation-audit`
-Status: approved for implementation as a non-policy provenance correction
+Status: implementation and local verification complete; PR review pending
 
 ## Outcome
 
