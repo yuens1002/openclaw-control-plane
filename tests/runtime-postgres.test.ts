@@ -434,20 +434,22 @@ describePostgres("PostgreSQL durable runtime repository", () => {
 
   it("rejects malformed denial invocation provenance before persistence", async () => {
     const repository = new PostgresRuntimeRepository(pool, registry);
-    await expect(
-      repository.recordAuthorizationDecision({
-        stream_id: "denial-invalid-tool-stream",
-        operation_type: "example.state.reconcile",
-        operation_schema_version: 1,
-        target: { type: "example.environment", id: "production" },
-        request_id: "request-denied-invalid-tool",
-        tool_invocation_id: "invalid id",
-        command_context: trustedContext("denied")
-      })
-    ).rejects.toThrow();
+    for (const [index, toolInvocationId] of ["invalid id", ""].entries()) {
+      await expect(
+        repository.recordAuthorizationDecision({
+          stream_id: `denial-invalid-tool-stream-${index}`,
+          operation_type: "example.state.reconcile",
+          operation_schema_version: 1,
+          target: { type: "example.environment", id: "production" },
+          request_id: `request-denied-invalid-tool-${index}`,
+          tool_invocation_id: toolInvocationId,
+          command_context: trustedContext("denied")
+        })
+      ).rejects.toThrow();
+    }
 
     const records = await pool.query<{ count: string }>(
-      "SELECT count(*) FROM runtime_records WHERE stream_id = 'denial-invalid-tool-stream'"
+      "SELECT count(*) FROM runtime_records WHERE stream_id LIKE 'denial-invalid-tool-stream-%'"
     );
     expect(Number(records.rows[0]!.count)).toBe(0);
   });

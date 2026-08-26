@@ -425,7 +425,9 @@ export class PostgresRuntimeRepository {
     const payload = RuntimePayloadSchema.parse(
       AuthorizationDenialAuditPayloadSchema.parse({
         request_id: input.request_id,
-        ...(input.tool_invocation_id ? { tool_invocation_id: input.tool_invocation_id } : {}),
+        ...(input.tool_invocation_id !== undefined
+          ? { tool_invocation_id: input.tool_invocation_id }
+          : {}),
         decision_id: context.authorization.decision_id,
         policy_version: context.authorization.policy_version,
         reason_codes: context.authorization.reason_codes
@@ -440,7 +442,9 @@ export class PostgresRuntimeRepository {
       target: input.target,
       arguments: {
         request_id: input.request_id,
-        ...(input.tool_invocation_id ? { tool_invocation_id: input.tool_invocation_id } : {}),
+        ...(input.tool_invocation_id !== undefined
+          ? { tool_invocation_id: input.tool_invocation_id }
+          : {}),
         authorization_evidence: context.authorization
       },
       declared_effects: []
