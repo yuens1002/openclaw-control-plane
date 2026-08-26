@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createRequire } from "node:module";
+import { generateKeyPairSync } from "node:crypto";
 
 import { CONTROL_PLANE_VERSION, loadMcpAppConfig } from "@openclaw-control-plane/mcp";
 import { shutdownMcpApp } from "../apps/mcp/src/server.js";
@@ -34,9 +35,12 @@ describe("MCP application configuration", () => {
       mode: "stdio",
       runtime: { baseUrl: "https://runtime.example", allowInsecureTransport: false },
       token: {
-        tokenEndpoint: "https://issuer.example/token",
-        clientId: "client-id",
-        authMethod: "client_secret_basic"
+        mode: "oidc-client-credentials",
+        config: {
+          tokenEndpoint: "https://issuer.example/token",
+          clientId: "client-id",
+          authMethod: "client_secret_basic"
+        }
       }
     });
     expect(config.hosted).not.toHaveProperty("bearerToken");
@@ -117,6 +121,43 @@ describe("MCP application configuration", () => {
       expect(String(error)).not.toContain(secret);
     }
   });
+
+  it("selects workload JWT credentials without requiring an OAuth endpoint", () => {
+    const config = loadMcpAppConfig(workloadEnvironment());
+
+    expect(config.token).toMatchObject({
+      mode: "workload-jwt",
+      config: {
+        issuer: "https://issuer.example",
+        subject: "example-workload",
+        audience: "control-plane",
+        keyId: "workload-key-1",
+        algorithm: "RS256",
+        lifetimeSeconds: 120
+      }
+    });
+  });
+
+  it("rejects missing, mixed, and inactive-provider credentials", () => {
+    expect(() =>
+      loadMcpAppConfig({
+        ...workloadEnvironment(),
+        MCP_WORKLOAD_JWT_SUBJECT: undefined
+      })
+    ).toThrow(/MCP_WORKLOAD_JWT_SUBJECT is required/);
+    expect(() =>
+      loadMcpAppConfig({
+        ...workloadEnvironment(),
+        OIDC_CLIENT_ID: "stale-client"
+      })
+    ).toThrow(/OIDC_CLIENT_ID is not valid for workload-jwt/);
+    expect(() =>
+      loadMcpAppConfig({
+        ...baseEnvironment(),
+        MCP_WORKLOAD_JWT_KEY_ID: "stale-key"
+      })
+    ).toThrow(/MCP_WORKLOAD_JWT_KEY_ID is not valid for oidc-client-credentials/);
+  });
 });
 
 function baseEnvironment(): NodeJS.ProcessEnv {
@@ -127,5 +168,24 @@ function baseEnvironment(): NodeJS.ProcessEnv {
     OIDC_TOKEN_ENDPOINT: "https://issuer.example/token",
     OIDC_CLIENT_ID: "client-id",
     OIDC_CLIENT_SECRET: "client-secret"
+  };
+}
+
+function workloadEnvironment(): NodeJS.ProcessEnv {
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  return {
+    NODE_ENV: "production",
+    MCP_TRANSPORT: "stdio",
+    RUNTIME_API_URL: "https://runtime.example",
+    MCP_DOWNSTREAM_AUTH_MODE: "workload-jwt",
+    MCP_WORKLOAD_JWT_ISSUER: "https://issuer.example",
+    MCP_WORKLOAD_JWT_SUBJECT: "example-workload",
+    MCP_WORKLOAD_JWT_AUDIENCE: "control-plane",
+    MCP_WORKLOAD_JWT_KEY_ID: "workload-key-1",
+    MCP_WORKLOAD_JWT_ALGORITHM: "RS256",
+    MCP_WORKLOAD_JWT_PRIVATE_KEY: privateKey
+      .export({ format: "pem", type: "pkcs8" })
+      .toString(),
+    MCP_WORKLOAD_JWT_LIFETIME_SECONDS: "120"
   };
 }
