@@ -23,8 +23,9 @@ business-specific automations from private client repos or plugin packages.
   the versioned runtime HTTP API.
 - `packages/mcp-service`: workflow-neutral MCP module host, transports, call
   context, results/errors, hosted bearer gate, health, and lifecycle.
-- `packages/decision-runtime-mcp`: ten Decision Runtime MCP tools and the
-  short-lived downstream OIDC client-credentials provider.
+- `packages/decision-runtime-mcp`: ten Decision Runtime MCP tools and
+  short-lived downstream OAuth client-credentials or asymmetric workload-JWT
+  providers.
 - `packages/openclaw-railway-installer`: shell-installs the OpenClaw Railway
   template and verifies the resulting proof instance — see
   [deploy/openclaw-railway](../deploy/openclaw-railway/README.md).

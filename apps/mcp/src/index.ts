@@ -2,7 +2,8 @@ import { createRequire } from "node:module";
 
 import {
   createClientCredentialsTokenProvider,
-  createDecisionRuntimeMcpModule
+  createDecisionRuntimeMcpModule,
+  createWorkloadJwtTokenProvider
 } from "@openclaw-control-plane/decision-runtime-mcp";
 import { createMcpServiceHost } from "@openclaw-control-plane/mcp-service";
 
@@ -15,7 +16,10 @@ const rootPackage = createRequire(import.meta.url)("../../../package.json") as {
 export const CONTROL_PLANE_VERSION = rootPackage.version;
 
 export async function startMcpApp(config: McpAppConfig = loadMcpAppConfig(process.env)) {
-  const tokenProvider = createClientCredentialsTokenProvider(config.token);
+  const tokenProvider =
+    config.token.mode === "workload-jwt"
+      ? createWorkloadJwtTokenProvider(config.token.config)
+      : createClientCredentialsTokenProvider(config.token.config);
   const decisionRuntime = createDecisionRuntimeMcpModule({
     runtimeBaseUrl: config.runtime.baseUrl,
     tokenProvider,
