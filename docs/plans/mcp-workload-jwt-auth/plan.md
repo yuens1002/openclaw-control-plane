@@ -2,7 +2,7 @@
 
 Issue: https://github.com/yuens1002/openclaw-control-plane/issues/67
 Branch: `feat/mcp-workload-jwt-auth`
-Status: approved for implementation; verification pending
+Status: implementation and independent verification complete; PR review pending
 
 ## Outcome
 
