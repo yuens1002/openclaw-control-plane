@@ -205,6 +205,55 @@ describe("authenticated runtime API", () => {
     expect(dependencies.runtimeApiService!.listRegistrations).not.toHaveBeenCalled();
   });
 
+  it("forwards a validated tool invocation ID only on denied tool commands", async () => {
+    const withTool = createDependencies({ deny: true });
+    const toolResponse = await createControlPlaneApp(withTool).request("/v1/runtime/commands", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer valid",
+        "content-type": "application/json",
+        "x-tool-invocation-id": "tool-denial-1"
+      },
+      body: JSON.stringify(commandRequest())
+    });
+
+    expect(toolResponse.status).toBe(403);
+    expect(withTool.runtimeApiService!.recordCommandDenial).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tool_invocation_id: "tool-denial-1",
+        command_context: expect.objectContaining({ request_origin: "tool" })
+      })
+    );
+
+    const withoutTool = createDependencies({ deny: true });
+    const httpResponse = await createControlPlaneApp(withoutTool).request("/v1/runtime/commands", {
+      method: "POST",
+      headers: { authorization: "Bearer valid", "content-type": "application/json" },
+      body: JSON.stringify(commandRequest())
+    });
+
+    expect(httpResponse.status).toBe(403);
+    const denial = vi.mocked(withoutTool.runtimeApiService!.recordCommandDenial).mock.calls[0]![0];
+    expect(denial).not.toHaveProperty("tool_invocation_id");
+    expect(denial.command_context.request_origin).toBe("http");
+
+    const invalid = createDependencies({ deny: true });
+    const invalidResponse = await createControlPlaneApp(invalid).request(
+      "/v1/runtime/commands",
+      {
+        method: "POST",
+        headers: {
+          authorization: "Bearer valid",
+          "content-type": "application/json",
+          "x-tool-invocation-id": "invalid id"
+        },
+        body: JSON.stringify(commandRequest())
+      }
+    );
+    expect(invalidResponse.status).toBe(400);
+    expect(invalid.runtimeApiService!.recordCommandDenial).not.toHaveBeenCalled();
+  });
+
   it("returns bounded stream pages through the authorized query boundary", async () => {
     const dependencies = createDependencies();
     const response = await createControlPlaneApp(dependencies).request(

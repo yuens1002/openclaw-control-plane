@@ -234,6 +234,7 @@ export function createControlPlaneApp(
         type: request.operation_type,
         version: request.operation_schema_version
       },
+      ...(toolInvocationId ? { toolInvocationId } : {}),
       requestOrigin: toolInvocationId ? "tool" : "http"
     });
     const result = await runtime.executeCommand(
@@ -519,6 +520,7 @@ async function authorizeRequest(
     resource: { type: string; id: string };
     streamId: string;
     operation?: { type: string; version: number };
+    toolInvocationId?: string;
     requestOrigin?: TrustedCommandContext["request_origin"];
   }
 ): Promise<TrustedCommandContext> {
@@ -550,6 +552,7 @@ async function authorizeRequest(
         operation_schema_version: request.operation.version,
         target: request.resource,
         request_id: context.get("requestId"),
+        ...(request.toolInvocationId ? { tool_invocation_id: request.toolInvocationId } : {}),
         command_context: trusted
       });
     } else {

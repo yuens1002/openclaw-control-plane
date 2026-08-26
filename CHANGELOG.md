@@ -7,6 +7,11 @@ and uses semantic versioning.
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-08-26
+
+- Preserve validated MCP tool invocation IDs in effect-free authorization
+  denial audits while retaining headerless HTTP compatibility.
+
 ## [0.6.1] - 2026-08-26
 
 - 2026-08-26 - fix(runtime): wait for gateway process exit before restart respawns it
