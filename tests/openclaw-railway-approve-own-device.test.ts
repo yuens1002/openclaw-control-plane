@@ -8,19 +8,34 @@ const BASE_URL = "https://example-openclaw.example.com";
 
 let server: Server | undefined;
 
+/** Requests actually received by the server started by the most recent `serveDevicesPending*` call. */
+let receivedRequests: Array<{ method: string | undefined; url: string | undefined; authorization: string | undefined }> = [];
+
 afterEach(async () => {
   if (server) {
     await new Promise<void>((resolve) => server?.close(() => resolve()));
     server = undefined;
   }
+  receivedRequests = [];
 });
 
-/** Starts a local HTTP server that answers /setup/api/devices/pending with the given status/body, and returns its base URL. */
+/** Starts a local HTTP server that answers /setup/api/devices/pending with the given status/JSON body, and returns its base URL. Any other path answers 404, so a request to the wrong path fails loudly instead of silently getting the fixture response. */
 function serveDevicesPending(status: number, body: unknown): Promise<string> {
+  return serveDevicesPendingRaw(status, JSON.stringify(body), "application/json");
+}
+
+/** Same as `serveDevicesPending`, but with a raw (possibly non-JSON) response body. */
+function serveDevicesPendingRaw(status: number, rawBody: string, contentType = "text/plain"): Promise<string> {
   return new Promise((resolve) => {
     server = createServer((req, res) => {
-      res.writeHead(status, { "content-type": "application/json" });
-      res.end(JSON.stringify(body));
+      receivedRequests.push({ method: req.method, url: req.url, authorization: req.headers.authorization });
+      if (req.url !== "/setup/api/devices/pending") {
+        res.writeHead(404, { "content-type": "text/plain" });
+        res.end("not found");
+        return;
+      }
+      res.writeHead(status, { "content-type": contentType });
+      res.end(rawBody);
     });
     server.listen(0, "127.0.0.1", () => {
       const address = server?.address();
@@ -119,6 +134,13 @@ describe("approveOwnDevicePairing", () => {
       await expect(approveOwnDevicePairing(baseUrl, AUTH, {})).rejects.toThrow(
         "GET /setup/api/devices/pending returned 401"
       );
+
+      // Confirms the default hit the real endpoint (the 404 fallback would
+      // otherwise let a wrong-path request pass this test unnoticed) with
+      // the auth actually passed in, not some other path or no credential.
+      expect(receivedRequests).toEqual([
+        { method: "GET", url: "/setup/api/devices/pending", authorization: `Basic ${Buffer.from(`${AUTH.username}:${AUTH.password}`).toString("base64")}` }
+      ]);
     });
 
     it("reports not-ready, without throwing, on a real 500 with {ok:false} -- the confirmed-live gateway-not-started shape", async () => {
@@ -131,6 +153,25 @@ describe("approveOwnDevicePairing", () => {
       const result = await approveOwnDevicePairing(baseUrl, AUTH, {});
 
       expect(result).toEqual({ status: "not-ready" });
+    });
+
+    it("reports not-ready on a 500 with a non-JSON body (a proxy error page) -- same signal in different clothing", async () => {
+      const baseUrl = await serveDevicesPendingRaw(500, "<html><body>Bad Gateway</body></html>", "text/html");
+
+      const result = await approveOwnDevicePairing(baseUrl, AUTH, {});
+
+      expect(result).toEqual({ status: "not-ready" });
+    });
+
+    it("throws on a 200 with a non-JSON body -- a broken response must never be silently treated as not-ready", async () => {
+      // Confirmed live 500s always carry {ok:false} JSON; a 2xx that fails
+      // to parse was never the gateway-not-started shape at all, and
+      // mapping it to "not-ready" would hide a genuine protocol violation.
+      const baseUrl = await serveDevicesPendingRaw(200, "<html><body>unexpected</body></html>", "text/html");
+
+      await expect(approveOwnDevicePairing(baseUrl, AUTH, {})).rejects.toThrow(
+        "GET /setup/api/devices/pending returned 200 with a non-JSON body"
+      );
     });
   });
 });

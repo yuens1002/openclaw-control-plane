@@ -113,15 +113,25 @@ async function defaultGetPendingDevices(
   // Do not throw on a 5xx: confirmed live, the wrapper answers with its own
   // {ok:false} body (and a 500) when the underlying gateway process has not
   // started yet, in the exact pre-baseline window issue #77 fixed for the
-  // raw-config endpoint. Parse the body regardless of status so the caller
-  // can tell "not ready yet" apart from a genuine failure.
-  let body: { ok?: boolean; requestIds?: string[] } = {};
+  // raw-config endpoint.
+  let body: { ok?: boolean; requestIds?: string[] };
   try {
     body = (await response.json()) as { ok?: boolean; requestIds?: string[] };
-  } catch {
-    // Non-JSON body (a proxy error page, a truncated response) -- the
-    // caller's ok:false handling below covers this the same as an explicit
-    // {ok:false}.
+  } catch (cause) {
+    if (response.status >= 500) {
+      // A non-JSON 5xx body (a proxy error page) is the same "not ready
+      // yet" signal in different clothing -- treat it like an explicit
+      // {ok:false} rather than failing to parse it.
+      return { ok: false, requestIds: [] };
+    }
+    // A 2xx (or any other unexpected status) with an unparseable body is a
+    // genuine protocol violation, not a readiness signal -- throw rather
+    // than silently reporting "not ready" for a response that was never
+    // the gateway-not-started shape at all.
+    throw new Error(
+      `GET /setup/api/devices/pending returned ${response.status} with a non-JSON body: ` +
+        `${cause instanceof Error ? cause.message : String(cause)}`
+    );
   }
   return { ok: body.ok === true, requestIds: body.requestIds ?? [] };
 }
