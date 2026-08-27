@@ -103,7 +103,13 @@ describe("provisionClientInstance — fresh provision", () => {
           calls.push("status");
           return 200;
         },
-        ...createFakeConfigStore({ onCall: (c) => calls.push(c) }).deps,
+        // A baseline `gateway.mode` is present here -- this test is about the
+        // patch/approve mechanics against an already-onboarded (or reused)
+        // instance, not the missing-baseline case issue #77 covers below.
+        ...createFakeConfigStore({
+          initialContent: JSON.stringify({ gateway: { mode: "local" } }),
+          onCall: (c) => calls.push(c)
+        }).deps,
         getPendingDevices: async () => {
           calls.push("getPendingDevices");
           return { ok: true, requestIds: ["req_1"] };
@@ -127,6 +133,28 @@ describe("provisionClientInstance — fresh provision", () => {
     ]);
     expect(result.patchedAllowedOrigins).toBe(true);
     expect(result.approvedDeviceRequestId).toBe("req_1");
+  });
+
+  it("does not POST an origin patch against a genuinely fresh instance with no gateway.mode yet (issue #77)", async () => {
+    const runner = new FakeRailwayRunner([[], [freshService("BUILDING")], [freshService("SUCCESS")]]);
+    runner.setDomainList(domainList(8080));
+
+    const result = await provisionClientInstance(
+      { clientName: "acme", pollSeconds: 0, writeLocalFiles: false },
+      baseDependencies(runner, {
+        // Default createFakeConfigStore() content ("{}") models exactly what
+        // a never-onboarded instance's /setup/api/config/raw returns: no
+        // gateway.mode at all. Writing allowedOrigins into it would produce
+        // a config the gateway refuses to start against.
+        ...createFakeConfigStore().deps,
+        postConfigRaw: async () => {
+          throw new Error("must not POST an origin patch before a baseline config exists");
+        },
+        getPendingDevices: async () => ({ ok: true, requestIds: [] })
+      })
+    );
+
+    expect(result.patchedAllowedOrigins).toBe(false);
   });
 
   it("does not POST a config patch or approve anything when there's nothing to do", async () => {

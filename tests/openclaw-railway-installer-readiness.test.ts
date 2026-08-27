@@ -127,7 +127,13 @@ describe("installOpenClawOnRailway post-deploy step order and result reporting",
           order.push("readiness");
           return 200;
         },
-        ...createFakeConfigStore({ onCall: (c) => order.push(c) }).deps,
+        // A baseline `gateway.mode` is present here -- this test is about the
+        // patch/approve mechanics, not the missing-baseline case issue #77
+        // covers below.
+        ...createFakeConfigStore({
+          initialContent: JSON.stringify({ gateway: { mode: "local" } }),
+          onCall: (c) => order.push(c)
+        }).deps,
         getPendingDevices: async () => {
           order.push("getPendingDevices");
           return { ok: true, requestIds: ["req_xyz789"] };
@@ -153,6 +159,32 @@ describe("installOpenClawOnRailway post-deploy step order and result reporting",
     ]);
     expect(result.patchedAllowedOrigins).toBe(true);
     expect(result.approvedDeviceRequestId).toBe("req_xyz789");
+  });
+
+  it("does not POST an origin patch when the read-back config has no gateway.mode yet (issue #77)", async () => {
+    const runner = newRunner([[], [service("SUCCESS")]]);
+
+    const result = await installOpenClawOnRailway(
+      {
+        setupPassword: "setup-secret",
+        gatewayToken: "gateway-secret",
+        pollSeconds: 0,
+        writeLocalFiles: false
+      },
+      {
+        runner,
+        sleep: async () => {},
+        checkSetupStatus: async () => 200,
+        // Default createFakeConfigStore() content ("{}") has no gateway.mode.
+        ...createFakeConfigStore().deps,
+        postConfigRaw: async () => {
+          throw new Error("must not POST an origin patch before a baseline config exists");
+        },
+        getPendingDevices: async () => ({ ok: true, requestIds: [] })
+      }
+    );
+
+    expect(result.patchedAllowedOrigins).toBe(false);
   });
 
   it("reports no patch and no approval when there's nothing to do", async () => {

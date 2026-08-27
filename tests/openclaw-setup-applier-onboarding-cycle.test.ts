@@ -327,4 +327,61 @@ describe("bootstrapOnboardingCycle", () => {
     // of silently relying on hold-last semantics masking the difference.
     expect(runner.calls.filter((call) => call.args[0] === "service" && call.args[1] === "list")).toHaveLength(3);
   });
+
+  it("retries the allowedOrigins patch after apply establishes a baseline config, on a genuinely fresh instance (issue #77)", async () => {
+    const runner = newRunner({}, { createdServiceName: "fixture-onboard" });
+    const calls: string[] = [];
+    let configured = false;
+    // Models a never-onboarded instance: no gateway.mode until /setup/api/run
+    // establishes one, exactly like the real wrapper does. patchAllowedOrigins
+    // must refuse to write before that point (issue #77) and succeed after.
+    const store = createFakeConfigStore({ initialContent: "{}", onCall: (c) => calls.push(c) });
+
+    const fetchImpl = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "https://openrouter.ai/api/v1/keys") {
+        calls.push("mint");
+        return new Response(JSON.stringify({ key: SENTINEL_MINTED, data: { hash: SENTINEL_MINTED_HASH } }), { status: 200 });
+      }
+      if (url.endsWith("/setup/api/status")) {
+        calls.push("status");
+        return new Response(JSON.stringify({ configured }), { status: 200 });
+      }
+      if (url.endsWith("/setup/api/run")) {
+        calls.push("run");
+        configured = true;
+        // The real wrapper's /setup/api/run establishes gateway.mode as a
+        // side effect of completing onboarding -- simulate that here.
+        await store.postConfigRaw("", {}, JSON.stringify({ gateway: { mode: "local" } }));
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      if (url.endsWith("/setup/healthz")) {
+        calls.push("healthz");
+        return new Response("ok", { status: 200 });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    }) as typeof fetch;
+
+    const result = await bootstrapOnboardingCycle(
+      { clientName: "fixture-onboard", profile: readFixture("key-provisioning-provider.json") },
+      {
+        runner,
+        openRouterManagementKey: "sk-test-DO-NOT-LOG-mgmt",
+        fetchImpl,
+        checkSetupStatus: async () => 200,
+        ...store.deps,
+        getPendingDevices: async () => ({ ok: true, requestIds: [] }),
+        approveDevice: async () => ({ ok: true }),
+        sleep: async () => {}
+      }
+    );
+
+    // provisionClientInstance's own attempt (before apply ever runs) found
+    // no gateway.mode and refused to write.
+    expect(result.provision.patchedAllowedOrigins).toBe(false);
+    // The retry after apply succeeded, now that a baseline config exists.
+    expect(result.patchedAllowedOrigins).toBe(true);
+    const written = JSON.parse(store.posted[store.posted.length - 1] ?? "{}");
+    expect(written.gateway.controlUi.allowedOrigins).toEqual(["https://fixture-onboard.up.railway.app"]);
+  });
 });

@@ -41,6 +41,7 @@ async function main(): Promise<void> {
     console.log(`Setup password: ${result.provision.setupPassword}`);
     console.log(`Client handoff link (single-click dashboard connect): ${result.provision.dashboardUrl}`);
     console.log(`Reused existing service: ${result.provision.reusedExistingService}`);
+    console.log(`Patched allowedOrigins: ${result.patchedAllowedOrigins}`);
     console.log(`Apply outcome: ${result.apply.outcome}`);
     if (result.apply.mintedKeyHash !== undefined) {
       console.log(`Minted OpenRouter key hash: ${result.apply.mintedKeyHash}`);

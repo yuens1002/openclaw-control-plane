@@ -11,6 +11,21 @@
 // the config and asserts the origin is actually present before returning --
 // the post-write verification half the protocol's idempotent-write rule
 // requires, matching the profile-apply path.
+//
+// Issue #77: on a genuinely fresh instance (no `openclaw.json` yet), the
+// GET above reads back whatever minimal/default document the wrapper
+// serves for an unconfigured instance -- which has no `gateway.mode`. This
+// read-merge-write cycle protects against a *redundant* write (the origin
+// compare above), but not against writing back an *incomplete* one: a
+// config with `allowedOrigins` set but no `gateway.mode` makes the wrapper
+// treat the file as suspicious/clobbered and refuse to start the gateway
+// at all. So the write is also refused -- not just the redundant one --
+// when the document read back has no `gateway.mode`: this function only
+// ever writes a document it read as already carrying a baseline `gateway`
+// section, never one it would be completing on the instance's behalf.
+// `bootstrapOnboardingCycle` retries this call once `/setup/api/run` has
+// established that baseline, so the origin still lands in the common
+// provisioning flow -- just after setup instead of before it.
 
 import { basicAuthHeader, type SetupAuth } from "./setup-auth.js";
 
@@ -56,6 +71,14 @@ export async function patchAllowedOrigins(
   const origin = `https://${domain}`;
 
   if (existingOrigins.includes(origin)) {
+    return { patched: false };
+  }
+
+  // Refuse to write back a document that has no baseline `gateway.mode` --
+  // see the issue #77 note above. `gateway` here is whatever `asRecord`
+  // read (and possibly just created as `{}` for a missing/empty document),
+  // so an absent or non-string `mode` means there is no real baseline yet.
+  if (typeof gateway.mode !== "string" || gateway.mode.trim().length === 0) {
     return { patched: false };
   }
 

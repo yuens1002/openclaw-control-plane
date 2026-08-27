@@ -7,6 +7,7 @@
 // `bootstrapOnboardingCycle`. Each exported function carries its own
 // marker below.
 
+import { patchAllowedOrigins } from "@openclaw-control-plane/openclaw-railway-installer/patch-allowed-origins";
 import {
   provisionClientInstance,
   type ProvisionClientDependencies,
@@ -44,6 +45,16 @@ export interface BootstrapOnboardingCycleResult {
   provision: ProvisionClientResult;
   dryRun: DryRunResult;
   apply: ApplyResult;
+  /**
+   * Whether the instance's own Railway domain ended up in
+   * `gateway.controlUi.allowedOrigins`. On a genuinely fresh instance
+   * `provision.patchedAllowedOrigins` is `false` -- `patchAllowedOrigins`
+   * refuses to write before any baseline config exists (issue #77) -- so
+   * this reflects the retry below, run once `apply` has established that
+   * baseline. `false` here means the origin genuinely never landed and the
+   * dashboard will show "origin not allowed" until it's patched manually.
+   */
+  patchedAllowedOrigins: boolean;
 }
 
 // LIVE-INSTANCE TIER: deploy
@@ -85,7 +96,20 @@ export async function bootstrapOnboardingCycle(
     }
   );
 
-  return { provision, dryRun, apply };
+  // Issue #77: on a genuinely fresh instance, `provisionClientInstance`'s
+  // own `patchAllowedOrigins` attempt ran before this instance had any
+  // baseline config and was refused (see patch-allowed-origins.ts). `apply`
+  // above just established that baseline via `/setup/api/run`, so retry
+  // here. Idempotent either way -- a no-op if the origin already landed on
+  // the first attempt.
+  const { patched: patchedAllowedOrigins } = await patchAllowedOrigins(
+    baseUrl,
+    { username: provision.setupUsername, password: provision.setupPassword },
+    provision.domain,
+    { getConfigRaw: dependencies.getConfigRaw, postConfigRaw: dependencies.postConfigRaw }
+  );
+
+  return { provision, dryRun, apply, patchedAllowedOrigins };
 }
 
 export interface RegressionCheckOptions {
