@@ -46,13 +46,16 @@ export interface BootstrapOnboardingCycleResult {
   dryRun: DryRunResult;
   apply: ApplyResult;
   /**
-   * Whether the instance's own Railway domain ended up in
-   * `gateway.controlUi.allowedOrigins`. On a genuinely fresh instance
-   * `provision.patchedAllowedOrigins` is `false` -- `patchAllowedOrigins`
-   * refuses to write before any baseline config exists (issue #77) -- so
-   * this reflects the retry below, run once `apply` has established that
-   * baseline. `false` here means the origin genuinely never landed and the
-   * dashboard will show "origin not allowed" until it's patched manually.
+   * The retry `patchAllowedOrigins` call's own `patched` result, run after
+   * `apply` has established a baseline config (issue #77). `true` means
+   * this call's own write landed the origin. `false` is ambiguous by
+   * design, same as `patchAllowedOrigins` itself: it covers both "the
+   * origin was already present" (idempotent no-op -- nothing to worry
+   * about) and, in principle, "still refused for lack of a baseline" --
+   * which should no longer happen here since `apply` just established one,
+   * but isn't distinguished in the return value. Check `provision.patchedAllowedOrigins`
+   * alongside this field if you need to know whether the *first* attempt,
+   * before `apply` ran, also succeeded or was refused.
    */
   patchedAllowedOrigins: boolean;
 }

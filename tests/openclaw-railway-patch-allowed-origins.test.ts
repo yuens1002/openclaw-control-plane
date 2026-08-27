@@ -40,7 +40,7 @@ describe("patchAllowedOrigins", () => {
     expect(store.getCalls).toBe(1);
   });
 
-  it("refuses to write when the config has a baseline gateway.mode by the time of the write (creates the nested controlUi path)", async () => {
+  it("writes successfully when the config already has a baseline gateway.mode (creates the nested controlUi path)", async () => {
     const store = createFakeConfigStore({ initialContent: JSON.stringify({ gateway: { mode: "local" } }) });
 
     const result = await patchAllowedOrigins(BASE_URL, AUTH, DOMAIN, store);
