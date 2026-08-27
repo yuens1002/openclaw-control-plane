@@ -45,7 +45,13 @@ const stopGatewayAndWaitDefinition = `async function stopGatewayAndWait() {
     } catch {
       // ignore
     }
-    await exited;
+    // Bounded even after SIGKILL: an uninterruptible/stuck process must not
+    // block restarts forever. On a second timeout, throw WITHOUT clearing
+    // gatewayProc so no caller spawns a concurrent gateway beside it.
+    const stillRunning = await Promise.race([exited.then(() => false), sleep(5000).then(() => true)]);
+    if (stillRunning) {
+      throw new Error("gateway process did not exit within 5s of SIGKILL; refusing to start a second gateway");
+    }
   }
   gatewayProc = null;
 }`;
