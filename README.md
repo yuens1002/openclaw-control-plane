@@ -156,7 +156,7 @@ route still sits behind the wrapper's setup password.
   `VACUUM INTO` snapshot taken over a read-only `node:sqlite` connection, not
   a hot copy of a WAL-mode database.
 - **Excludes**: `bin/`, `lib/`, `media/`, `logs/`, `backups/`, `sessions/`,
-  `plugins/`, `codex-home/`, the workspace, `*-wal`/`-shm` siblings,
+  `plugins/`, `codex-home/`, the workspace, `*-wal`/`*-shm` siblings,
   `*.bak*`/`*.migrated` leftovers, and any symlink or non-regular file.
   Measured on one instance during planning (read-only `du -sh`): the full
   state directory was 541 MB (`bin/` 415 MB, `agents/main/sessions/` 64 MB,
