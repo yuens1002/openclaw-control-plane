@@ -102,11 +102,19 @@ async function defaultGetPendingDevices(
   const response = await fetch(`${baseUrl}/setup/api/devices/pending`, {
     headers: { authorization: basicAuthHeader(auth) }
   });
-  // Do not throw on a non-2xx status: confirmed live, the wrapper answers
-  // with its own {ok:false} body (and a 500) when the underlying gateway
-  // process has not started yet, in the exact pre-baseline window issue #77
-  // fixed for the raw-config endpoint. Parse the body regardless of status
-  // so the caller can tell "not ready yet" apart from a genuine failure.
+  // A 4xx is a hard failure (wrong SETUP_PASSWORD, wrong username) and must
+  // throw immediately -- silently mapping it to {ok:false}/"not-ready" would
+  // hide a credential problem behind an endless "retry once ready" loop,
+  // exactly the mistake this codebase has already been burned by once
+  // (retry-vs-fail-fast in a readiness poll, a different call site).
+  if (response.status >= 400 && response.status < 500) {
+    throw new Error(`GET /setup/api/devices/pending returned ${response.status}`);
+  }
+  // Do not throw on a 5xx: confirmed live, the wrapper answers with its own
+  // {ok:false} body (and a 500) when the underlying gateway process has not
+  // started yet, in the exact pre-baseline window issue #77 fixed for the
+  // raw-config endpoint. Parse the body regardless of status so the caller
+  // can tell "not ready yet" apart from a genuine failure.
   let body: { ok?: boolean; requestIds?: string[] } = {};
   try {
     body = (await response.json()) as { ok?: boolean; requestIds?: string[] };
