@@ -505,7 +505,8 @@ describe.skipIf(!sqliteAvailable)("wrapper-state-export: buildStateExportTree on
     // source, and correctly reject a -wal/-shm basename there (AC-TST-001's
     // decoys include exactly that: a live source-side `state/openclaw.sqlite-wal`).
     const sidecarPlaceholders = relativePaths.filter((p) => p.endsWith("-wal") || p.endsWith("-shm"));
-    const sourcedPaths = relativePaths.filter((p) => !sidecarPlaceholders.includes(p));
+    const sidecarPlaceholderSet = new Set(sidecarPlaceholders);
+    const sourcedPaths = relativePaths.filter((p) => !sidecarPlaceholderSet.has(p));
 
     expect(new Set(sidecarPlaceholders)).toEqual(
       new Set(EXPECTED_INCLUDED.filter((p) => p.endsWith(".sqlite")).flatMap((p) => [`${p}-wal`, `${p}-shm`]))
