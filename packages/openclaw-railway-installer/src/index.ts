@@ -18,7 +18,12 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 import { approveOwnDevicePairing, type ApproveOwnDeviceDependencies } from "./approve-own-device.js";
-import { patchAllowedOrigins, type PatchAllowedOriginsDependencies } from "./patch-allowed-origins.js";
+import {
+  patchAllowedOrigins,
+  describePatchAllowedOriginsStatus,
+  type PatchAllowedOriginsDependencies,
+  type PatchAllowedOriginsStatus
+} from "./patch-allowed-origins.js";
 import { basicAuthHeader, type SetupAuth } from "./setup-auth.js";
 
 export type { SetupAuth };
@@ -118,6 +123,8 @@ export interface InstallResult {
   wroteEnvLocal: boolean;
   wroteHandoff: boolean;
   patchedAllowedOrigins: boolean;
+  /** Disambiguates `patchedAllowedOrigins:false` -- see `PatchAllowedOriginsStatus`. */
+  allowedOriginsStatus: PatchAllowedOriginsStatus;
   approvedDeviceRequestId?: string;
 }
 
@@ -179,7 +186,7 @@ This file is local-only and should not be committed.
 
 ## Post-Deploy Automation
 
-- Patched allowedOrigins: ${result.patchedAllowedOrigins ? "yes" : "no (already present)"}
+- Patched allowedOrigins: ${describePatchAllowedOriginsStatus(result.allowedOriginsStatus)}
 - Approved device pairing request: ${result.approvedDeviceRequestId ?? "none pending"}
 
 ## Next Steps
@@ -249,10 +256,12 @@ export async function installOpenClawOnRailway(
   const setupStatusUrl = `${baseUrl}/setup/api/status`;
   await waitForSetupReady(setupStatusUrl, setupAuth, resolved.pollSeconds, resolved.timeoutMinutes, dependencies);
 
-  const { patched: patchedAllowedOrigins } = await patchAllowedOrigins(baseUrl, setupAuth, domain.domain, {
-    getConfigRaw: dependencies.getConfigRaw,
-    postConfigRaw: dependencies.postConfigRaw
-  });
+  const { patched: patchedAllowedOrigins, status: allowedOriginsStatus } = await patchAllowedOrigins(
+    baseUrl,
+    setupAuth,
+    domain.domain,
+    { getConfigRaw: dependencies.getConfigRaw, postConfigRaw: dependencies.postConfigRaw }
+  );
   const approvedDeviceRequestId = await approveOwnDevicePairing(baseUrl, setupAuth, {
     getPendingDevices: dependencies.getPendingDevices,
     approveDevice: dependencies.approveDevice
@@ -269,6 +278,7 @@ export async function installOpenClawOnRailway(
     setupPassword: resolved.setupPassword,
     reusedExistingService,
     patchedAllowedOrigins,
+    allowedOriginsStatus,
     ...(approvedDeviceRequestId ? { approvedDeviceRequestId } : {}),
     ...(service.latestDeployment?.id ? { deploymentId: service.latestDeployment.id } : {})
   } satisfies Omit<InstallResult, "wroteEnvLocal" | "wroteHandoff">;

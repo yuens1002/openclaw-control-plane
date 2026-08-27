@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { patchAllowedOrigins } from "@openclaw-control-plane/openclaw-railway-installer/patch-allowed-origins";
+import {
+  patchAllowedOrigins,
+  describePatchAllowedOriginsStatus
+} from "@openclaw-control-plane/openclaw-railway-installer/patch-allowed-origins";
 import { createFakeConfigStore } from "./fixtures/fake-config-store.js";
 
 const AUTH = { username: "openclaw-admin", password: "setup-secret" };
@@ -35,6 +38,7 @@ describe("patchAllowedOrigins", () => {
     const result = await patchAllowedOrigins(BASE_URL, AUTH, DOMAIN, store);
 
     expect(result.patched).toBe(false);
+    expect(result.status).toBe("already-present");
     expect(store.posted).toHaveLength(0);
     // The skipped write also skips the verification read: one GET total.
     expect(store.getCalls).toBe(1);
@@ -46,11 +50,12 @@ describe("patchAllowedOrigins", () => {
     const result = await patchAllowedOrigins(BASE_URL, AUTH, DOMAIN, store);
 
     expect(result.patched).toBe(true);
+    expect(result.status).toBe("patched");
     const written = JSON.parse(store.posted[0] ?? "{}");
     expect(written.gateway.controlUi.allowedOrigins).toEqual([ORIGIN]);
   });
 
-  it("skips the write and reports patched:false against a genuinely fresh instance with no gateway.mode (issue #77)", async () => {
+  it("skips the write and reports status:refused-missing-baseline against a genuinely fresh instance with no gateway.mode (issue #77)", async () => {
     // An empty/unconfigured config file is exactly what the wrapper serves
     // for an instance that has never been through /setup/api/run -- no
     // `gateway` section at all, so no `gateway.mode` either.
@@ -59,6 +64,7 @@ describe("patchAllowedOrigins", () => {
     const result = await patchAllowedOrigins(BASE_URL, AUTH, DOMAIN, store);
 
     expect(result.patched).toBe(false);
+    expect(result.status).toBe("refused-missing-baseline");
     // Never POSTs an incomplete document -- the wrapper treats a config with
     // allowedOrigins but no gateway.mode as suspicious/clobbered and refuses
     // to start the gateway against it.
@@ -71,6 +77,7 @@ describe("patchAllowedOrigins", () => {
     const result = await patchAllowedOrigins(BASE_URL, AUTH, DOMAIN, store);
 
     expect(result.patched).toBe(false);
+    expect(result.status).toBe("refused-missing-baseline");
     expect(store.posted).toHaveLength(0);
   });
 
@@ -143,5 +150,13 @@ describe("patchAllowedOrigins", () => {
         postConfigRaw: async () => ({ ok: false })
       })
     ).rejects.toThrow("ok:false");
+  });
+});
+
+describe("describePatchAllowedOriginsStatus", () => {
+  it("renders a distinct, human-readable message per status (so 'already-present' and 'refused-missing-baseline' don't collapse to the same false-y-looking text)", () => {
+    expect(describePatchAllowedOriginsStatus("patched")).toBe("yes");
+    expect(describePatchAllowedOriginsStatus("already-present")).toMatch(/already present/);
+    expect(describePatchAllowedOriginsStatus("refused-missing-baseline")).toMatch(/no baseline/);
   });
 });

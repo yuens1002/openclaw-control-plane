@@ -379,8 +379,10 @@ describe("bootstrapOnboardingCycle", () => {
     // provisionClientInstance's own attempt (before apply ever runs) found
     // no gateway.mode and refused to write.
     expect(result.provision.patchedAllowedOrigins).toBe(false);
+    expect(result.provision.allowedOriginsStatus).toBe("refused-missing-baseline");
     // The retry after apply succeeded, now that a baseline config exists.
     expect(result.patchedAllowedOrigins).toBe(true);
+    expect(result.allowedOriginsStatus).toBe("patched");
     const written = JSON.parse(store.posted[store.posted.length - 1] ?? "{}");
     expect(written.gateway.controlUi.allowedOrigins).toEqual(["https://fixture-onboard.up.railway.app"]);
   });

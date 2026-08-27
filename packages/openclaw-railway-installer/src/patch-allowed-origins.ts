@@ -41,8 +41,31 @@ export interface PatchAllowedOriginsDependencies {
   postConfigRaw?: ((baseUrl: string, auth: SetupAuth, content: string) => Promise<{ ok: boolean }>) | undefined;
 }
 
+/**
+ * Why `patched` alone is not enough for user-facing output: `false` covers
+ * two unrelated cases -- the origin was already present (idempotent no-op,
+ * nothing to worry about) and the write was refused for lack of a baseline
+ * `gateway.mode` (issue #77 -- the origin is genuinely still missing and a
+ * later retry is needed). `status` disambiguates the two; `patched` is kept
+ * for callers that only care about "did a write happen".
+ */
+export type PatchAllowedOriginsStatus = "patched" | "already-present" | "refused-missing-baseline";
+
 export interface PatchAllowedOriginsResult {
   patched: boolean;
+  status: PatchAllowedOriginsStatus;
+}
+
+/** One-line, human-readable rendering of `PatchAllowedOriginsResult.status` for handoff docs and CLI output. */
+export function describePatchAllowedOriginsStatus(status: PatchAllowedOriginsStatus): string {
+  switch (status) {
+    case "patched":
+      return "yes";
+    case "already-present":
+      return "no (already present)";
+    case "refused-missing-baseline":
+      return "no (skipped -- instance has no baseline gateway.mode yet; retry once initial setup completes)";
+  }
 }
 
 export async function patchAllowedOrigins(
@@ -71,7 +94,7 @@ export async function patchAllowedOrigins(
   const origin = `https://${domain}`;
 
   if (existingOrigins.includes(origin)) {
-    return { patched: false };
+    return { patched: false, status: "already-present" };
   }
 
   // Refuse to write back a document that has no baseline `gateway.mode` --
@@ -79,7 +102,7 @@ export async function patchAllowedOrigins(
   // read (and possibly just created as `{}` for a missing/empty document),
   // so an absent or non-string `mode` means there is no real baseline yet.
   if (typeof gateway.mode !== "string" || gateway.mode.trim().length === 0) {
-    return { patched: false };
+    return { patched: false, status: "refused-missing-baseline" };
   }
 
   controlUi.allowedOrigins = [...existingOrigins, origin];
@@ -114,7 +137,7 @@ export async function patchAllowedOrigins(
       `Post-write verification failed: ${origin} is absent from gateway.controlUi.allowedOrigins after the write reported success`
     );
   }
-  return { patched: true };
+  return { patched: true, status: "patched" };
 }
 
 /**

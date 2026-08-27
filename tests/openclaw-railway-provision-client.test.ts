@@ -132,6 +132,7 @@ describe("provisionClientInstance — fresh provision", () => {
       "approveDevice"
     ]);
     expect(result.patchedAllowedOrigins).toBe(true);
+    expect(result.allowedOriginsStatus).toBe("patched");
     expect(result.approvedDeviceRequestId).toBe("req_1");
   });
 
@@ -155,6 +156,7 @@ describe("provisionClientInstance — fresh provision", () => {
     );
 
     expect(result.patchedAllowedOrigins).toBe(false);
+    expect(result.allowedOriginsStatus).toBe("refused-missing-baseline");
   });
 
   it("does not POST a config patch or approve anything when there's nothing to do", async () => {
@@ -173,6 +175,7 @@ describe("provisionClientInstance — fresh provision", () => {
     );
 
     expect(result.patchedAllowedOrigins).toBe(false);
+    expect(result.allowedOriginsStatus).toBe("already-present");
     expect(result.approvedDeviceRequestId).toBeUndefined();
   });
 

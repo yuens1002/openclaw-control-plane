@@ -7,7 +7,10 @@
 // `bootstrapOnboardingCycle`. Each exported function carries its own
 // marker below.
 
-import { patchAllowedOrigins } from "@openclaw-control-plane/openclaw-railway-installer/patch-allowed-origins";
+import {
+  patchAllowedOrigins,
+  type PatchAllowedOriginsStatus
+} from "@openclaw-control-plane/openclaw-railway-installer/patch-allowed-origins";
 import {
   provisionClientInstance,
   type ProvisionClientDependencies,
@@ -45,19 +48,17 @@ export interface BootstrapOnboardingCycleResult {
   provision: ProvisionClientResult;
   dryRun: DryRunResult;
   apply: ApplyResult;
-  /**
-   * The retry `patchAllowedOrigins` call's own `patched` result, run after
-   * `apply` has established a baseline config (issue #77). `true` means
-   * this call's own write landed the origin. `false` is ambiguous by
-   * design, same as `patchAllowedOrigins` itself: it covers both "the
-   * origin was already present" (idempotent no-op -- nothing to worry
-   * about) and, in principle, "still refused for lack of a baseline" --
-   * which should no longer happen here since `apply` just established one,
-   * but isn't distinguished in the return value. Check `provision.patchedAllowedOrigins`
-   * alongside this field if you need to know whether the *first* attempt,
-   * before `apply` ran, also succeeded or was refused.
-   */
+  /** The retry `patchAllowedOrigins` call's own `patched` result, run after `apply` has established a baseline config (issue #77). */
   patchedAllowedOrigins: boolean;
+  /**
+   * Disambiguates `patchedAllowedOrigins:false` above -- see
+   * `PatchAllowedOriginsStatus`. Expected to read `"patched"` or
+   * `"already-present"` here, since `apply` just established a baseline
+   * config; a `"refused-missing-baseline"` reading at this point means
+   * `apply` did not actually establish one. `provision.allowedOriginsStatus`
+   * carries the *first* attempt's status, before `apply` ran.
+   */
+  allowedOriginsStatus: PatchAllowedOriginsStatus;
 }
 
 // LIVE-INSTANCE TIER: deploy
@@ -105,14 +106,14 @@ export async function bootstrapOnboardingCycle(
   // above just established that baseline via `/setup/api/run`, so retry
   // here. Idempotent either way -- a no-op if the origin already landed on
   // the first attempt.
-  const { patched: patchedAllowedOrigins } = await patchAllowedOrigins(
+  const { patched: patchedAllowedOrigins, status: allowedOriginsStatus } = await patchAllowedOrigins(
     baseUrl,
     { username: provision.setupUsername, password: provision.setupPassword },
     provision.domain,
     { getConfigRaw: dependencies.getConfigRaw, postConfigRaw: dependencies.postConfigRaw }
   );
 
-  return { provision, dryRun, apply, patchedAllowedOrigins };
+  return { provision, dryRun, apply, patchedAllowedOrigins, allowedOriginsStatus };
 }
 
 export interface RegressionCheckOptions {

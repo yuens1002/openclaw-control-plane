@@ -158,6 +158,7 @@ describe("installOpenClawOnRailway post-deploy step order and result reporting",
       "approveDevice"
     ]);
     expect(result.patchedAllowedOrigins).toBe(true);
+    expect(result.allowedOriginsStatus).toBe("patched");
     expect(result.approvedDeviceRequestId).toBe("req_xyz789");
   });
 
@@ -185,6 +186,7 @@ describe("installOpenClawOnRailway post-deploy step order and result reporting",
     );
 
     expect(result.patchedAllowedOrigins).toBe(false);
+    expect(result.allowedOriginsStatus).toBe("refused-missing-baseline");
   });
 
   it("reports no patch and no approval when there's nothing to do", async () => {
@@ -216,6 +218,7 @@ describe("installOpenClawOnRailway post-deploy step order and result reporting",
     );
 
     expect(result.patchedAllowedOrigins).toBe(false);
+    expect(result.allowedOriginsStatus).toBe("already-present");
     expect(result.approvedDeviceRequestId).toBeUndefined();
   });
 });

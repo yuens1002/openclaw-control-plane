@@ -32,7 +32,7 @@ import {
   type InstallerService,
   type SetupAuth
 } from "./index.js";
-import { patchAllowedOrigins } from "./patch-allowed-origins.js";
+import { patchAllowedOrigins, type PatchAllowedOriginsStatus, describePatchAllowedOriginsStatus } from "./patch-allowed-origins.js";
 import { readRailwayVariable, writeRailwayVariable } from "./railway-variables.js";
 import { readTemplateLock } from "./template-lock.js";
 
@@ -100,6 +100,8 @@ export interface ProvisionClientResult {
   wroteEnvLocal: boolean;
   wroteHandoff: boolean;
   patchedAllowedOrigins: boolean;
+  /** Disambiguates `patchedAllowedOrigins:false` -- see `PatchAllowedOriginsStatus`. */
+  allowedOriginsStatus: PatchAllowedOriginsStatus;
   approvedDeviceRequestId?: string;
 }
 
@@ -246,10 +248,12 @@ export async function provisionClientInstance(
   // instance's dashboard chat fails with "origin not allowed" and would
   // also need a manual device-pairing approval without them. Mirrors
   // installOpenClawOnRailway's call order and dependency wiring exactly.
-  const { patched: patchedAllowedOrigins } = await patchAllowedOrigins(baseUrl, setupAuth, domain.domain, {
-    getConfigRaw: dependencies.getConfigRaw,
-    postConfigRaw: dependencies.postConfigRaw
-  });
+  const { patched: patchedAllowedOrigins, status: allowedOriginsStatus } = await patchAllowedOrigins(
+    baseUrl,
+    setupAuth,
+    domain.domain,
+    { getConfigRaw: dependencies.getConfigRaw, postConfigRaw: dependencies.postConfigRaw }
+  );
   const approvedDeviceRequestId = await approveOwnDevicePairing(baseUrl, setupAuth, {
     getPendingDevices: dependencies.getPendingDevices,
     approveDevice: dependencies.approveDevice
@@ -271,6 +275,7 @@ export async function provisionClientInstance(
     dashboardUrl: `${openclawUrl}#token=${gatewayToken}`,
     reusedExistingService,
     patchedAllowedOrigins,
+    allowedOriginsStatus,
     ...(approvedDeviceRequestId ? { approvedDeviceRequestId } : {})
   } satisfies Omit<ProvisionClientResult, "wroteEnvLocal" | "wroteHandoff">;
 
@@ -842,7 +847,7 @@ ${result.projectId ? `- Project ID: ${result.projectId}\n` : ""}- Template ref: 
 
 ## Post-Deploy Automation
 
-- Patched allowedOrigins: ${result.patchedAllowedOrigins ? "yes" : "no (already present)"}
+- Patched allowedOrigins: ${describePatchAllowedOriginsStatus(result.allowedOriginsStatus)}
 - Approved device pairing request: ${result.approvedDeviceRequestId ?? "none pending"}
 
 ## Updating the wrapper version later

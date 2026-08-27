@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 
 import type { RailwayRunner } from "@openclaw-control-plane/openclaw-railway-installer";
 
+import { describePatchAllowedOriginsStatus } from "@openclaw-control-plane/openclaw-railway-installer/patch-allowed-origins";
+
 import {
   bootstrapOnboardingCycle,
   runRegressionCheck,
@@ -41,7 +43,12 @@ async function main(): Promise<void> {
     console.log(`Setup password: ${result.provision.setupPassword}`);
     console.log(`Client handoff link (single-click dashboard connect): ${result.provision.dashboardUrl}`);
     console.log(`Reused existing service: ${result.provision.reusedExistingService}`);
-    console.log(`Patched allowedOrigins: ${result.patchedAllowedOrigins}`);
+    console.log(
+      `Patched allowedOrigins (initial provisioning, before setup): ${describePatchAllowedOriginsStatus(result.provision.allowedOriginsStatus)}`
+    );
+    console.log(
+      `Patched allowedOrigins (retry after apply): ${describePatchAllowedOriginsStatus(result.allowedOriginsStatus)}`
+    );
     console.log(`Apply outcome: ${result.apply.outcome}`);
     if (result.apply.mintedKeyHash !== undefined) {
       console.log(`Minted OpenRouter key hash: ${result.apply.mintedKeyHash}`);
