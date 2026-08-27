@@ -115,8 +115,8 @@ the `template-source` Dockerfile stage with the existing
    template-source` (AC-REG) cover the real wrapper.
 5. **Live verification is the consumer's.** The first real
    `?scope=state` request against a redeployed instance is an Ops AC in the
-   consumer repo's plan (its "redeploy agency-prod" deliverable); here it is
-   recorded as DEFERRED-to-consumer, not PASS.
+   consumer repo's plan (its agency-instance redeploy deliverable); here it
+   is recorded as DEFERRED-to-consumer, not PASS.
 
 ## Deliverables (with spec-role assignment)
 
