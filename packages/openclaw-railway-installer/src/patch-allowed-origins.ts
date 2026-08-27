@@ -65,6 +65,10 @@ export function describePatchAllowedOriginsStatus(status: PatchAllowedOriginsSta
       return "no (already present)";
     case "refused-missing-baseline":
       return "no (skipped -- instance has no baseline gateway.mode yet; retry once initial setup completes)";
+    default: {
+      const exhaustiveCheck: never = status;
+      throw new Error(`describePatchAllowedOriginsStatus: unhandled status '${String(exhaustiveCheck)}'`);
+    }
   }
 }
 

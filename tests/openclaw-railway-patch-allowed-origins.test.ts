@@ -159,4 +159,11 @@ describe("describePatchAllowedOriginsStatus", () => {
     expect(describePatchAllowedOriginsStatus("already-present")).toMatch(/already present/);
     expect(describePatchAllowedOriginsStatus("refused-missing-baseline")).toMatch(/no baseline/);
   });
+
+  it("throws instead of returning undefined for an unrecognized status", () => {
+    // Simulates a status value that TS's exhaustiveness check would catch at
+    // compile time but a runtime caller (e.g. a JS consumer) could still pass.
+    const bogusStatus = "some-future-status" as unknown as Parameters<typeof describePatchAllowedOriginsStatus>[0];
+    expect(() => describePatchAllowedOriginsStatus(bogusStatus)).toThrow(/unhandled status/);
+  });
 });
