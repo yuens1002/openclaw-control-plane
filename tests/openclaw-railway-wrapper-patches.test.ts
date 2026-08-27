@@ -609,7 +609,7 @@ describe.skipIf(!sqliteAvailable)("wrapper-state-export: buildStateExportTree on
     mkdirSync(dirname(staleWalPath), { recursive: true });
     writeFileSync(staleWalPath, Buffer.alloc(4096, 0xff)); // stands in for the target's own live, un-checkpointed WAL
 
-    await tar.x({ cwd: restoreTarget, file: archivePath });
+    await tar.x({ gzip: true, cwd: restoreTarget, file: archivePath });
 
     expect(existsSync(staleWalPath)).toBe(true);
     expect(lstatSync(staleWalPath).size).toBe(0);
