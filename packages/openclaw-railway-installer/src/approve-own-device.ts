@@ -49,7 +49,7 @@ export function describeDeviceApprovalStatus(status: ApproveOwnDeviceStatus, req
     case "no-pending":
       return "none pending";
     case "not-ready":
-      return "skipped -- instance has no baseline gateway.mode yet; retry once initial setup completes";
+      return "skipped -- instance did not report ready (commonly: no baseline gateway.mode yet); retry once initial setup completes";
     default: {
       const exhaustiveCheck: never = status;
       throw new Error(`describeDeviceApprovalStatus: unhandled status '${String(exhaustiveCheck)}'`);
@@ -102,12 +102,13 @@ async function defaultGetPendingDevices(
   const response = await fetch(`${baseUrl}/setup/api/devices/pending`, {
     headers: { authorization: basicAuthHeader(auth) }
   });
-  // A 4xx is a hard failure (wrong SETUP_PASSWORD, wrong username) and must
-  // throw immediately -- silently mapping it to {ok:false}/"not-ready" would
-  // hide a credential problem behind an endless "retry once ready" loop,
-  // exactly the mistake this codebase has already been burned by once
-  // (retry-vs-fail-fast in a readiness poll, a different call site).
-  if (response.status >= 400 && response.status < 500) {
+  // Any non-2xx status below 500 -- a 4xx (wrong SETUP_PASSWORD, wrong
+  // username) or an unexpected 3xx -- is a hard failure and must throw
+  // immediately. Silently mapping it to {ok:false}/"not-ready" would hide a
+  // credential (or redirect/config) problem behind an endless "retry once
+  // ready" loop, exactly the mistake this codebase has already been burned
+  // by once (retry-vs-fail-fast in a readiness poll, a different call site).
+  if (!response.ok && response.status < 500) {
     throw new Error(`GET /setup/api/devices/pending returned ${response.status}`);
   }
   // Do not throw on a 5xx: confirmed live, the wrapper answers with its own
@@ -132,6 +133,13 @@ async function defaultGetPendingDevices(
       `GET /setup/api/devices/pending returned ${response.status} with a non-JSON body: ` +
         `${cause instanceof Error ? cause.message : String(cause)}`
     );
+  }
+  // A 5xx is never "ready" regardless of what its JSON body claims -- an
+  // erroneous {ok:true} on a 500 must not be trusted into approving a
+  // pairing against a gateway the HTTP layer itself says is failing. Only a
+  // genuine 2xx response's own ok flag is trusted.
+  if (response.status >= 500) {
+    return { ok: false, requestIds: [] };
   }
   return { ok: body.ok === true, requestIds: body.requestIds ?? [] };
 }

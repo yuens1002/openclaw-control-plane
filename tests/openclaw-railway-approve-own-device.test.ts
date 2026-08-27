@@ -163,6 +163,17 @@ describe("approveOwnDevicePairing", () => {
       expect(result).toEqual({ status: "not-ready" });
     });
 
+    it("reports not-ready on a 500 even when its JSON body erroneously claims ok:true -- the HTTP layer wins", async () => {
+      // A 5xx is never "ready", no matter what an inconsistent/buggy body
+      // says. Trusting body.ok on a 500 could approve a pairing against a
+      // gateway the transport layer itself says is failing.
+      const baseUrl = await serveDevicesPending(500, { ok: true, requestIds: ["req_should_not_surface"] });
+
+      const result = await approveOwnDevicePairing(baseUrl, AUTH, {});
+
+      expect(result).toEqual({ status: "not-ready" });
+    });
+
     it("throws on a 200 with a non-JSON body -- a broken response must never be silently treated as not-ready", async () => {
       // Confirmed live 500s always carry {ok:false} JSON; a 2xx that fails
       // to parse was never the gateway-not-started shape at all, and
