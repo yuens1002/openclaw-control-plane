@@ -723,6 +723,127 @@ export async function updateClientOpenClawRef(
   return { serviceName: options.service, openclawRef: options.openclawRef, changed, newDeploymentReady };
 }
 
+export interface RotateGatewayTokenOptions {
+  service: string;
+  setupUsername?: string;
+  pollSeconds?: number;
+  timeoutMinutes?: number;
+}
+
+export interface RotateGatewayTokenResult {
+  serviceName: string;
+  newDeploymentReady: boolean;
+}
+
+// LIVE-INSTANCE TIER: restart-or-redeploy-triggering
+// See docs/live-instance-operations.md for what this tier permits.
+/**
+ * Rotates OPENCLAW_GATEWAY_TOKEN on an already-provisioned client service to
+ * a fresh random value and redeploys it, then waits for it to answer
+ * authenticated requests. Unlike updateClientTemplateRef/updateClientOpenClawRef,
+ * this is not a compare-and-swap against a caller-declared expected value --
+ * a rotation's whole point is to always replace the current value with a new
+ * one, so there is nothing meaningful to compare against. Refuses when the
+ * service has no OPENCLAW_GATEWAY_TOKEN at all (nothing to rotate; provision
+ * first). The new value is never returned, logged, or printed: nothing
+ * outside the running process needs it, unlike the initial-provisioning
+ * handoff, which exists specifically to hand the operator a credential they
+ * will use. Never touches any other service, control-plane's own main, or
+ * railway.toml.
+ */
+export async function rotateGatewayToken(
+  options: RotateGatewayTokenOptions,
+  dependencies: InstallerDependencies
+): Promise<RotateGatewayTokenResult> {
+  const pollSeconds = options.pollSeconds ?? 15;
+  const timeoutMinutes = options.timeoutMinutes ?? 25;
+
+  const current = await readRailwayVariable("OPENCLAW_GATEWAY_TOKEN", options.service, dependencies);
+  if (current === undefined) {
+    throw new Error(
+      `Refusing to rotate OPENCLAW_GATEWAY_TOKEN on '${options.service}': it has no OPENCLAW_GATEWAY_TOKEN ` +
+        `variable set at all. There is nothing to rotate; provision the service first.`
+    );
+  }
+
+  // Captured before the write so the post-redeploy poll can reject the
+  // deployment that was already there -- same guard updateClientRefVariable
+  // uses, for the same reason.
+  const priorDeploymentId = findTemplateService(await listServices(dependencies.runner), options.service)
+    ?.latestDeployment?.id;
+  if (priorDeploymentId === undefined) {
+    throw new Error(
+      `Refusing to rotate OPENCLAW_GATEWAY_TOKEN on '${options.service}': its current deployment id could not ` +
+        `be read, so a redeploy could not be distinguished from the deployment already running. Nothing has ` +
+        `been changed. Confirm the service exists and has a deployment, then retry.`
+    );
+  }
+
+  const next = createSecret(32);
+
+  try {
+    await writeRailwayVariable(
+      { name: "OPENCLAW_GATEWAY_TOKEN", value: next, service: options.service, skipDeploys: true },
+      dependencies
+    );
+  } catch (cause) {
+    throw new Error(
+      `Writing a new OPENCLAW_GATEWAY_TOKEN to '${options.service}' failed, and it is not certain whether the ` +
+        `value was applied before the failure: ${cause instanceof Error ? cause.message : String(cause)}. ` +
+        `Re-read (do not print) the live value before retrying.`,
+      { cause }
+    );
+  }
+
+  try {
+    await dependencies.runner.run(["redeploy", "--service", options.service, "--yes", "--json"]);
+    await pollServiceUntilSuccess(options.service, pollSeconds, timeoutMinutes, dependencies, priorDeploymentId);
+    await assertInstanceReady(
+      { service: options.service, setupUsername: options.setupUsername, pollSeconds, timeoutMinutes },
+      dependencies
+    );
+
+    // Post-write verification, the second half the protocol's own
+    // idempotent-write rule requires. A healthy instance is not proof the
+    // rotation actually took: the write could have been accepted and not
+    // applied, or something else could have changed it in the meantime.
+    let applied: string | undefined;
+    try {
+      applied = await readRailwayVariable("OPENCLAW_GATEWAY_TOKEN", options.service, dependencies);
+    } catch (cause) {
+      // Readiness already passed, so this is not an unhealthy instance -- it
+      // is a failed *verification read*. Reporting it as a health problem
+      // would send the operator to the wrong recovery (updateClientRefVariable
+      // draws the same distinction for the ref-update paths).
+      throw new RefVerificationError(
+        `OPENCLAW_GATEWAY_TOKEN on '${options.service}' was rotated and the instance is answering authenticated ` +
+          `requests, but reading the variable back to confirm it failed: ` +
+          `${cause instanceof Error ? cause.message : String(cause)}. The instance is healthy; the rotation was ` +
+          `not confirmed. Re-read the live value to check.`
+      );
+    }
+    if (applied !== next) {
+      throw new RefVerificationError(
+        `OPENCLAW_GATEWAY_TOKEN on '${options.service}' does not read back as the value just written, even ` +
+          `though the instance is answering authenticated requests. The write was accepted but did not take ` +
+          `effect, or something else changed it since. The instance is healthy; the rotation is unconfirmed.`
+      );
+    }
+  } catch (cause) {
+    if (cause instanceof RefVerificationError) {
+      throw cause;
+    }
+    throw new Error(
+      `OPENCLAW_GATEWAY_TOKEN on '${options.service}' WAS rotated, but the instance is not confirmed healthy ` +
+        `afterwards: ${cause instanceof Error ? cause.message : String(cause)}. The change is live and ` +
+        `unverified -- check the instance before retrying.`,
+      { cause }
+    );
+  }
+
+  return { serviceName: options.service, newDeploymentReady: true };
+}
+
 async function resolveProvisionOptions(
   options: ProvisionClientOptions,
   dependencies: ProvisionClientDependencies
