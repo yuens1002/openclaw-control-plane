@@ -5,9 +5,11 @@ import { fileURLToPath } from "node:url";
 
 import {
   provisionClientInstance,
+  rotateGatewayToken,
   updateClientOpenClawRef,
   updateClientTemplateRef,
   type ProvisionClientOptions,
+  type RotateGatewayTokenOptions,
   type UpdateClientOpenClawRefOptions,
   type UpdateClientTemplateRefOptions
 } from "./provision-client.js";
@@ -67,8 +69,21 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (subcommand === "rotate-gateway-token") {
+    const options = parseRotateGatewayTokenArgs(rest);
+    const result = await rotateGatewayToken(options, { runner });
+    console.log("");
+    console.log(
+      `Service '${result.serviceName}': OPENCLAW_GATEWAY_TOKEN rotated, a new deployment reached SUCCESS, and ` +
+        `the instance is answering authenticated requests. The new value was not printed -- nothing outside ` +
+        `the running process needs it.`
+    );
+    return;
+  }
+
   throw new Error(
-    `Unknown subcommand '${subcommand ?? ""}'. Expected 'provision', 'update-ref', or 'update-openclaw-ref'.`
+    `Unknown subcommand '${subcommand ?? ""}'. Expected 'provision', 'update-ref', 'update-openclaw-ref', or ` +
+      `'rotate-gateway-token'.`
   );
 }
 
@@ -244,6 +259,40 @@ export function parseUpdateOpenClawRefArgs(args: string[]): UpdateClientOpenClaw
   }
 
   return options as UpdateClientOpenClawRefOptions;
+}
+
+export function parseRotateGatewayTokenArgs(args: string[]): RotateGatewayTokenOptions {
+  const options: Partial<RotateGatewayTokenOptions> = {};
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    const value = args[index + 1];
+    switch (arg) {
+      case "--service":
+        options.service = requireValue(arg, value);
+        index += 1;
+        break;
+      case "--setup-username":
+        options.setupUsername = requireValue(arg, value);
+        index += 1;
+        break;
+      case "--poll-seconds":
+        options.pollSeconds = parseIntegerFlag(arg, value);
+        index += 1;
+        break;
+      case "--timeout-minutes":
+        options.timeoutMinutes = parseIntegerFlag(arg, value);
+        index += 1;
+        break;
+      default:
+        throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+
+  if (!options.service) {
+    throw new Error("Missing required --service");
+  }
+
+  return options as RotateGatewayTokenOptions;
 }
 
 function requireValue(flag: string, value: string | undefined): string {
