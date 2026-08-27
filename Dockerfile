@@ -155,6 +155,16 @@ RUN ! grep -qF '!req?.headers?.authorization' src/server.js
 # OPENCLAW_TEMPLATE_REF bump doesn't reintroduce the exposure. Fix: wait for
 # the process's actual `exit` event, escalating to SIGKILL after a timeout,
 # before considering the gateway slot free.
+#
+# The same inline kill/sleep(750)/null sequence also lives in the
+# POST /setup/import handler ("Stop gateway before restore so we don't
+# overwrite live files") -- the one place a stale gateway process is actively
+# dangerous, because tar.x then writes over the files it may still hold open.
+# Both sites now call one exit-confirmed helper, stopGatewayAndWait(), that
+# the script defines once above restartGateway(); the pinned template's four
+# `await sleep(750);` sites drop to two (the gateway.stop and reset paths,
+# which are out of scope). Tracked in
+# https://github.com/yuens1002/openclaw-control-plane/issues/73.
 # A real script rather than an inline `sed` one-liner: this is a multi-line
 # structural replacement (the old kill/wait/null block spans several lines),
 # and a multi-line `sed` pattern is fragile to get exactly right -- it's
@@ -164,13 +174,57 @@ RUN ! grep -qF '!req?.headers?.authorization' src/server.js
 # block match via `String.prototype.replace` in scripts/patch-wrapper-restart-gateway.mjs
 # is not ambiguous the way a hand-escaped multi-line sed pattern is, and the
 # script fails loudly (non-zero exit) rather than silently no-op-ing if the
-# pinned wrapper's source ever changes shape.
+# pinned wrapper's source ever changes shape -- each of its three target
+# blocks carries its own exactly-one-occurrence guard.
 COPY scripts/patch-wrapper-restart-gateway.mjs ./patch-wrapper-restart-gateway.mjs
 RUN node patch-wrapper-restart-gateway.mjs src/server.js
+RUN grep -qF 'stopGatewayAndWait' src/server.js
+RUN test "$(grep -cF 'async function stopGatewayAndWait()' src/server.js)" -eq 1
+RUN test "$(grep -cF 'await stopGatewayAndWait();' src/server.js)" -eq 2
 RUN grep -qF '// Wait for the process to actually exit' src/server.js
 RUN grep -qF 'proc.once("exit"' src/server.js
-RUN test "$(grep -cF 'await sleep(750);' src/server.js)" -eq 3
+RUN test "$(grep -cF 'await sleep(750);' src/server.js)" -eq 2
 RUN node --check src/server.js
+
+# The wrapper's GET /setup/export tars all of STATE_DIR plus WORKSPACE_DIR with
+# no filter. Measured on a live instance during planning (read-only `du -sh`):
+# STATE_DIR is 541 MB -- bin/ 415 MB, agents/main/sessions/ 64 MB, lib/ 32 MB,
+# agents/main/agent/{plugins,codex-home} ~22 MB -- while the state that a
+# backup actually needs (openclaw.json, exec-approvals.json, credentials/,
+# devices/, cron/, identity/, memory/, state/openclaw.sqlite ~7 MB,
+# agents/*/agent/{*.sqlite,models.json,auth-profiles*}) is ~7.2 MB. A daily
+# backup pulling 541 MB to save 7 MB is the defect. state/openclaw.sqlite also
+# runs in WAL mode with a live -wal/-shm pair, so even a filtered plain file
+# copy is not a consistent database; the runtime image (node:22-bookworm) has
+# no sqlite3 CLI, but node:sqlite (unflagged since Node 22.13) provides
+# `VACUUM INTO`, which yields a consistent single-file snapshot from a
+# read-only connection.
+# Fix: `GET /setup/export?scope=state` on the same route (so requireSetupAuth
+# is inherited and there is one export entry point) builds the state subset
+# in a temp dir under os.tmpdir() -- copying included regular files, VACUUM
+# INTO-snapshotting every *.sqlite, skipping -wal/-shm/*.bak*/symlinks, and
+# refusing past a byte cap (200 MiB default; OPENCLAW_STATE_EXPORT_MAX_BYTES
+# overrides) before any archive bytes stream -- then streams it as
+# .openclaw/... relative to /data, the exact shape the wrapper's own
+# POST /setup/import extracts. Any other non-empty scope is a 400; no scope
+# is the unmodified full export (the delegate is a prefix of the handler, not
+# a rewrite). The logic is scripts/wrapper-state-export.mjs, copied into
+# src/ so the runtime stage's `COPY --from=template-source /template/src`
+# carries it; scripts/patch-wrapper-scoped-export.mjs only injects the import
+# line and the delegate, each with an exactly-one-occurrence anchor guard plus
+# an already-applied guard. Build-time rather than upstream for the same
+# reason as every patch above: it survives every OPENCLAW_TEMPLATE_REF bump,
+# and the upstream request is filed separately (see
+# docs/plans/wrapper-scoped-export-and-import-restart/upstream-issues.md).
+# https://github.com/yuens1002/openclaw-control-plane/issues/73
+COPY scripts/wrapper-state-export.mjs src/wrapper-state-export.mjs
+COPY scripts/patch-wrapper-scoped-export.mjs ./patch-wrapper-scoped-export.mjs
+RUN node patch-wrapper-scoped-export.mjs src/server.js
+RUN grep -qF 'scope === "state"' src/server.js
+RUN grep -qF 'import { buildStateExportTree } from "./wrapper-state-export.mjs";' src/server.js
+RUN test "$(grep -cF 'scope === "state"' src/server.js)" -eq 1
+RUN node --check src/server.js
+RUN node --check src/wrapper-state-export.mjs
 
 FROM node:22-bookworm AS openclaw-build
 

@@ -7,6 +7,24 @@ and uses semantic versioning.
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-08-27
+
+- 2026-08-27 - feat(wrapper): add scoped state export and share the exit-confirmed gateway stop (#73)
+  - `GET /setup/export?scope=state` on the pinned Railway wrapper: state subset
+    only (measured ~7 MB vs 541 MB unscoped), consistent SQLite snapshots via
+    `node:sqlite` `VACUUM INTO`, closed include list + explicit excludes, hard
+    byte cap (`OPENCLAW_STATE_EXPORT_MAX_BYTES`), archive importable by
+    `/setup/import`. Logic lives in `scripts/wrapper-state-export.mjs`
+    (copied into the image); `scripts/patch-wrapper-scoped-export.mjs`
+    injects only the import and the route delegate.
+  - `/setup/import` no longer stops the gateway with an unconfirmed
+    `kill → sleep(750)`; `scripts/patch-wrapper-restart-gateway.mjs` now
+    defines one `stopGatewayAndWait()` used by both `restartGateway()` and
+    the import handler, each site count-guarded at build time.
+  - `tests/openclaw-railway-wrapper-patches.test.ts` (21 tests), README
+    subsection, Dockerfile assertions; upstream issue drafts in
+    `docs/plans/wrapper-scoped-export-and-import-restart/upstream-issues.md`.
+
 ## [0.6.2] - 2026-08-26
 
 - Preserve validated MCP tool invocation IDs in effect-free authorization
