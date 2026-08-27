@@ -80,7 +80,10 @@ import { buildStateExportTree } from "./wrapper-state-export.mjs";`,
         res.end(String(err));
       });
       // finally-equivalent for a streamed response: the temp tree is removed
-      // once the response closes, whether it completed, errored, or aborted.
+      // as soon as the response finishes (a keep-alive socket may not emit
+      // "close" until much later) and again on "close" for aborted/errored
+      // requests; removeTargetRoot is idempotent (rmSync with force).
+      res.once("finish", removeTargetRoot);
       res.once("close", removeTargetRoot);
       stateStream.pipe(res);
       return;
