@@ -140,6 +140,46 @@ runtime by pulling the pinned OpenClaw Railway wrapper from
 dashboard can show this public repo as the source while `/setup` and `/openclaw`
 still come from OpenClaw.
 
+### Scoped state export (`GET /setup/export?scope=state`)
+
+The pinned wrapper's `GET /setup/export` archives all of the state directory
+plus the workspace directory with no filter. This repo's `Dockerfile` adds a
+build-time patch (`scripts/patch-wrapper-scoped-export.mjs`, logic in
+`scripts/wrapper-state-export.mjs`) so the same route, with `?scope=state`,
+returns only the state an instance needs restored. Auth is unchanged: the
+route still sits behind the wrapper's setup password.
+
+- **Contains** (relative to the state directory): `openclaw.json`,
+  `exec-approvals.json`, `credentials/`, `devices/`, `cron/`, `identity/`,
+  `memory/`, `state/`, and under `agents/<id>/agent/` only `*.sqlite`,
+  `models.json`, and `auth-profiles*`. Every `*.sqlite` file is a consistent
+  `VACUUM INTO` snapshot taken over a read-only `node:sqlite` connection, not
+  a hot copy of a WAL-mode database.
+- **Excludes**: `bin/`, `lib/`, `media/`, `logs/`, `backups/`, `sessions/`,
+  `plugins/`, `codex-home/`, the workspace, `*-wal`/`*-shm` siblings,
+  `*.bak*`/`*.migrated` leftovers, and any symlink or non-regular file.
+  Measured on one instance during planning (read-only `du -sh`): the full
+  state directory was 541 MB (`bin/` 415 MB, `agents/main/sessions/` 64 MB,
+  `lib/` 32 MB) while the state subset was about 7 MB.
+- **Archive layout**: gzip tar with paths as `.openclaw/...` relative to
+  `/data`, the same shape the unscoped export uses, so the archive is a valid
+  input for the wrapper's own `POST /setup/import` (which extracts under
+  `/data` and never deletes existing files).
+- **Size cap**: the subset is built in a temp directory and the request fails
+  with `500` before any archive bytes stream if it exceeds
+  `OPENCLAW_STATE_EXPORT_MAX_BYTES` (default 200 MiB; positive integer bytes).
+  A missing `node:sqlite` also fails the request rather than degrading to an
+  inconsistent copy.
+- **Other scopes**: any other non-empty `scope` value returns `400`; no
+  `scope` is the unmodified full export.
+
+The same Dockerfile stage also replaces the wrapper's inline
+`kill -> sleep(750)` gateway stop in `POST /setup/import` and
+`restartGateway()` with one exit-confirmed helper
+(`scripts/patch-wrapper-restart-gateway.mjs`). Both changes are proposed
+upstream in
+[docs/plans/wrapper-scoped-export-and-import-restart/upstream-issues.md](docs/plans/wrapper-scoped-export-and-import-restart/upstream-issues.md).
+
 Run the source/static proof check locally with:
 
 ```bash
