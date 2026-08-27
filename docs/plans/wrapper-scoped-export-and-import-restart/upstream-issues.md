@@ -1,11 +1,9 @@
 # Upstream Issue Drafts: `vignesh07/clawdbot-railway-template`
 
-**Status: NOT FILED.** These two issue bodies are drafts. The operator files
-them by hand against
-<https://github.com/vignesh07/clawdbot-railway-template/issues> after
-reviewing them (third-party public repo; nothing in this repo files them
-autonomously). After filing, append the issue URL to the `Filed:` line of the
-matching draft so the Dockerfile comment trail resolves.
+**Status: FILED** — #234 (scoped export) and #235 (import race) — filed
+2026-08-27 on the operator's explicit go-ahead against the reviewed,
+hygiene-clean bodies below (third-party public repo; not filed
+autonomously).
 
 Both drafts describe the pinned commit
 `b9e2467189d02dfe51a80173c40bad650a58eaf2` (`deploy/openclaw-railway/template-lock.json`).
@@ -18,7 +16,7 @@ not universal. No hosted identifiers belong in either body.
 
 ## Issue 1 — Add a scoped `/setup/export` variant (state subset, consistent SQLite snapshot, size cap)
 
-Filed:
+Filed: <https://github.com/vignesh07/clawdbot-railway-template/issues/234>
 
 ### Title
 
@@ -99,7 +97,7 @@ Happy to turn that into a PR here if the query-parameter shape is acceptable.
 
 ## Issue 2 — `/setup/import` stops the gateway with the same unconfirmed kill→sleep(750) race as `restartGateway()` (see #233)
 
-Filed:
+Filed: <https://github.com/vignesh07/clawdbot-railway-template/issues/235>
 
 ### Title
 
