@@ -7,6 +7,10 @@ and uses semantic versioning.
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-08-27
+
+- 2026-08-27 - fix(installer): refuse to write allowedOrigins before a baseline config exists (#77)
+
 ## [0.6.3] - 2026-08-27
 
 - 2026-08-27 - feat(wrapper): add scoped state export and share the exit-confirmed gateway stop (#73)

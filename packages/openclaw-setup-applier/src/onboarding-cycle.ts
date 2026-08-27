@@ -8,6 +8,10 @@
 // marker below.
 
 import {
+  patchAllowedOrigins,
+  type PatchAllowedOriginsStatus
+} from "@openclaw-control-plane/openclaw-railway-installer/patch-allowed-origins";
+import {
   provisionClientInstance,
   type ProvisionClientDependencies,
   type ProvisionClientOptions,
@@ -44,6 +48,17 @@ export interface BootstrapOnboardingCycleResult {
   provision: ProvisionClientResult;
   dryRun: DryRunResult;
   apply: ApplyResult;
+  /** The retry `patchAllowedOrigins` call's own `patched` result, run after `apply` has established a baseline config (issue #77). */
+  patchedAllowedOrigins: boolean;
+  /**
+   * Disambiguates `patchedAllowedOrigins:false` above -- see
+   * `PatchAllowedOriginsStatus`. Expected to read `"patched"` or
+   * `"already-present"` here, since `apply` just established a baseline
+   * config; a `"refused-missing-baseline"` reading at this point means
+   * `apply` did not actually establish one. `provision.allowedOriginsStatus`
+   * carries the *first* attempt's status, before `apply` ran.
+   */
+  allowedOriginsStatus: PatchAllowedOriginsStatus;
 }
 
 // LIVE-INSTANCE TIER: deploy
@@ -85,7 +100,20 @@ export async function bootstrapOnboardingCycle(
     }
   );
 
-  return { provision, dryRun, apply };
+  // Issue #77: on a genuinely fresh instance, `provisionClientInstance`'s
+  // own `patchAllowedOrigins` attempt ran before this instance had any
+  // baseline config and was refused (see patch-allowed-origins.ts). `apply`
+  // above just established that baseline via `/setup/api/run`, so retry
+  // here. Idempotent either way -- a no-op if the origin already landed on
+  // the first attempt.
+  const { patched: patchedAllowedOrigins, status: allowedOriginsStatus } = await patchAllowedOrigins(
+    baseUrl,
+    { username: provision.setupUsername, password: provision.setupPassword },
+    provision.domain,
+    { getConfigRaw: dependencies.getConfigRaw, postConfigRaw: dependencies.postConfigRaw }
+  );
+
+  return { provision, dryRun, apply, patchedAllowedOrigins, allowedOriginsStatus };
 }
 
 export interface RegressionCheckOptions {

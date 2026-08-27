@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { patchAllowedOrigins } from "@openclaw-control-plane/openclaw-railway-installer/patch-allowed-origins";
+import {
+  patchAllowedOrigins,
+  describePatchAllowedOriginsStatus
+} from "@openclaw-control-plane/openclaw-railway-installer/patch-allowed-origins";
 import { createFakeConfigStore } from "./fixtures/fake-config-store.js";
 
 const AUTH = { username: "openclaw-admin", password: "setup-secret" };
@@ -13,7 +16,7 @@ describe("patchAllowedOrigins", () => {
     const store = createFakeConfigStore({
       initialContent: JSON.stringify({
         agents: { defaults: { model: "anthropic/claude" } },
-        gateway: { controlUi: { allowedOrigins: ["https://existing.example.com"] } }
+        gateway: { mode: "local", controlUi: { allowedOrigins: ["https://existing.example.com"] } }
       })
     });
 
@@ -35,23 +38,51 @@ describe("patchAllowedOrigins", () => {
     const result = await patchAllowedOrigins(BASE_URL, AUTH, DOMAIN, store);
 
     expect(result.patched).toBe(false);
+    expect(result.status).toBe("already-present");
     expect(store.posted).toHaveLength(0);
     // The skipped write also skips the verification read: one GET total.
     expect(store.getCalls).toBe(1);
   });
 
-  it("handles an empty/unconfigured config file by creating the nested path", async () => {
-    const store = createFakeConfigStore({ initialContent: "" });
+  it("writes successfully when the config already has a baseline gateway.mode (creates the nested controlUi path)", async () => {
+    const store = createFakeConfigStore({ initialContent: JSON.stringify({ gateway: { mode: "local" } }) });
 
     const result = await patchAllowedOrigins(BASE_URL, AUTH, DOMAIN, store);
 
     expect(result.patched).toBe(true);
+    expect(result.status).toBe("patched");
     const written = JSON.parse(store.posted[0] ?? "{}");
     expect(written.gateway.controlUi.allowedOrigins).toEqual([ORIGIN]);
   });
 
+  it("skips the write and reports status:refused-missing-baseline against a genuinely fresh instance with no gateway.mode (issue #77)", async () => {
+    // An empty/unconfigured config file is exactly what the wrapper serves
+    // for an instance that has never been through /setup/api/run -- no
+    // `gateway` section at all, so no `gateway.mode` either.
+    const store = createFakeConfigStore({ initialContent: "" });
+
+    const result = await patchAllowedOrigins(BASE_URL, AUTH, DOMAIN, store);
+
+    expect(result.patched).toBe(false);
+    expect(result.status).toBe("refused-missing-baseline");
+    // Never POSTs an incomplete document -- the wrapper treats a config with
+    // allowedOrigins but no gateway.mode as suspicious/clobbered and refuses
+    // to start the gateway against it.
+    expect(store.posted).toHaveLength(0);
+  });
+
+  it("skips the write when gateway.mode is present but not a non-empty string", async () => {
+    const store = createFakeConfigStore({ initialContent: JSON.stringify({ gateway: { mode: "" } }) });
+
+    const result = await patchAllowedOrigins(BASE_URL, AUTH, DOMAIN, store);
+
+    expect(result.patched).toBe(false);
+    expect(result.status).toBe("refused-missing-baseline");
+    expect(store.posted).toHaveLength(0);
+  });
+
   it("re-reads the config after writing to confirm the origin actually landed", async () => {
-    const store = createFakeConfigStore();
+    const store = createFakeConfigStore({ initialContent: JSON.stringify({ gateway: { mode: "local" } }) });
 
     await patchAllowedOrigins(BASE_URL, AUTH, DOMAIN, store);
 
@@ -63,7 +94,10 @@ describe("patchAllowedOrigins", () => {
   it("throws when the write reports success but the origin is absent afterward", async () => {
     // The endpoint answers ok:true and the value never lands -- exactly the
     // silent-failure class an ok:true check alone cannot detect.
-    const store = createFakeConfigStore({ persistWrites: false });
+    const store = createFakeConfigStore({
+      initialContent: JSON.stringify({ gateway: { mode: "local" } }),
+      persistWrites: false
+    });
 
     await expect(patchAllowedOrigins(BASE_URL, AUTH, DOMAIN, store)).rejects.toThrow(
       /Post-write verification failed/
@@ -79,7 +113,7 @@ describe("patchAllowedOrigins", () => {
         getConfigRaw: async () => {
           getCalls += 1;
           // First read succeeds; the verification read fails.
-          return getCalls === 1 ? { ok: true, content: "{}" } : { ok: false, content: "" };
+          return getCalls === 1 ? { ok: true, content: JSON.stringify({ gateway: { mode: "local" } }) } : { ok: false, content: "" };
         },
         postConfigRaw: async () => ({ ok: true })
       })
@@ -93,7 +127,7 @@ describe("patchAllowedOrigins", () => {
         getConfigRaw: async () => {
           getCalls += 1;
           // Valid on the first read; corrupt on the verification read.
-          return getCalls === 1 ? { ok: true, content: "{}" } : { ok: true, content: "{ not json" };
+          return getCalls === 1 ? { ok: true, content: JSON.stringify({ gateway: { mode: "local" } }) } : { ok: true, content: "{ not json" };
         },
         postConfigRaw: async () => ({ ok: true })
       })
@@ -112,9 +146,24 @@ describe("patchAllowedOrigins", () => {
   it("throws when the wrapper responds ok:false on POST, and does not report patched: true", async () => {
     await expect(
       patchAllowedOrigins(BASE_URL, AUTH, DOMAIN, {
-        getConfigRaw: async () => ({ ok: true, content: "{}" }),
+        getConfigRaw: async () => ({ ok: true, content: JSON.stringify({ gateway: { mode: "local" } }) }),
         postConfigRaw: async () => ({ ok: false })
       })
     ).rejects.toThrow("ok:false");
+  });
+});
+
+describe("describePatchAllowedOriginsStatus", () => {
+  it("renders a distinct, human-readable message per status (so 'already-present' and 'refused-missing-baseline' don't collapse to the same false-y-looking text)", () => {
+    expect(describePatchAllowedOriginsStatus("patched")).toBe("yes");
+    expect(describePatchAllowedOriginsStatus("already-present")).toMatch(/already present/);
+    expect(describePatchAllowedOriginsStatus("refused-missing-baseline")).toMatch(/no baseline/);
+  });
+
+  it("throws instead of returning undefined for an unrecognized status", () => {
+    // Simulates a status value that TS's exhaustiveness check would catch at
+    // compile time but a runtime caller (e.g. a JS consumer) could still pass.
+    const bogusStatus = "some-future-status" as unknown as Parameters<typeof describePatchAllowedOriginsStatus>[0];
+    expect(() => describePatchAllowedOriginsStatus(bogusStatus)).toThrow(/unhandled status/);
   });
 });
