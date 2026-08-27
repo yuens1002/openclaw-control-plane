@@ -29,6 +29,9 @@ export const pipelines = pgTable("pipelines", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });
 
+// `workers` and `workerRuns` below are M1-era tables, migrated but not read
+// or written by current code -- action attempts live in the generic
+// `runtime_records`/`record_edges` tables instead (see runtime-repository.ts).
 export const workers = pgTable("workers", {
   id: text("id").primaryKey(),
   domain: text("domain")
