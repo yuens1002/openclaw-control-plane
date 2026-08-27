@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -119,7 +119,7 @@ function globToRegExp(pattern: string): RegExp {
 /** Writes `content` at `stateDir/<relativePath>` (POSIX separators), creating parents. */
 function writeFixtureFile(stateDir: string, relativePath: string, content: string | Buffer): void {
   const target = join(stateDir, ...relativePath.split("/"));
-  mkdirSync(join(target, ".."), { recursive: true });
+  mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, content);
 }
 
