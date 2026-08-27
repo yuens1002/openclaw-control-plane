@@ -1,7 +1,10 @@
 import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { approveOwnDevicePairing } from "@openclaw-control-plane/openclaw-railway-installer/approve-own-device";
+import {
+  approveOwnDevicePairing,
+  describeDeviceApprovalStatus
+} from "@openclaw-control-plane/openclaw-railway-installer/approve-own-device";
 
 const AUTH = { username: "openclaw-admin", password: "setup-secret" };
 const BASE_URL = "https://example-openclaw.example.com";
@@ -204,5 +207,26 @@ describe("approveOwnDevicePairing", () => {
         "GET /setup/api/devices/pending returned 200 with a non-JSON body"
       );
     });
+  });
+});
+
+describe("describeDeviceApprovalStatus", () => {
+  it("renders the requestId for an approved pairing", () => {
+    expect(describeDeviceApprovalStatus("approved", "req_1")).toBe("req_1");
+  });
+
+  it("renders no-pending and not-ready as fixed, human-readable strings", () => {
+    expect(describeDeviceApprovalStatus("no-pending")).toBe("none pending");
+    expect(describeDeviceApprovalStatus("not-ready")).toMatch(/did not report ready/);
+  });
+
+  it("throws rather than silently rendering an ambiguous string when status is approved with no requestId", () => {
+    // ApproveOwnDeviceResult's own type guarantees this combination can't be
+    // constructed from approveOwnDevicePairing's return value -- reaching
+    // this branch means the two arguments were assembled inconsistently by
+    // the caller, which must surface loudly, not render "approved".
+    expect(() => describeDeviceApprovalStatus("approved")).toThrow(
+      "status is 'approved' but no requestId was given"
+    );
   });
 });

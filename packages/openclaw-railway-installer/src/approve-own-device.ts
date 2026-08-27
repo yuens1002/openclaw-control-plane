@@ -50,7 +50,18 @@ export type ApproveOwnDeviceResult =
 export function describeDeviceApprovalStatus(status: ApproveOwnDeviceStatus, requestId?: string): string {
   switch (status) {
     case "approved":
-      return requestId ?? "approved";
+      // ApproveOwnDeviceResult guarantees a requestId whenever status is
+      // "approved" (a discriminated union), so reaching this branch without
+      // one means the two arguments were assembled inconsistently by the
+      // caller -- surface that loudly rather than silently rendering the
+      // ambiguous, unhelpful literal string "approved".
+      if (!requestId) {
+        throw new Error(
+          "describeDeviceApprovalStatus: status is 'approved' but no requestId was given -- the caller " +
+            "assembled these two arguments inconsistently."
+        );
+      }
+      return requestId;
     case "no-pending":
       return "none pending";
     case "not-ready":
