@@ -4,13 +4,17 @@ Plan: `docs/plans/denied-tool-invocation-audit/plan.md`
 
 Corrected implementation SHA: `03817e8878930864dd48d2fb059c4ea9973aa996`
 
-Status: local implementation verification passed; independent QC, CI, and PR
-review pending
+Independently reviewed evidence SHA:
+`231b149ff4aa252128d3ccaea2d8ac3e5bf5d6e6`
+
+Status: local implementation verification and independent exact-head Copilot
+review passed; final publication-head CI and operating-owner merge gate pending
 
 ## Verdict
 
-PASS for local implementation verification. Publication and merge remain
-blocked on independent exact-head review and CI.
+PASS for implementation and independent review. Copilot recommended approval on
+the exact evidence head with no new findings. Publication and merge remain
+blocked until CI and the operating-owner gate clear on the final PR head.
 
 ## Executed Evidence
 
@@ -24,6 +28,7 @@ blocked on independent exact-head review and CI.
 | MCP image | Decision Runtime MCP Docker image built; production prune found zero vulnerabilities |
 | Public-language scan | No deployment identity, live endpoint, or credential material found; the repository issue URL and generic `principal://` contract examples were the only expected matches |
 | Diff check | `git diff --check` passed before implementation commit |
+| Independent review | Copilot recommended approval on exact head `231b149` after verifying the empty-value correction; no current-head finding was added |
 
 ## Findings
 
@@ -46,6 +51,6 @@ and malformed values. The 434-test full suite and runtime image build pass.
 
 ## Residual Risks
 
-- CI and independent exact-head review have not run yet.
+- Final publication-head CI and the operating-owner merge gate remain pending.
 - The change correlates denied command calls; it does not add successful read
   authorization auditing.

@@ -3,7 +3,8 @@
 Plan: `docs/plans/denied-tool-invocation-audit/plan.md`
 
 Status: local verification complete on `03817e8878930864dd48d2fb059c4ea9973aa996`;
-independent QC and PR review pending
+Copilot recommended approval on exact evidence head `231b149`; final
+publication-head CI and operating-owner merge gate pending
 
 | AC | Plan ref | Role | What | Pass condition | Agent | QC | Reviewer |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -15,4 +16,4 @@ independent QC and PR review pending
 | AC-COMPAT-001 | D3 | test-engineer | Headerless compatibility | A denied command without the header retains `request_origin: http` and omits `tool_invocation_id`. | PASS - headerless PostgreSQL and API cases passed. | pending | pending |
 | AC-MCP-001 | D3 | test-engineer | MCP correlation | The MCP integration test proves its generated invocation ID reaches the denied audit path. | PASS - adapter-generated ID traversed HTTP into the PostgreSQL denial audit; stdio MCP generation remained green. | pending | pending |
 | AC-DOCS-001 | D4 | project-manager | Portable documentation | Public docs and changelog describe generic denied-tool provenance without deployment-specific identities, endpoints, or secrets. | PASS - architecture, ADR, changelog, and scoped public-language scan passed. | pending | pending |
-| AC-REVIEW-001 | D5 | test-engineer | Exact-head verification | Focused/full tests, PostgreSQL, typecheck, build, audit, Docker, diff, CI, and external review pass on the merge head. | PARTIAL - corrected local gates pass; CI and Copilot re-review pending. | pending | pending |
+| AC-REVIEW-001 | D5 | test-engineer | Exact-head verification | Focused/full tests, PostgreSQL, typecheck, build, audit, Docker, diff, CI, and external review pass on the merge head. | PARTIAL - corrected local gates pass and Copilot recommended approval on exact evidence head `231b149`; final publication-head CI and operating-owner gate remain. | CONFIRMED - Copilot found no new issue on exact evidence head `231b149`. | pending |
