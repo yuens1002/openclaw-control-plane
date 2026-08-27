@@ -131,6 +131,32 @@ describe("rotateGatewayToken", () => {
     expect(String(error)).not.toMatch(/not confirmed healthy/);
   });
 
+  it("treats a failed verification read as a rotation problem, not an unhealthy instance", async () => {
+    // Readiness already passed; only the confirming read failed. Reporting
+    // that as a health problem would misdirect recovery.
+    const runner = runnerWith({ OPENCLAW_GATEWAY_TOKEN: OLD_TOKEN, SETUP_PASSWORD: "setup-secret" });
+    const inner = runner.run.bind(runner);
+    let listCalls = 0;
+    runner.run = async (args: string[], stdin?: string) => {
+      if (args[0] === "variable" && args[1] === "list") {
+        listCalls += 1;
+        // Three variable-list reads happen: the current token, SETUP_PASSWORD
+        // for readiness, then the confirming readback. Fail only the last.
+        if (listCalls >= 3) {
+          throw new Error("transient variable-list failure");
+        }
+      }
+      return inner(args, stdin);
+    };
+
+    const error = await rotateGatewayToken({ service: SERVICE, pollSeconds: 0 }, { runner, ...READY }).catch(
+      (caught: unknown) => caught
+    );
+
+    expect(String(error)).toMatch(/reading the variable back to confirm it failed/);
+    expect(String(error)).not.toMatch(/not confirmed healthy/);
+  });
+
   it("still reports the change as live when the redeploy itself fails", async () => {
     const runner = runnerWith({ OPENCLAW_GATEWAY_TOKEN: OLD_TOKEN, SETUP_PASSWORD: "setup-secret" });
     const inner = runner.run.bind(runner);
