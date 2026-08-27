@@ -36,10 +36,15 @@ export interface ApproveOwnDeviceDependencies {
 
 export type ApproveOwnDeviceStatus = "approved" | "no-pending" | "not-ready";
 
-export interface ApproveOwnDeviceResult {
-  requestId?: string;
-  status: ApproveOwnDeviceStatus;
-}
+// A discriminated union rather than a bare `{ requestId?: string; status }`:
+// the latter lets a caller (or a future edit to this function) construct
+// `{ status: "approved" }` with no requestId, or `{ status: "no-pending",
+// requestId: "req_1" }` -- both nonsensical. Read access to `.requestId`
+// across the union still works uniformly (TypeScript infers `string |
+// undefined`), so no call site needs to narrow on `.status` first.
+export type ApproveOwnDeviceResult =
+  | { status: "approved"; requestId: string }
+  | { status: "no-pending" | "not-ready"; requestId?: undefined };
 
 /** One-line, human-readable rendering of an approval result for handoff docs and CLI output. */
 export function describeDeviceApprovalStatus(status: ApproveOwnDeviceStatus, requestId?: string): string {
@@ -86,7 +91,14 @@ export async function approveOwnDevicePairing(
 
   const requestId = requestIds[0];
   if (!requestId) {
-    return { status: "no-pending" };
+    // requestIds.length === 1 by this point, so an empty/undefined single
+    // entry is a malformed response, not "nothing pending" -- silently
+    // treating it as no-pending would skip approval and hide a genuine
+    // protocol/data problem in the wrapper's own response shape.
+    throw new Error(
+      `GET /setup/api/devices/pending returned exactly one pending request, but its id was empty or missing ` +
+        `(requestIds: ${JSON.stringify(requestIds)}). This is a malformed response, not "nothing pending".`
+    );
   }
   const approved = await approveDevice(baseUrl, auth, requestId);
   if (!approved.ok) {

@@ -112,6 +112,26 @@ describe("approveOwnDevicePairing", () => {
     expect(approveCalls).toBe(0);
   });
 
+  it("throws on a single pending entry with an empty id -- a malformed response, not nothing-pending", async () => {
+    // requestIds.length === 1 here, so an empty string is not "no requests
+    // pending" -- it's the wrapper returning a broken entry. Silently
+    // treating it as no-pending would skip approval and hide the real
+    // protocol/data problem.
+    let approveCalls = 0;
+
+    await expect(
+      approveOwnDevicePairing(BASE_URL, AUTH, {
+        getPendingDevices: async () => ({ ok: true, requestIds: [""] }),
+        approveDevice: async () => {
+          approveCalls += 1;
+          return { ok: true };
+        }
+      })
+    ).rejects.toThrow("malformed response, not \"nothing pending\"");
+
+    expect(approveCalls).toBe(0);
+  });
+
   it("throws when the wrapper responds ok:false on approve, and does not return a requestId", async () => {
     await expect(
       approveOwnDevicePairing(BASE_URL, AUTH, {
