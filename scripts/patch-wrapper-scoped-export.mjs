@@ -40,6 +40,10 @@ import { buildStateExportTree } from "./wrapper-state-export.mjs";`,
   {
     const scope = _req.query.scope;
     if (scope === "state") {
+      // Same guarantee the unscoped handler makes right after this delegate:
+      // a never-configured instance has no state dir yet, and an empty export
+      // is the correct answer for it, not a 500.
+      fs.mkdirSync(STATE_DIR, { recursive: true });
       const targetRoot = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-state-export-"));
       const removeTargetRoot = () => {
         try {
