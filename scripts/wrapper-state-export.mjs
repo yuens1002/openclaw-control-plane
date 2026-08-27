@@ -87,6 +87,15 @@ const AGENTS_ROOT = "agents";
 const AGENT_SUBDIR = "agent";
 const SQLITE_SUFFIX = ".sqlite";
 
+// Written as zero-byte placeholders alongside every VACUUM INTO snapshot so
+// the wrapper's own /setup/import (which extracts without clearing
+// pre-existing sidecars first) truncates a target's stale -wal/-shm rather
+// than leaving it stale beside a freshly-restored main file. See
+// https://github.com/yuens1002/openclaw-control-plane/issues/79 and the
+// upstream defect it works around,
+// https://github.com/vignesh07/clawdbot-railway-template/issues/236.
+const SQLITE_SIDECAR_SUFFIXES = Object.freeze(["-wal", "-shm"]);
+
 function globToRegExp(pattern) {
   const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
   return new RegExp(`^${escaped}$`);
@@ -258,11 +267,20 @@ export async function buildStateExportTree({ stateDir, targetRoot, maxBytes } = 
         const snapshotSize = fs.lstatSync(targetPath).size;
         bytes -= sourceSize;
         account(snapshotSize, archivePath);
-      } else {
-        account(sourceSize, archivePath);
-        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-        fs.copyFileSync(sourcePath, targetPath, fs.constants.COPYFILE_EXCL);
+        files.push(archivePath);
+        // Zero-byte -wal/-shm placeholders: cost nothing real, but are still
+        // accounted so every archive entry passes through the same cap check.
+        for (const suffix of SQLITE_SIDECAR_SUFFIXES) {
+          const sidecarArchivePath = `${archivePath}${suffix}`;
+          account(0, sidecarArchivePath);
+          fs.writeFileSync(`${targetPath}${suffix}`, Buffer.alloc(0));
+          files.push(sidecarArchivePath);
+        }
+        continue;
       }
+      account(sourceSize, archivePath);
+      fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+      fs.copyFileSync(sourcePath, targetPath, fs.constants.COPYFILE_EXCL);
       files.push(archivePath);
     }
   };
