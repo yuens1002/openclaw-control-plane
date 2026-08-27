@@ -807,7 +807,21 @@ export async function rotateGatewayToken(
     // idempotent-write rule requires. A healthy instance is not proof the
     // rotation actually took: the write could have been accepted and not
     // applied, or something else could have changed it in the meantime.
-    const applied = await readRailwayVariable("OPENCLAW_GATEWAY_TOKEN", options.service, dependencies);
+    let applied: string | undefined;
+    try {
+      applied = await readRailwayVariable("OPENCLAW_GATEWAY_TOKEN", options.service, dependencies);
+    } catch (cause) {
+      // Readiness already passed, so this is not an unhealthy instance -- it
+      // is a failed *verification read*. Reporting it as a health problem
+      // would send the operator to the wrong recovery (updateClientRefVariable
+      // draws the same distinction for the ref-update paths).
+      throw new RefVerificationError(
+        `OPENCLAW_GATEWAY_TOKEN on '${options.service}' was rotated and the instance is answering authenticated ` +
+          `requests, but reading the variable back to confirm it failed: ` +
+          `${cause instanceof Error ? cause.message : String(cause)}. The instance is healthy; the rotation was ` +
+          `not confirmed. Re-read the live value to check.`
+      );
+    }
     if (applied !== next) {
       throw new RefVerificationError(
         `OPENCLAW_GATEWAY_TOKEN on '${options.service}' does not read back as the value just written, even ` +
