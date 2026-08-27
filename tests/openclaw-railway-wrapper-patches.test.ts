@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import * as tar from "tar";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // Issue #73 (wrapper-scoped-export-and-import-restart), deliverable D4.
@@ -496,10 +497,23 @@ describe.skipIf(!sqliteAvailable)("wrapper-state-export: buildStateExportTree on
       expect(archivePath.startsWith(`${stateExport.STATE_EXPORT_ARCHIVE_ROOT}/`)).toBe(true);
       return archivePath.slice(stateExport.STATE_EXPORT_ARCHIVE_ROOT.length + 1);
     });
-    expect(new Set(relativePaths)).toEqual(new Set(EXPECTED_INCLUDED));
+
+    // Issue #79's zero-byte -wal/-shm placeholders are synthesized directly
+    // next to each snapshot, not paths walked from (and filtered out of) the
+    // source tree, so they are carved out before the filterStateEntry/exclude
+    // invariants below -- which describe what the walk may copy FROM the
+    // source, and correctly reject a -wal/-shm basename there (AC-TST-001's
+    // decoys include exactly that: a live source-side `state/openclaw.sqlite-wal`).
+    const sidecarPlaceholders = relativePaths.filter((p) => p.endsWith("-wal") || p.endsWith("-shm"));
+    const sourcedPaths = relativePaths.filter((p) => !sidecarPlaceholders.includes(p));
+
+    expect(new Set(sidecarPlaceholders)).toEqual(
+      new Set(EXPECTED_INCLUDED.filter((p) => p.endsWith(".sqlite")).flatMap((p) => [`${p}-wal`, `${p}-shm`]))
+    );
+    expect(new Set(sourcedPaths)).toEqual(new Set(EXPECTED_INCLUDED));
 
     const excludeBasenames = stateExport.STATE_EXPORT_EXCLUDE_BASENAME_PATTERNS.map(globToRegExp);
-    for (const relativePath of relativePaths) {
+    for (const relativePath of sourcedPaths) {
       expect(stateExport.filterStateEntry(relativePath, fileDirent), relativePath).toBe(true);
       const segments = segmentsOf(relativePath);
       for (const segment of segments) {
@@ -509,11 +523,11 @@ describe.skipIf(!sqliteAvailable)("wrapper-state-export: buildStateExportTree on
       expect(excludeBasenames.some((re) => re.test(basename)), relativePath).toBe(false);
     }
     for (const decoy of [...DECOYS, fixture.symlinkRelativePath]) {
-      expect(relativePaths, decoy).not.toContain(decoy);
+      expect(sourcedPaths, decoy).not.toContain(decoy);
     }
     // The symlink target directory is a junction on win32; nothing under it may
     // have been walked through the link either.
-    for (const relativePath of relativePaths) {
+    for (const relativePath of sourcedPaths) {
       expect(relativePath.startsWith(`${fixture.symlinkRelativePath}/`), relativePath).toBe(false);
     }
   });
@@ -530,12 +544,16 @@ describe.skipIf(!sqliteAvailable)("wrapper-state-export: buildStateExportTree on
   });
 
   // AC-TST-002
-  it("snapshots the WAL-mode SQLite consistently: all rows present, integrity ok, no -wal/-shm beside it", () => {
+  it("snapshots the WAL-mode SQLite consistently: all rows present, integrity ok, only zero-byte placeholders beside it", () => {
     const sqlite = sqliteModule as SqliteModule;
     const snapshotPath = join(targetRoot, ".openclaw", "state", "openclaw.sqlite");
     expect(existsSync(snapshotPath)).toBe(true);
-    expect(existsSync(`${snapshotPath}-wal`)).toBe(false);
-    expect(existsSync(`${snapshotPath}-shm`)).toBe(false);
+    // Issue #79: a zero-byte placeholder, not the absence of a sidecar --
+    // see the dedicated placeholder test above for the full assertion.
+    expect(existsSync(`${snapshotPath}-wal`)).toBe(true);
+    expect(lstatSync(`${snapshotPath}-wal`).size).toBe(0);
+    expect(existsSync(`${snapshotPath}-shm`)).toBe(true);
+    expect(lstatSync(`${snapshotPath}-shm`).size).toBe(0);
 
     const snapshot = new sqlite.DatabaseSync(snapshotPath, { readOnly: true });
     try {
@@ -552,6 +570,49 @@ describe.skipIf(!sqliteAvailable)("wrapper-state-export: buildStateExportTree on
     } finally {
       snapshot.close();
     }
+  });
+
+  // Issue #79: the wrapper's /setup/import extracts without clearing
+  // pre-existing -wal/-shm sidecars first, so a stale sidecar left over from
+  // the target's own live WAL survives a restore beside a freshly-imported
+  // main file. A zero-byte placeholder for each sqlite entry works around it
+  // -- extracting a zero-byte file over the target's stale sidecar truncates
+  // it, so SQLite finds an empty WAL (nothing to replay) on next open.
+  it("writes a zero-byte -wal/-shm placeholder alongside every VACUUM INTO snapshot", () => {
+    const sqliteEntries = produced.files.filter((archivePath) => archivePath.endsWith(".sqlite"));
+    expect(sqliteEntries.length).toBeGreaterThan(0);
+    for (const archivePath of sqliteEntries) {
+      for (const suffix of ["-wal", "-shm"]) {
+        const sidecarArchivePath = `${archivePath}${suffix}`;
+        expect(produced.files, sidecarArchivePath).toContain(sidecarArchivePath);
+        const onDiskPath = join(targetRoot, ...sidecarArchivePath.split("/"));
+        expect(existsSync(onDiskPath), sidecarArchivePath).toBe(true);
+        expect(lstatSync(onDiskPath).size, sidecarArchivePath).toBe(0);
+      }
+    }
+  });
+
+  // AC from issue #79: a target with a pre-existing non-empty -wal ends up
+  // truncated after import. Exercised through the real `tar` package the
+  // patched wrapper uses server-side (tar.c to build the export, tar.x to
+  // extract it), not a hand-rolled simulation of extraction semantics.
+  it("restoring the produced archive over a target with a live, non-empty -wal truncates it to zero bytes", async () => {
+    const archiveDir = join(fixture.root, "archive-out");
+    mkdirSync(archiveDir, { recursive: true });
+    const archivePath = join(archiveDir, "state.tar.gz");
+    await tar.c({ gzip: true, portable: true, noMtime: true, cwd: targetRoot, file: archivePath }, [
+      stateExport.STATE_EXPORT_ARCHIVE_ROOT
+    ]);
+
+    const restoreTarget = join(fixture.root, "restore-target");
+    const staleWalPath = join(restoreTarget, stateExport.STATE_EXPORT_ARCHIVE_ROOT, "state", "openclaw.sqlite-wal");
+    mkdirSync(dirname(staleWalPath), { recursive: true });
+    writeFileSync(staleWalPath, Buffer.alloc(4096, 0xff)); // stands in for the target's own live, un-checkpointed WAL
+
+    await tar.x({ cwd: restoreTarget, file: archivePath });
+
+    expect(existsSync(staleWalPath)).toBe(true);
+    expect(lstatSync(staleWalPath).size).toBe(0);
   });
 
   it("snapshotSqlite refuses to run on a missing source rather than producing an empty target", async () => {

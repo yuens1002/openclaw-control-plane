@@ -7,6 +7,27 @@ and uses semantic versioning.
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-08-27
+
+- 2026-08-27 - fix(wrapper): scoped state export writes zero-byte -wal/-shm placeholders (#79)
+  - `buildStateExportTree` (`scripts/wrapper-state-export.mjs`) now writes a
+    zero-byte `-wal` and `-shm` placeholder next to every `VACUUM INTO`
+    snapshot it produces, accounted against the byte cap like any other
+    entry. The pinned wrapper's `POST /setup/import` extracts without
+    clearing pre-existing sidecars first, so a target's own stale, live
+    `-wal` previously survived a restore beside the freshly-imported main
+    file; extracting a zero-byte file over it truncates it instead, giving
+    SQLite an empty (nothing-to-replay) WAL on next open.
+  - Root-caused a real production incident: importing a scoped-export
+    backup onto a live instance corrupted `state/openclaw.sqlite` and
+    crash-looped the gateway until the stale sidecars were removed by hand.
+    Works around a defect filed upstream at
+    [vignesh07/clawdbot-railway-template#236](https://github.com/vignesh07/clawdbot-railway-template/issues/236).
+  - `tests/openclaw-railway-wrapper-patches.test.ts`: asserts every
+    snapshot's placeholder pair is zero-byte, and restores the produced
+    archive over a target with a live, non-empty `-wal` through the real
+    `tar` package to prove it gets truncated.
+
 ## [0.6.5] - 2026-08-27
 
 - 2026-08-27 - feat(railway-installer): add `rotateGatewayToken` + `client-cli rotate-gateway-token`
