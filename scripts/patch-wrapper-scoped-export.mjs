@@ -70,7 +70,12 @@ import { buildStateExportTree } from "./wrapper-state-export.mjs";`,
           portable: true,
           noMtime: true,
           cwd: targetRoot,
-          onwarn: () => {},
+          // A backup must never be silently partial: strict mode turns entry
+          // errors (unreadable file, vanished path) into a stream error the
+          // handler below answers with 500 instead of a truncated archive, and
+          // any non-fatal warning is logged rather than swallowed.
+          strict: true,
+          onwarn: (code, message) => console.warn("[export] scope=state tar warning:", code, message),
         },
         [".openclaw"],
       );
