@@ -185,9 +185,10 @@ consumer payload.
 The service boundary exposes a bounded `recordAuthorizationDecision`
 operation. A denied context records an audit entry containing the request,
 principal/delegation, attempted operation and target, policy version, decision
-ID, result, and reason codes; it cannot create a work item, action attempt, or
-effect. Transport adapters call this operation after a denial rather than
-writing audit tables directly.
+ID, result, reason codes, and the optional validated tool invocation ID; it
+cannot create a work item, action attempt, or effect. The invocation ID is also
+part of the canonical denial evidence when present. Transport adapters call
+this operation after a denial rather than writing audit tables directly.
 
 ### 6. Attribute every action attempt and effect
 

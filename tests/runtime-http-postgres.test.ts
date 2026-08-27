@@ -415,6 +415,63 @@ describePostgres("authenticated runtime HTTP PostgreSQL conformance", () => {
       expect(response.status, `${method} ${path}`).toBe(403);
     }
   });
+
+  it("persists denied tool provenance without creating an effect record", async () => {
+    const app = authenticatedApp(runtime, true);
+    const workId = "00000000-0000-4000-8000-000000008071";
+    const toolStream = "denied-tool-stream";
+    const tools = createOpenClawControlPlaneTools({
+      baseUrl: "https://runtime.example",
+      tokenProvider: () => "valid",
+      toolInvocationIdProvider: () => "tool-denial-postgres-1",
+      fetchImpl: async (input, init) => app.request(String(input), init)
+    });
+
+    await expect(
+      tools.execute_runtime_command({
+        ...commandRequest(workId),
+        stream_id: toolStream,
+        idempotency_key: "denied-tool-command",
+        declared_effects: []
+      })
+    ).rejects.toMatchObject({ status: 403 });
+
+    const toolPage = await runtime.apiService.listRecords({ stream_id: toolStream, limit: 20 });
+    expect(toolPage.records).toHaveLength(1);
+    expect(toolPage.records[0]).toMatchObject({
+      kind: "audit_entry",
+      type: "runtime.authorization.denied",
+      command_context: {
+        authenticated_principal_ref: "principal://example/service",
+        effective_actor: { type: "service", id: "example-service" },
+        request_origin: "tool",
+        authorization: { result: "denied" }
+      },
+      payload: {
+        request_id: expect.any(String),
+        tool_invocation_id: "tool-denial-postgres-1"
+      }
+    });
+    expect(toolPage.records.some((record) => record.kind === "action_attempt")).toBe(false);
+    expect(toolPage.records.some((record) => record.kind === "result")).toBe(false);
+
+    const httpStream = "denied-http-stream";
+    const httpResponse = await app.request("/v1/runtime/commands", {
+      method: "POST",
+      headers: bearerHeaders(),
+      body: JSON.stringify({
+        ...commandRequest(workId),
+        stream_id: httpStream,
+        idempotency_key: "denied-http-command"
+      })
+    });
+
+    expect(httpResponse.status).toBe(403);
+    const httpPage = await runtime.apiService.listRecords({ stream_id: httpStream, limit: 20 });
+    expect(httpPage.records).toHaveLength(1);
+    expect(httpPage.records[0]!.command_context.request_origin).toBe("http");
+    expect(httpPage.records[0]!.payload).not.toHaveProperty("tool_invocation_id");
+  });
 });
 
 function authenticatedApp(runtime: PostgresRuntime, deny = false) {

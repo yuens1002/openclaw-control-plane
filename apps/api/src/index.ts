@@ -223,9 +223,11 @@ export function createControlPlaneApp(
       request.operation_type,
       request.operation_schema_version
     );
-    const toolInvocationId = context.req.header("x-tool-invocation-id")
-      ? SafeLocalIdentifierSchema.parse(context.req.header("x-tool-invocation-id"))
-      : undefined;
+    const toolInvocationHeader = context.req.header("x-tool-invocation-id");
+    const toolInvocationId =
+      toolInvocationHeader === undefined
+        ? undefined
+        : SafeLocalIdentifierSchema.parse(toolInvocationHeader);
     const trusted = await authorizeRequest(context, dependencies, {
       action: operation.authorization_action,
       resource: request.target,
@@ -234,6 +236,7 @@ export function createControlPlaneApp(
         type: request.operation_type,
         version: request.operation_schema_version
       },
+      ...(toolInvocationId ? { toolInvocationId } : {}),
       requestOrigin: toolInvocationId ? "tool" : "http"
     });
     const result = await runtime.executeCommand(
@@ -519,6 +522,7 @@ async function authorizeRequest(
     resource: { type: string; id: string };
     streamId: string;
     operation?: { type: string; version: number };
+    toolInvocationId?: string;
     requestOrigin?: TrustedCommandContext["request_origin"];
   }
 ): Promise<TrustedCommandContext> {
@@ -550,6 +554,7 @@ async function authorizeRequest(
         operation_schema_version: request.operation.version,
         target: request.resource,
         request_id: context.get("requestId"),
+        ...(request.toolInvocationId ? { tool_invocation_id: request.toolInvocationId } : {}),
         command_context: trusted
       });
     } else {

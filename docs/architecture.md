@@ -53,9 +53,11 @@ edges; agents access that state only through the API or typed adapter. See
 
 Agents may consume the runtime through the MCP service. MCP supplies discovery,
 schemas, annotations, and a server-generated tool invocation ID; the module
-delegates through the same HTTP adapter and adds no authority. See
-[MCP Service Host And Decision Runtime Module](mcp-service.md). The HTTP API
-remains the service boundary and PostgreSQL remains inaccessible to agents.
+delegates through the same HTTP adapter and adds no authority. Successful
+commands and denied command audits retain that invocation ID when present, so
+transport calls remain correlated without making identity caller-controlled.
+See [MCP Service Host And Decision Runtime Module](mcp-service.md). The HTTP
+API remains the service boundary and PostgreSQL remains inaccessible to agents.
 
 ## Public Baseline
 

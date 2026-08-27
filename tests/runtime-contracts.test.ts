@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ActionAttributionSchema,
+  AuthorizationDenialAuditPayloadSchema,
   CanonicalCommandEnvelopeSchema,
   RuntimeKindSchema,
   SafeNamespacedIdentifierSchema,
@@ -15,6 +16,26 @@ const digest = "a".repeat(64);
 const commandDigest = `sha256:${digest}`;
 
 describe("runtime contracts", () => {
+  it("keeps denied tool invocation provenance optional and bounded", () => {
+    const base = {
+      request_id: "request-1",
+      decision_id: "decision-1",
+      policy_version: "policy-v1",
+      reason_codes: ["policy.no_matching_grant"]
+    };
+
+    expect(AuthorizationDenialAuditPayloadSchema.parse(base)).toEqual(base);
+    expect(
+      AuthorizationDenialAuditPayloadSchema.parse({
+        ...base,
+        tool_invocation_id: "tool-invocation-1"
+      })
+    ).toEqual({ ...base, tool_invocation_id: "tool-invocation-1" });
+    expect(() =>
+      AuthorizationDenialAuditPayloadSchema.parse({ ...base, tool_invocation_id: "invalid id" })
+    ).toThrow();
+  });
+
   it("keeps record, operation, subject, result, and artifact types independent", () => {
     const record = TypedRecordEnvelopeSchema.parse({
       id: firstId,
