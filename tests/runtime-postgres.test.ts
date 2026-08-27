@@ -415,16 +415,43 @@ describePostgres("PostgreSQL durable runtime repository", () => {
       operation_schema_version: 1,
       target: { type: "example.environment", id: "production" },
       request_id: "request-denied-001",
+      tool_invocation_id: "tool-denied-001",
       command_context: trustedContext("denied")
     });
 
-    const records = await pool.query<{ kind: string; type: string }>(
-      "SELECT kind, type FROM runtime_records WHERE stream_id = 'denial-stream'"
+    const records = await pool.query<{ kind: string; type: string; payload: Record<string, unknown> }>(
+      "SELECT kind, type, payload FROM runtime_records WHERE stream_id = 'denial-stream'"
     );
     expect(result.result_record_ids).toEqual([]);
     expect(records.rows).toEqual([
-      { kind: "audit_entry", type: "runtime.authorization.denied" }
+      {
+        kind: "audit_entry",
+        type: "runtime.authorization.denied",
+        payload: expect.objectContaining({ tool_invocation_id: "tool-denied-001" })
+      }
     ]);
+  });
+
+  it("rejects malformed denial invocation provenance before persistence", async () => {
+    const repository = new PostgresRuntimeRepository(pool, registry);
+    for (const [index, toolInvocationId] of ["invalid id", ""].entries()) {
+      await expect(
+        repository.recordAuthorizationDecision({
+          stream_id: `denial-invalid-tool-stream-${index}`,
+          operation_type: "example.state.reconcile",
+          operation_schema_version: 1,
+          target: { type: "example.environment", id: "production" },
+          request_id: `request-denied-invalid-tool-${index}`,
+          tool_invocation_id: toolInvocationId,
+          command_context: trustedContext("denied")
+        })
+      ).rejects.toThrow();
+    }
+
+    const records = await pool.query<{ count: string }>(
+      "SELECT count(*) FROM runtime_records WHERE stream_id LIKE 'denial-invalid-tool-stream-%'"
+    );
+    expect(Number(records.rows[0]!.count)).toBe(0);
   });
 
   it("rejects denied evidence for an unrelated registered action", async () => {

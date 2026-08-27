@@ -121,6 +121,7 @@ export interface AuthorizationDenialInput {
   operation_schema_version: number;
   target: RuntimeSubject;
   request_id: string;
+  tool_invocation_id?: string;
   command_context: TrustedCommandContext;
 }
 
@@ -421,6 +422,17 @@ export class PostgresRuntimeRepository {
       throw new Error("Denied authorization action does not match the registered operation action.");
     }
     const auditId = randomUUID();
+    const payload = RuntimePayloadSchema.parse(
+      AuthorizationDenialAuditPayloadSchema.parse({
+        request_id: input.request_id,
+        ...(input.tool_invocation_id !== undefined
+          ? { tool_invocation_id: input.tool_invocation_id }
+          : {}),
+        decision_id: context.authorization.decision_id,
+        policy_version: context.authorization.policy_version,
+        reason_codes: context.authorization.reason_codes
+      })
+    );
     const canonicalCommand = CanonicalCommandEnvelopeSchema.parse({
       canonicalization_version: "jcs-rfc8785-v1",
       operation_type: input.operation_type,
@@ -430,6 +442,9 @@ export class PostgresRuntimeRepository {
       target: input.target,
       arguments: {
         request_id: input.request_id,
+        ...(input.tool_invocation_id !== undefined
+          ? { tool_invocation_id: input.tool_invocation_id }
+          : {}),
         authorization_evidence: context.authorization
       },
       declared_effects: []
@@ -454,12 +469,7 @@ export class PostgresRuntimeRepository {
           operation_type: input.operation_type,
           operation_schema_version: input.operation_schema_version,
           subject: input.target,
-          payload: {
-            request_id: input.request_id,
-            decision_id: context.authorization.decision_id,
-            policy_version: context.authorization.policy_version,
-            reason_codes: context.authorization.reason_codes
-          },
+          payload,
           occurred_at: new Date().toISOString()
         }
       ]
@@ -513,12 +523,14 @@ export class PostgresRuntimeRepository {
       schema_version: 1,
       schema_ref: "runtime://schemas/authorization-denied/v1",
       subject: RuntimeSubjectSchema.parse(input.target),
-      payload: AuthorizationDenialAuditPayloadSchema.parse({
-        request_id: input.request_id,
-        decision_id: context.authorization.decision_id,
-        policy_version: context.authorization.policy_version,
-        reason_codes: context.authorization.reason_codes
-      }),
+      payload: RuntimePayloadSchema.parse(
+        AuthorizationDenialAuditPayloadSchema.parse({
+          request_id: input.request_id,
+          decision_id: context.authorization.decision_id,
+          policy_version: context.authorization.policy_version,
+          reason_codes: context.authorization.reason_codes
+        })
+      ),
       occurred_at: new Date().toISOString()
     };
     const client = await this.pool.connect();

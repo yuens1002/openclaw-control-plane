@@ -326,6 +326,7 @@ export type ApprovalAttributionPayload = z.infer<
 export const AuthorizationDenialAuditPayloadSchema = z
   .object({
     request_id: SafeLocalIdentifierSchema,
+    tool_invocation_id: SafeLocalIdentifierSchema.optional(),
     decision_id: SafeLocalIdentifierSchema,
     policy_version: SafeLocalIdentifierSchema,
     reason_codes: z.array(SafeNamespacedIdentifierSchema)
