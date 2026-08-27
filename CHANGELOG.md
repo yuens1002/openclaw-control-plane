@@ -7,6 +7,18 @@ and uses semantic versioning.
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-08-27
+
+- 2026-08-27 - feat(railway-installer): add `rotateGatewayToken` + `client-cli rotate-gateway-token`
+  - Rotates `OPENCLAW_GATEWAY_TOKEN` on an already-provisioned client service
+    to a fresh random value, redeploys, and waits for the instance to answer
+    authenticated requests, mirroring `updateClientTemplateRef`/
+    `updateClientOpenClawRef`'s write-then-verify shape. Unlike those two,
+    it is not a compare-and-swap (a rotation always replaces the current
+    value), and the new value is never returned, logged, or printed.
+  - Built to unblock the post-restore-drill step in the consumer repo's
+    backup/restore runbook, which had been a manual-only instruction.
+
 ## [0.6.4] - 2026-08-27
 
 - 2026-08-27 - fix(installer): refuse to write allowedOrigins before a baseline config exists (#77)
