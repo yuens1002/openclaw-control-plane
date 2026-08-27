@@ -17,7 +17,7 @@ describe("approveOwnDevicePairing", () => {
       }
     });
 
-    expect(result).toBeUndefined();
+    expect(result).toEqual({ status: "no-pending" });
     expect(approveCalls).toBe(0);
   });
 
@@ -32,7 +32,7 @@ describe("approveOwnDevicePairing", () => {
       }
     });
 
-    expect(result).toBe("req_abc123");
+    expect(result).toEqual({ requestId: "req_abc123", status: "approved" });
     expect(approvedIds).toEqual(["req_abc123"]);
   });
 
@@ -52,13 +52,24 @@ describe("approveOwnDevicePairing", () => {
     expect(approveCalls).toBe(0);
   });
 
-  it("throws when the wrapper responds ok:false on the pending-devices listing", async () => {
-    await expect(
-      approveOwnDevicePairing(BASE_URL, AUTH, {
-        getPendingDevices: async () => ({ ok: false, requestIds: [] }),
-        approveDevice: async () => ({ ok: true })
-      })
-    ).rejects.toThrow("ok:false");
+  it("reports not-ready, without throwing, when the wrapper responds ok:false on the pending-devices listing", async () => {
+    // Confirmed live (dogfood-throwaway-01 bootstrap): a genuinely fresh
+    // instance's gateway has not started yet -- no baseline config exists --
+    // and /setup/api/devices/pending proxies to it, answering {ok:false}
+    // with a 500. That is a "not ready yet" signal for the caller to retry
+    // once a baseline exists (issue #77's sibling), not a hard failure.
+    let approveCalls = 0;
+
+    const result = await approveOwnDevicePairing(BASE_URL, AUTH, {
+      getPendingDevices: async () => ({ ok: false, requestIds: [] }),
+      approveDevice: async () => {
+        approveCalls += 1;
+        return { ok: true };
+      }
+    });
+
+    expect(result).toEqual({ status: "not-ready" });
+    expect(approveCalls).toBe(0);
   });
 
   it("throws when the wrapper responds ok:false on approve, and does not return a requestId", async () => {

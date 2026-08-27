@@ -8,6 +8,10 @@
 // marker below.
 
 import {
+  approveOwnDevicePairing,
+  type ApproveOwnDeviceStatus
+} from "@openclaw-control-plane/openclaw-railway-installer/approve-own-device";
+import {
   patchAllowedOrigins,
   type PatchAllowedOriginsStatus
 } from "@openclaw-control-plane/openclaw-railway-installer/patch-allowed-origins";
@@ -59,6 +63,17 @@ export interface BootstrapOnboardingCycleResult {
    * carries the *first* attempt's status, before `apply` ran.
    */
   allowedOriginsStatus: PatchAllowedOriginsStatus;
+  /** The retry `approveOwnDevicePairing` call's own result, run after `apply` has established a baseline config (issue #77's sibling). */
+  approvedDeviceRequestId?: string;
+  /**
+   * Disambiguates an absent `approvedDeviceRequestId` above -- see
+   * `ApproveOwnDeviceStatus`. Expected to read `"approved"` or
+   * `"no-pending"` here, since `apply` just established a baseline config;
+   * a `"not-ready"` reading at this point means `apply` did not actually
+   * establish one. `provision.deviceApprovalStatus` carries the *first*
+   * attempt's status, before `apply` ran.
+   */
+  deviceApprovalStatus: ApproveOwnDeviceStatus;
 }
 
 // LIVE-INSTANCE TIER: deploy
@@ -113,7 +128,27 @@ export async function bootstrapOnboardingCycle(
     { getConfigRaw: dependencies.getConfigRaw, postConfigRaw: dependencies.postConfigRaw }
   );
 
-  return { provision, dryRun, apply, patchedAllowedOrigins, allowedOriginsStatus };
+  // Issue #77's sibling: `provisionClientInstance`'s own device-approval
+  // attempt runs before this instance has any baseline config, and the
+  // wrapper's /setup/api/devices/pending proxies to a gateway that has not
+  // started yet -- confirmed live, {ok:false} with a 500. `apply` above just
+  // established that baseline, so retry here. Idempotent either way -- a
+  // no-op if the pairing already landed on the first attempt.
+  const { requestId: approvedDeviceRequestId, status: deviceApprovalStatus } = await approveOwnDevicePairing(
+    baseUrl,
+    { username: provision.setupUsername, password: provision.setupPassword },
+    { getPendingDevices: dependencies.getPendingDevices, approveDevice: dependencies.approveDevice }
+  );
+
+  return {
+    provision,
+    dryRun,
+    apply,
+    patchedAllowedOrigins,
+    allowedOriginsStatus,
+    deviceApprovalStatus,
+    ...(approvedDeviceRequestId ? { approvedDeviceRequestId } : {})
+  };
 }
 
 export interface RegressionCheckOptions {

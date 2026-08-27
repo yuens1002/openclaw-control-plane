@@ -386,4 +386,66 @@ describe("bootstrapOnboardingCycle", () => {
     const written = JSON.parse(store.posted[store.posted.length - 1] ?? "{}");
     expect(written.gateway.controlUi.allowedOrigins).toEqual(["https://fixture-onboard.up.railway.app"]);
   });
+
+  it("retries device-pairing approval after apply establishes a baseline config, on a genuinely fresh instance (issue #77's sibling)", async () => {
+    const runner = newRunner({}, { createdServiceName: "fixture-onboard" });
+    const calls: string[] = [];
+    let configured = false;
+    // Models the real wrapper: /setup/api/devices/pending proxies to a
+    // gateway that has not started at all until /setup/api/run establishes
+    // a baseline config -- {ok:false} before that point, a real pending
+    // request after.
+    const store = createFakeConfigStore({ initialContent: "{}" });
+
+    const fetchImpl = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "https://openrouter.ai/api/v1/keys") {
+        calls.push("mint");
+        return new Response(JSON.stringify({ key: SENTINEL_MINTED, data: { hash: SENTINEL_MINTED_HASH } }), { status: 200 });
+      }
+      if (url.endsWith("/setup/api/status")) {
+        calls.push("status");
+        return new Response(JSON.stringify({ configured }), { status: 200 });
+      }
+      if (url.endsWith("/setup/api/run")) {
+        calls.push("run");
+        configured = true;
+        await store.postConfigRaw("", {}, JSON.stringify({ gateway: { mode: "local" } }));
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      if (url.endsWith("/setup/healthz")) {
+        calls.push("healthz");
+        return new Response("ok", { status: 200 });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    }) as typeof fetch;
+
+    const approvedIds: string[] = [];
+    const result = await bootstrapOnboardingCycle(
+      { clientName: "fixture-onboard", profile: readFixture("key-provisioning-provider.json") },
+      {
+        runner,
+        openRouterManagementKey: "sk-test-DO-NOT-LOG-mgmt",
+        fetchImpl,
+        checkSetupStatus: async () => 200,
+        ...store.deps,
+        getPendingDevices: async () =>
+          configured ? { ok: true, requestIds: ["req_fresh"] } : { ok: false, requestIds: [] },
+        approveDevice: async (_baseUrl, _auth, requestId) => {
+          approvedIds.push(requestId);
+          return { ok: true };
+        },
+        sleep: async () => {}
+      }
+    );
+
+    // provisionClientInstance's own attempt (before apply ever runs) found
+    // the gateway not yet started and reported not-ready, without throwing.
+    expect(result.provision.approvedDeviceRequestId).toBeUndefined();
+    expect(result.provision.deviceApprovalStatus).toBe("not-ready");
+    // The retry after apply approved the pairing, now that the gateway is up.
+    expect(result.approvedDeviceRequestId).toBe("req_fresh");
+    expect(result.deviceApprovalStatus).toBe("approved");
+    expect(approvedIds).toEqual(["req_fresh"]);
+  });
 });

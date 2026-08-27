@@ -16,7 +16,11 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import { approveOwnDevicePairing } from "./approve-own-device.js";
+import {
+  approveOwnDevicePairing,
+  describeDeviceApprovalStatus,
+  type ApproveOwnDeviceStatus
+} from "./approve-own-device.js";
 import {
   createSecret,
   ensureDomainPort,
@@ -103,6 +107,8 @@ export interface ProvisionClientResult {
   /** Disambiguates `patchedAllowedOrigins:false` -- see `PatchAllowedOriginsStatus`. */
   allowedOriginsStatus: PatchAllowedOriginsStatus;
   approvedDeviceRequestId?: string;
+  /** Disambiguates an absent `approvedDeviceRequestId` -- see `ApproveOwnDeviceStatus`. */
+  deviceApprovalStatus: ApproveOwnDeviceStatus;
 }
 
 interface ResolvedProvisionOptions {
@@ -254,10 +260,11 @@ export async function provisionClientInstance(
     domain.domain,
     { getConfigRaw: dependencies.getConfigRaw, postConfigRaw: dependencies.postConfigRaw }
   );
-  const approvedDeviceRequestId = await approveOwnDevicePairing(baseUrl, setupAuth, {
-    getPendingDevices: dependencies.getPendingDevices,
-    approveDevice: dependencies.approveDevice
-  });
+  const { requestId: approvedDeviceRequestId, status: deviceApprovalStatus } = await approveOwnDevicePairing(
+    baseUrl,
+    setupAuth,
+    { getPendingDevices: dependencies.getPendingDevices, approveDevice: dependencies.approveDevice }
+  );
 
   const openclawUrl = `${baseUrl}/openclaw`;
   const resultBase = {
@@ -276,6 +283,7 @@ export async function provisionClientInstance(
     reusedExistingService,
     patchedAllowedOrigins,
     allowedOriginsStatus,
+    deviceApprovalStatus,
     ...(approvedDeviceRequestId ? { approvedDeviceRequestId } : {})
   } satisfies Omit<ProvisionClientResult, "wroteEnvLocal" | "wroteHandoff">;
 
@@ -969,7 +977,7 @@ ${result.projectId ? `- Project ID: ${result.projectId}\n` : ""}- Template ref: 
 ## Post-Deploy Automation
 
 - Patched allowedOrigins: ${describePatchAllowedOriginsStatus(result.allowedOriginsStatus)}
-- Approved device pairing request: ${result.approvedDeviceRequestId ?? "none pending"}
+- Approved device pairing request: ${describeDeviceApprovalStatus(result.deviceApprovalStatus, result.approvedDeviceRequestId)}
 
 ## Updating the wrapper version later
 
