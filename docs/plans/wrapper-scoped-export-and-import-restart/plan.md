@@ -88,9 +88,13 @@ the `template-source` Dockerfile stage with the existing
    inserts one import line after `import * as tar from "tar";` and, at the
    top of the existing export handler, a delegate: when `req.query.scope ===
    "state"`, build the tree in a temp dir (`fs.mkdtempSync` under
-   `os.tmpdir()`), stream `tar.c({ gzip, portable, noMtime, cwd: tmpRoot },
-   [".openclaw"])` with the same `content-type`/`content-disposition`
-   headers as the existing export, and remove the temp dir in `finally`.
+   `os.tmpdir()`), write the complete archive to a file in that dir with
+   `tar.c({ gzip, portable, noMtime, cwd, file, strict: true }, [".openclaw"])`
+   **before setting any header** — so every failure is a clean `text/plain`
+   500, never a partial `application/gzip` body — then stream the file with
+   the same `content-type`/`content-disposition` headers as the existing
+   export plus `content-length`, removing the temp dir on response
+   `finish`/`close`.
    Any other `scope` value → 400. Auth is inherited (`requireSetupAuth` on
    the same route). Archive paths stay `.openclaw/…`, so the output is a
    valid input for the wrapper's own `/setup/import`.

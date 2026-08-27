@@ -48,9 +48,28 @@ import { buildStateExportTree } from "./wrapper-state-export.mjs";`,
           // best effort: the directory is under os.tmpdir()
         }
       };
+      // The archive is built COMPLETELY before any response header is set, so
+      // every failure (tree build, cap, node:sqlite, tar entry error) becomes a
+      // clean text/plain 500 -- never a partial body under application/gzip.
+      const archivePath = path.join(targetRoot, "state.tar.gz");
       try {
         // maxBytes: wrapper-state-export.mjs resolves OPENCLAW_STATE_EXPORT_MAX_BYTES (default 200 MiB).
         await buildStateExportTree({ stateDir: STATE_DIR, targetRoot });
+        await tar.c(
+          {
+            gzip: true,
+            portable: true,
+            noMtime: true,
+            cwd: targetRoot,
+            file: archivePath,
+            // A backup must never be silently partial: strict mode turns entry
+            // errors (unreadable file, vanished path) into a rejection handled
+            // below, and any non-fatal warning is logged rather than swallowed.
+            strict: true,
+            onwarn: (code, message) => console.warn("[export] scope=state tar warning:", code, message),
+          },
+          [".openclaw"],
+        );
       } catch (err) {
         removeTargetRoot();
         console.error("[export] scope=state failed:", err);
@@ -59,38 +78,27 @@ import { buildStateExportTree } from "./wrapper-state-export.mjs";`,
           .type("text/plain")
           .send(\`state export failed: \${err?.message ?? String(err)}\\n\`);
       }
+      const archiveSize = fs.statSync(archivePath).size;
       res.setHeader("content-type", "application/gzip");
+      res.setHeader("content-length", String(archiveSize));
       res.setHeader(
         "content-disposition",
         \`attachment; filename="openclaw-backup-state-\${new Date().toISOString().replace(/[:.]/g, "-")}.tar.gz"\`,
       );
-      const stateStream = tar.c(
-        {
-          gzip: true,
-          portable: true,
-          noMtime: true,
-          cwd: targetRoot,
-          // A backup must never be silently partial: strict mode turns entry
-          // errors (unreadable file, vanished path) into a stream error the
-          // handler below answers with 500 instead of a truncated archive, and
-          // any non-fatal warning is logged rather than swallowed.
-          strict: true,
-          onwarn: (code, message) => console.warn("[export] scope=state tar warning:", code, message),
-        },
-        [".openclaw"],
-      );
-      stateStream.on("error", (err) => {
-        console.error("[export] scope=state stream error:", err);
-        if (!res.headersSent) res.status(500);
-        res.end(String(err));
-      });
-      // finally-equivalent for a streamed response: the temp tree is removed
-      // as soon as the response finishes (a keep-alive socket may not emit
-      // "close" until much later) and again on "close" for aborted/errored
-      // requests; removeTargetRoot is idempotent (rmSync with force).
+      // finally-equivalent for a streamed response: the temp tree (archive
+      // included) is removed as soon as the response finishes (a keep-alive
+      // socket may not emit "close" until much later) and again on "close" for
+      // aborted requests; removeTargetRoot is idempotent (rmSync with force).
       res.once("finish", removeTargetRoot);
       res.once("close", removeTargetRoot);
-      stateStream.pipe(res);
+      const archiveStream = fs.createReadStream(archivePath);
+      archiveStream.on("error", (err) => {
+        // Headers are already out; the only honest signal left is to abort the
+        // connection so the client cannot mistake a truncated body for success.
+        console.error("[export] scope=state read error:", err);
+        res.destroy(err);
+      });
+      archiveStream.pipe(res);
       return;
     }
     if (scope !== undefined && scope !== "") {
