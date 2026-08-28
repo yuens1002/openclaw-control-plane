@@ -83,6 +83,9 @@ export function createControlPlaneApp(
     await next();
   });
 
+  // worker_registry/stale_workers/failed_runs below (and on the legacy `/`
+  // route further down) are static stub values, not a live worker registry --
+  // no such registry is implemented anywhere in this repository.
   app.get("/health", async (context) => {
     const readiness = dependencies.readiness
       ? await dependencies.readiness()
