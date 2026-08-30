@@ -3,6 +3,31 @@
 [build]
 builder = "dockerfile"
 dockerfilePath = "deploy/decision-runtime-mcp/Dockerfile"
+# The repo-root /package.json is deliberately absent from watchPatterns: its
+# version field moves on every release, and watching it would redeploy this live
+# service once per release for a change the image does not read. This
+# Dockerfile invokes no root npm script (it runs `npm ci`, then an explicit
+# `tsc -b`), and the manifest's build-relevant content -- `workspaces` and the
+# root dependency sets -- is mirrored into /package-lock.json, which stays
+# watched. See issue #86 and docs/decision-runtime-deployment.md.
+watchPatterns = [
+  "/apps/mcp/**",
+  "/packages/contracts/**",
+  "/packages/openclaw-adapter/**",
+  "/packages/mcp-service/**",
+  "/packages/decision-runtime-mcp/**",
+  "/package-lock.json",
+  "/tsconfig.json",
+  "/tsconfig.base.json",
+  "/apps/mcp/package.json",
+  "/packages/contracts/package.json",
+  "/packages/openclaw-adapter/package.json",
+  "/packages/mcp-service/package.json",
+  "/packages/decision-runtime-mcp/package.json",
+  "/deploy/decision-runtime-mcp/Dockerfile",
+  "/deploy/decision-runtime-mcp/railway.toml",
+  "/.dockerignore"
+]
 
 [deploy]
 healthcheckPath = "/health"

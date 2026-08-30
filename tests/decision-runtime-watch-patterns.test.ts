@@ -78,23 +78,35 @@ describe("decision runtime watch patterns", () => {
   let workerConfig: string;
   let apiDockerfile: string;
   let workerDockerfile: string;
+  let mcpConfig: string;
+  let mcpDockerfile: string;
   let apiPatterns: string[];
   let workerPatterns: string[];
+  let mcpPatterns: string[];
 
   beforeAll(async () => {
-    [apiConfig, workerConfig, apiDockerfile, workerDockerfile] = await Promise.all([
-      read("deploy/decision-runtime/railway.toml"),
-      read("deploy/decision-runtime/worker.railway.toml"),
-      read("deploy/decision-runtime/Dockerfile"),
-      read("deploy/decision-runtime/worker.Dockerfile")
-    ]);
+    [apiConfig, workerConfig, apiDockerfile, workerDockerfile, mcpConfig, mcpDockerfile] =
+      await Promise.all([
+        read("deploy/decision-runtime/railway.toml"),
+        read("deploy/decision-runtime/worker.railway.toml"),
+        read("deploy/decision-runtime/Dockerfile"),
+        read("deploy/decision-runtime/worker.Dockerfile"),
+        read("deploy/decision-runtime-mcp/railway.toml"),
+        read("deploy/decision-runtime-mcp/Dockerfile")
+      ]);
     apiPatterns = parseWatchPatterns(apiConfig);
     workerPatterns = parseWatchPatterns(workerConfig);
+    mcpPatterns = parseWatchPatterns(mcpConfig);
   });
 
-  it("declares watch patterns for both services", () => {
+  // Issue #89: the MCP config declared no watchPatterns at all, so every commit to
+  // the tracked branch redeployed it -- docs, installer work, changelog entries
+  // included. An empty list is indistinguishable from "watch everything", so this
+  // asserts a non-empty list rather than merely a parseable one.
+  it("declares watch patterns for all three services", () => {
     expect(apiPatterns.length).toBeGreaterThan(0);
     expect(workerPatterns.length).toBeGreaterThan(0);
+    expect(mcpPatterns.length).toBeGreaterThan(0);
   });
 
   it("matches an API app change to the API service only", () => {
@@ -189,6 +201,46 @@ describe("decision runtime watch patterns", () => {
       "/.dockerignore"
     ], ["/package.json"]);
     expect(new Set(workerPatterns)).toEqual(expected);
+  });
+
+  it("keeps the MCP watch patterns exactly in sync with the MCP Dockerfile's build input", () => {
+    const expected = deriveExpectedPatterns(mcpDockerfile, [
+      "/deploy/decision-runtime-mcp/Dockerfile",
+      "/deploy/decision-runtime-mcp/railway.toml",
+      "/.dockerignore"
+    ], ["/package.json"]);
+    expect(new Set(mcpPatterns)).toEqual(expected);
+  });
+
+  it("matches an MCP app or MCP-only package change to the MCP service only", () => {
+    const paths = [
+      "apps/mcp/src/server.ts",
+      "packages/mcp-service/src/index.ts",
+      "packages/decision-runtime-mcp/src/token-provider.ts",
+      "packages/openclaw-adapter/src/index.ts"
+    ];
+    for (const path of paths) {
+      expect(matchesAnyPattern(path, mcpPatterns)).toBe(true);
+      expect(matchesAnyPattern(path, apiPatterns)).toBe(false);
+      expect(matchesAnyPattern(path, workerPatterns)).toBe(false);
+    }
+  });
+
+  // The MCP image deliberately excludes the database boundary (see
+  // tests/decision-runtime-mcp-deployment.test.ts), so a db or api change must not
+  // reach it -- and docs/installer churn must not reach any of the three.
+  it("does not match the MCP service for db, api, worker, docs, or installer changes", () => {
+    const paths = [
+      "packages/db/src/schema.ts",
+      "apps/api/src/index.ts",
+      "apps/worker/src/index.ts",
+      "docs/architecture.md",
+      "CHANGELOG.md",
+      "packages/openclaw-railway-installer/src/cli.ts"
+    ];
+    for (const path of paths) {
+      expect(matchesAnyPattern(path, mcpPatterns)).toBe(false);
+    }
   });
 
   it("detects drift when a Dockerfile gains a COPY source absent from watch patterns", () => {

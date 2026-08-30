@@ -7,6 +7,33 @@ and uses semantic versioning.
 
 ## [Unreleased]
 
+## [0.6.9] - 2026-08-30
+
+- 2026-08-30 - build(railway): scope the Decision Runtime MCP service's deploy trigger (#89)
+  - `deploy/decision-runtime-mcp/railway.toml` declared no `build.watchPatterns`
+    at all, so every commit to the tracked branch redeployed the MCP service --
+    documentation, installer work, and changelog entries included. An absent
+    list is not a narrower boundary but the widest one. Same class as #86, but
+    broader: #86 over-triggered on one path, this triggered on all of them.
+  - The declared patterns are derived from the service's own Dockerfile `COPY`
+    sources: `apps/mcp`, `packages/contracts`, `packages/openclaw-adapter`,
+    `packages/mcp-service`, `packages/decision-runtime-mcp`, the shared root
+    manifests and TypeScript config, its own Dockerfile and `railway.toml`, and
+    `.dockerignore`. The repo-root `package.json` is excluded on the grounds
+    established in #86/#88. The database boundary stays excluded, matching the
+    image (`tests/decision-runtime-mcp-deployment.test.ts`).
+  - `tests/decision-runtime-watch-patterns.test.ts` now covers the MCP service
+    the same way it covers the API and worker -- COPY-derived set equality, plus
+    cases asserting that MCP-only paths reach only the MCP service and that db,
+    api, worker, docs, and installer paths reach it not at all. Mutation-checked:
+    dropping a single declared pattern fails the suite.
+  - `docs/decision-runtime-deployment.md`: trigger matrix extended to three
+    columns and split where the MCP's shared-package set diverges from the
+    API/worker's. `docs/architecture.md`: corrected from three services to four
+    (the MCP service was absent from the topology and diagram entirely) and
+    records that an absent `watchPatterns` is the widest boundary, not a
+    narrower one.
+
 ## [0.6.8] - 2026-08-30
 
 - 2026-08-30 - build(railway): stop redeploying the decision-runtime services on every version bump (#86)

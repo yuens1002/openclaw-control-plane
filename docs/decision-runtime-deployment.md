@@ -54,22 +54,34 @@ together, and neither file uses a negation pattern.
 
 Each service's patterns cover exactly its Dockerfile's build-stage `COPY`
 sources: its own app directory, its own Dockerfile and `railway.toml`, the
-shared `packages/contracts`, `packages/runtime-auth`, and `packages/db`
-(including migrations), the root dependency manifests and shared TypeScript
-configuration, and `.dockerignore`. Root OpenClaw's `railway.toml` declares no
-`watchPatterns` and continues to deploy on every commit to the tracked branch
-— that is unchanged by this feature.
+shared packages it actually compiles against, the root dependency manifests
+and shared TypeScript configuration, and `.dockerignore`. The API and worker
+share `packages/contracts`, `packages/runtime-auth`, and `packages/db`
+(including migrations); the MCP service shares only `packages/contracts`,
+and adds `packages/openclaw-adapter`, `packages/mcp-service`, and
+`packages/decision-runtime-mcp` — it deliberately excludes the database
+boundary (asserted in `tests/decision-runtime-mcp-deployment.test.ts`). Root
+OpenClaw's `railway.toml` declares no `watchPatterns` and continues to deploy
+on every commit to the tracked branch — that is unchanged.
 
-| Changed path | API deploys | Worker deploys |
-| --- | --- | --- |
-| `apps/api/**` | Yes | No |
-| `apps/worker/**` | No | Yes |
-| `packages/contracts/**`, `packages/runtime-auth/**`, `packages/db/**` (incl. migrations) | Yes | Yes |
-| `package-lock.json`, `tsconfig.json`, `tsconfig.base.json`, `.dockerignore` | Yes | Yes |
-| `package.json` (repo root) | No | No |
-| `deploy/decision-runtime/railway.toml` or `deploy/decision-runtime/Dockerfile` | Yes | No |
-| `deploy/decision-runtime/worker.railway.toml` or `deploy/decision-runtime/worker.Dockerfile` | No | Yes |
-| Documentation, the OpenClaw wrapper, or an unrelated package | No | No |
+The MCP service originally declared no `watchPatterns` either, which meant
+every commit to the tracked branch redeployed it (issue #89). An absent list
+is not a narrower list: it is equivalent to watching everything.
+
+| Changed path | API | Worker | MCP |
+| --- | --- | --- | --- |
+| `apps/api/**` | Yes | No | No |
+| `apps/worker/**` | No | Yes | No |
+| `apps/mcp/**` | No | No | Yes |
+| `packages/contracts/**` | Yes | Yes | Yes |
+| `packages/runtime-auth/**`, `packages/db/**` (incl. migrations) | Yes | Yes | No |
+| `packages/openclaw-adapter/**`, `packages/mcp-service/**`, `packages/decision-runtime-mcp/**` | No | No | Yes |
+| `package-lock.json`, `tsconfig.json`, `tsconfig.base.json`, `.dockerignore` | Yes | Yes | Yes |
+| `package.json` (repo root) | No | No | No |
+| `deploy/decision-runtime/railway.toml` or `deploy/decision-runtime/Dockerfile` | Yes | No | No |
+| `deploy/decision-runtime/worker.railway.toml` or `deploy/decision-runtime/worker.Dockerfile` | No | Yes | No |
+| `deploy/decision-runtime-mcp/railway.toml` or `deploy/decision-runtime-mcp/Dockerfile` | No | No | Yes |
+| Documentation, the OpenClaw wrapper, or an unrelated package | No | No | No |
 
 **Maintenance rule**: whenever either Dockerfile gains another copied
 source path — a new shared package, a new root manifest, a new build

@@ -75,11 +75,12 @@ The repository builds and deploys three independent Railway services from one
 Git history. Each service owns its own project boundary, build boundary,
 deployment boundary, and runtime boundary — they are not phases of one release.
 
-- **Project boundary**: one repository, one default branch, three services.
+- **Project boundary**: one repository, one default branch, four services.
 - **Service boundary**: each service selects its own config-as-code file
   (`railway.toml` for OpenClaw at the repository root;
   `deploy/decision-runtime/railway.toml` for the API;
-  `deploy/decision-runtime/worker.railway.toml` for the worker) and its own
+  `deploy/decision-runtime/worker.railway.toml` for the worker;
+  `deploy/decision-runtime-mcp/railway.toml` for the MCP service) and its own
   `dockerfilePath`. Railway otherwise discovers the root `railway.toml` by
   default, so every non-root service must point at its file explicitly.
 - **Build boundary**: every Dockerfile shares the same Docker build context
@@ -88,13 +89,16 @@ deployment boundary, and runtime boundary — they are not phases of one release
   app directory plus the shared packages and root manifests it actually
   compiles against. A service's build boundary is exactly what its
   Dockerfile copies, nothing more.
-- **Deployment boundary**: the decision-runtime API and worker each declare
-  `build.watchPatterns` matching their own Dockerfile's build boundary; root
-  OpenClaw declares none and deploys on every commit (see the diagram
-  below). A commit that touches only paths outside a service's watch
+- **Deployment boundary**: the decision-runtime API, worker, and MCP service
+  each declare `build.watchPatterns` matching their own Dockerfile's build
+  boundary; root OpenClaw declares none and deploys on every commit (see the
+  diagram below). A commit that touches only paths outside a service's watch
   patterns does not create a deployment for that service — **rebuilding one
-  sibling service does not rebuild another**. See [Private Decision Runtime
-  Deployment](decision-runtime-deployment.md) for the API/worker trigger
+  sibling service does not rebuild another**. An *absent* `watchPatterns` is
+  not a narrower boundary but the widest one — it deploys on every commit,
+  which is deliberate for root OpenClaw and was a defect for the MCP service
+  (issue #89). See [Private Decision Runtime
+  Deployment](decision-runtime-deployment.md) for the full trigger
   matrix.
 - **Runtime boundary**: OpenClaw and the decision-runtime services do not
   call each other directly at deploy time. The API and worker share one
@@ -111,7 +115,10 @@ repo (one default branch)
  ├─ deploy/decision-runtime/railway.toml       → decision-runtime API service
  │                                               (watchPatterns scoped to its
  │                                                Dockerfile's build input)
- └─ deploy/decision-runtime/worker.railway.toml → decision-runtime worker service
-                                                   (watchPatterns scoped to its
-                                                    Dockerfile's build input)
+ ├─ deploy/decision-runtime/worker.railway.toml → decision-runtime worker service
+ │                                                 (watchPatterns scoped to its
+ │                                                  Dockerfile's build input)
+ └─ deploy/decision-runtime-mcp/railway.toml   → decision-runtime MCP service
+                                                 (watchPatterns scoped to its
+                                                  Dockerfile's build input)
 ```
