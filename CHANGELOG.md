@@ -25,8 +25,14 @@ and uses semantic versioning.
   - `tests/decision-runtime-watch-patterns.test.ts` now covers the MCP service
     the same way it covers the API and worker -- COPY-derived set equality, plus
     cases asserting that MCP-only paths reach only the MCP service and that db,
-    api, worker, docs, and installer paths reach it not at all. Mutation-checked:
-    dropping a single declared pattern fails the suite.
+    api, and worker paths reach it not at all, plus a docs/changelog/installer
+    churn case asserted against all three services. Mutation-checked: dropping a
+    single declared pattern fails the suite.
+  - Pins `matchesAnyPattern`'s directory boundary. It treats `dir/**` as a prefix
+    check, and the trailing slash is the only thing stopping `/apps/mcp/**` from
+    matching `/apps/mcp-extra/...`; no existing case would have failed if that
+    slash were lost, in a repo full of prefix-similar names (`apps/mcp`,
+    `packages/mcp-service`, `packages/decision-runtime-mcp`). Mutation-checked.
   - `docs/decision-runtime-deployment.md`: trigger matrix extended to three
     columns and split where the MCP's shared-package set diverges from the
     API/worker's. `docs/architecture.md`: corrected from three services to four

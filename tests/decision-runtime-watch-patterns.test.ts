@@ -227,20 +227,41 @@ describe("decision runtime watch patterns", () => {
   });
 
   // The MCP image deliberately excludes the database boundary (see
-  // tests/decision-runtime-mcp-deployment.test.ts), so a db or api change must not
-  // reach it -- and docs/installer churn must not reach any of the three.
-  it("does not match the MCP service for db, api, worker, docs, or installer changes", () => {
+  // tests/decision-runtime-mcp-deployment.test.ts), so a db, api, or worker change
+  // must not reach it.
+  it("does not match the MCP service for db, api, or worker changes", () => {
+    const paths = ["packages/db/src/schema.ts", "apps/api/src/index.ts", "apps/worker/src/index.ts"];
+    for (const path of paths) {
+      expect(matchesAnyPattern(path, mcpPatterns)).toBe(false);
+    }
+  });
+
+  // Issue #89 was this churn reaching the MCP service on every commit. Assert it
+  // against all three services, matching what the comment claims.
+  it("matches no service for docs, changelog, or installer churn", () => {
     const paths = [
-      "packages/db/src/schema.ts",
-      "apps/api/src/index.ts",
-      "apps/worker/src/index.ts",
       "docs/architecture.md",
+      "docs/decision-runtime-deployment.md",
       "CHANGELOG.md",
       "packages/openclaw-railway-installer/src/cli.ts"
     ];
     for (const path of paths) {
+      expect(matchesAnyPattern(path, apiPatterns)).toBe(false);
+      expect(matchesAnyPattern(path, workerPatterns)).toBe(false);
       expect(matchesAnyPattern(path, mcpPatterns)).toBe(false);
     }
+  });
+
+  // `matchesAnyPattern` treats `dir/**` as a prefix check, and the trailing slash
+  // left by `slice(0, -2)` is the only thing stopping `/apps/mcp/**` from matching
+  // `/apps/mcp-extra/...`. Nothing else in this suite would fail if that slash were
+  // lost, and this repo is full of prefix-similar names (apps/mcp,
+  // packages/mcp-service, packages/decision-runtime-mcp), so pin the boundary.
+  it("does not let a dir/** pattern match a prefix-similar sibling directory", () => {
+    expect(matchesAnyPattern("apps/mcp-extra/src/index.ts", mcpPatterns)).toBe(false);
+    expect(matchesAnyPattern("packages/mcp-service-tools/src/index.ts", mcpPatterns)).toBe(false);
+    expect(matchesAnyPattern("apps/api-v2/src/index.ts", apiPatterns)).toBe(false);
+    expect(matchesAnyPattern("packages/db-utils/src/index.ts", workerPatterns)).toBe(false);
   });
 
   it("detects drift when a Dockerfile gains a COPY source absent from watch patterns", () => {

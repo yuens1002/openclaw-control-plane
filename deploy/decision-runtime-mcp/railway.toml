@@ -9,7 +9,11 @@ dockerfilePath = "deploy/decision-runtime-mcp/Dockerfile"
 # Dockerfile invokes no root npm script (it runs `npm ci`, then an explicit
 # `tsc -b`), and the manifest's build-relevant content -- `workspaces` and the
 # root dependency sets -- is mirrored into /package-lock.json, which stays
-# watched. See issue #86 and docs/decision-runtime-deployment.md.
+# watched. Two things would break that and are guarded in
+# tests/decision-runtime-watch-patterns.test.ts: a root install-lifecycle
+# script (`npm ci` would run it, changing the image with no watched path
+# changing), and this list drifting from the Dockerfile's COPY sources.
+# See issue #86, issue #89, and docs/decision-runtime-deployment.md.
 watchPatterns = [
   "/apps/mcp/**",
   "/packages/contracts/**",
