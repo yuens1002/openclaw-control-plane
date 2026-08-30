@@ -23,7 +23,7 @@ and uses semantic versioning.
     the practical symptom is already resolved: after #86 and #89 these services
     deploy only on real Decision Runtime code changes rather than on every commit.
   - Names the conditions that should trigger revisiting: a second project needing
-    its own pair, these services changing often enough that client-facing deploys
+    its own Decision Runtime services, them changing often enough that client-facing deploys
     become routine, or a client instance and the runtime needing to be operated
     or handed off separately.
   - Documentation only. No infrastructure is changed by this release.

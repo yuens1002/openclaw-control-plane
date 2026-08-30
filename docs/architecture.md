@@ -83,7 +83,7 @@ deployment boundary, and runtime boundary — they are not phases of one release
   merge is a production event inside a client-facing project, with no promotion
   step between review and a running service. Placement is also what makes the
   deployment per-client rather than shared: a second such project would get its
-  own pair, and one commit would reach both at once.
+  own Decision Runtime services, and one commit would reach every copy at once.
 
   This is an **accepted tradeoff**, not an oversight (issue #90). Relocating
   them into this repository's own project — with client instances reaching them
@@ -96,7 +96,7 @@ deployment boundary, and runtime boundary — they are not phases of one release
   than on every commit.
 
   Revisit if any of the following becomes true: a second project needs its own
-  Decision Runtime pair (fan-out stops being hypothetical), the services start
+  Decision Runtime services (fan-out stops being hypothetical), they start
   changing often enough that client-facing deploys become routine, or a client
   instance and the runtime need to be operated or handed off separately.
 - **Service boundary**: each service selects its own config-as-code file
