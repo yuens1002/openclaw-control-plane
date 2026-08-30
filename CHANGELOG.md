@@ -7,6 +7,27 @@ and uses semantic versioning.
 
 ## [Unreleased]
 
+## [0.6.10] - 2026-08-30
+
+- 2026-08-30 - docs(architecture): record Decision Runtime project placement as an accepted tradeoff (#90)
+  - The Decision Runtime services are provisioned alongside a provisioned client
+    instance rather than in this repository's own project, and are git-connected
+    to the tracked branch -- so a merge is a production event inside a
+    client-facing project, and the deployment is per-client rather than shared.
+    Neither property was written down anywhere; `docs/architecture.md` described
+    the topology as repo-to-service without noting which project the services
+    land in.
+  - Recorded as an accepted tradeoff rather than acted on. Relocating would mean
+    re-provisioning services, re-supplying every secret from its source of truth,
+    and cutting a live client instance over to new URLs -- not justified, because
+    the practical symptom is already resolved: after #86 and #89 these services
+    deploy only on real Decision Runtime code changes rather than on every commit.
+  - Names the conditions that should trigger revisiting: a second project needing
+    its own pair, these services changing often enough that client-facing deploys
+    become routine, or a client instance and the runtime needing to be operated
+    or handed off separately.
+  - Documentation only. No infrastructure is changed by this release.
+
 ## [0.6.9] - 2026-08-30
 
 - 2026-08-30 - build(railway): scope the Decision Runtime MCP service's deploy trigger (#89)

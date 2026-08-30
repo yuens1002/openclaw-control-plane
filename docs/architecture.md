@@ -76,6 +76,29 @@ Git history. Each service owns its own project boundary, build boundary,
 deployment boundary, and runtime boundary — they are not phases of one release.
 
 - **Project boundary**: one repository, one default branch, four services.
+- **Project placement**: the Decision Runtime services are provisioned in the
+  same Railway project as a provisioned client instance, not in the project
+  named for this repository. Because they are git-connected to the tracked
+  branch, a merge that matches their watch patterns deploys them there — so a
+  merge is a production event inside a client-facing project, with no promotion
+  step between review and a running service. Placement is also what makes the
+  deployment per-client rather than shared: a second such project would get its
+  own pair, and one commit would reach both at once.
+
+  This is an **accepted tradeoff**, not an oversight (issue #90). Relocating
+  them into this repository's own project — with client instances reaching them
+  over the authenticated `/v1/runtime` boundary that already exists — would
+  remove both properties, but it means re-provisioning services, re-supplying
+  every secret from its source of truth, and cutting a live client instance
+  over to new URLs. That cost is not currently justified, because the practical
+  symptom is already gone: scoping the watch patterns (issues #86, #89) means
+  these services now deploy only on real Decision Runtime code changes rather
+  than on every commit.
+
+  Revisit if any of the following becomes true: a second project needs its own
+  Decision Runtime pair (fan-out stops being hypothetical), the services start
+  changing often enough that client-facing deploys become routine, or a client
+  instance and the runtime need to be operated or handed off separately.
 - **Service boundary**: each service selects its own config-as-code file
   (`railway.toml` for OpenClaw at the repository root;
   `deploy/decision-runtime/railway.toml` for the API;
