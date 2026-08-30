@@ -71,7 +71,7 @@ public baseline.
 
 ## Deployment Topology
 
-The repository builds and deploys three independent Railway services from one
+The repository builds and deploys four independent Railway services from one
 Git history. Each service owns its own project boundary, build boundary,
 deployment boundary, and runtime boundary — they are not phases of one release.
 

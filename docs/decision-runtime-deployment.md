@@ -44,13 +44,14 @@ release job.
 
 ## Build triggers
 
-Both `deploy/decision-runtime/railway.toml` and
-`deploy/decision-runtime/worker.railway.toml` declare `build.watchPatterns` —
+All three Decision Runtime configs — `deploy/decision-runtime/railway.toml`,
+`deploy/decision-runtime/worker.railway.toml`, and
+`deploy/decision-runtime-mcp/railway.toml` — declare `build.watchPatterns`:
 gitignore-style path patterns, evaluated from the repository root regardless
 of any root directory setting, that gate whether a commit creates a new
 deployment for that service. A commit matching none of a service's patterns
 skips a deployment for that service entirely; multiple patterns are OR'd
-together, and neither file uses a negation pattern.
+together, and none of the three files uses a negation pattern.
 
 Each service's patterns cover exactly its Dockerfile's build-stage `COPY`
 sources: its own app directory, its own Dockerfile and `railway.toml`, the
