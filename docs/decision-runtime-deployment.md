@@ -65,7 +65,8 @@ configuration, and `.dockerignore`. Root OpenClaw's `railway.toml` declares no
 | `apps/api/**` | Yes | No |
 | `apps/worker/**` | No | Yes |
 | `packages/contracts/**`, `packages/runtime-auth/**`, `packages/db/**` (incl. migrations) | Yes | Yes |
-| `package.json`, `package-lock.json`, `tsconfig.json`, `tsconfig.base.json`, `.dockerignore` | Yes | Yes |
+| `package-lock.json`, `tsconfig.json`, `tsconfig.base.json`, `.dockerignore` | Yes | Yes |
+| `package.json` (repo root) | No | No |
 | `deploy/decision-runtime/railway.toml` or `deploy/decision-runtime/Dockerfile` | Yes | No |
 | `deploy/decision-runtime/worker.railway.toml` or `deploy/decision-runtime/worker.Dockerfile` | No | Yes |
 | Documentation, the OpenClaw wrapper, or an unrelated package | No | No |
@@ -77,6 +78,32 @@ same change. An uncovered path silently stops triggering deployments for
 real build-input changes; `tests/decision-runtime-watch-patterns.test.ts`
 enforces this by deriving the expected pattern set directly from each
 Dockerfile's `COPY` sources and asserting it matches the declared patterns.
+
+**The one deliberate exception** (issue #86): the repo-root `package.json` is
+copied by both Dockerfiles but is *not* watched. Its `version` field moves on
+every release, so watching it redeployed both live services once per release
+for a change neither image reads — a restart-triggering operation on a live
+target caused by a version string. Neither Dockerfile runs a root npm script
+(each runs `npm ci` then an explicit `tsc -b`), and the manifest's only
+build-relevant content — `workspaces` and the root dependency sets — is
+mirrored into `package-lock.json`, which stays watched. The exclusion is
+declared explicitly in the drift test via `deriveExpectedPatterns`'s third
+argument, so the 1:1 rule above still holds for everything else.
+
+Two things would invalidate that reasoning, and both are guarded or noted:
+
+- **A root install-lifecycle script** (`preinstall`/`install`/`postinstall`/
+  `prepare`) would let a root-manifest edit change the built image with no
+  watched path changing — a silently missed deploy. The drift test asserts
+  none are declared.
+- **Re-syncing the lockfile's own `version` field.** `package-lock.json`
+  currently records a stale root version and is not touched by release
+  bumps, which is *why* watching it does not reintroduce the per-release
+  redeploy. Adopting `npm version` — or running `npm install
+  --package-lock-only` — would write the new version into the lockfile on
+  every release and bring the problem straight back through the watched
+  `/package-lock.json`. Bump `package.json` alone, or re-scope the watch to
+  the lockfile's dependency content, if that ever changes.
 
 **Verification procedure** (generic — run against any GitHub-connected
 decision-runtime service, replacing no identifiers below):

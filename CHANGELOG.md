@@ -7,6 +7,38 @@ and uses semantic versioning.
 
 ## [Unreleased]
 
+## [0.6.8] - 2026-08-30
+
+- 2026-08-30 - build(railway): stop redeploying the decision-runtime services on every version bump (#86)
+  - `deploy/decision-runtime/railway.toml` and `worker.railway.toml` listed the
+    repo-root `/package.json` in `build.watchPatterns`. Every release bumps that
+    file's `version`, so every release rebuilt and redeployed the decision-runtime
+    API and worker services -- a `restart-or-redeploy-triggering` operation on a
+    live target caused by a version string rather than by a change to the build
+    input. Observed on 0.6.6 -> 0.6.7, whose only other changes were to the
+    installer and setup-applier packages that neither service builds from.
+  - Both entries are removed and replaced with a comment recording why the root
+    manifest is deliberately absent: neither Dockerfile invokes a root npm
+    script (each runs `npm ci` then an explicit `tsc -b`), and its only
+    build-relevant content -- `workspaces` and the root dependency sets -- is
+    mirrored into `/package-lock.json`, which stays watched.
+  - `tests/decision-runtime-watch-patterns.test.ts` is the drift detector that
+    derives each service's expected patterns from its Dockerfile's `COPY`
+    sources, so the removal had to be declared to it rather than left to fail:
+    `deriveExpectedPatterns` gains an explicit `exclude` argument, and a new
+    case pins that a repo-root `package.json` change now matches neither
+    service. The 1:1 COPY-source rule still holds for every other path.
+  - Two premises of the exclusion are now guarded rather than merely asserted.
+    A new test requires the root manifest to declare no install-lifecycle
+    scripts (`npm ci` would run one, changing the image with no watched path
+    changing -- a silently missed deploy). And `docs/decision-runtime-deployment.md`
+    records that mirroring the release version into `package-lock.json` (via
+    `npm version` or `npm install --package-lock-only`) would reintroduce the
+    per-release redeploy through the still-watched `/package-lock.json`.
+  - `docs/decision-runtime-deployment.md`: trigger matrix corrected (root
+    `package.json` now deploys neither service) and the maintenance rule
+    extended with the exception and its two guards.
+
 ## [0.6.7] - 2026-08-27
 
 - 2026-08-27 - fix(installer): refuse to approve device pairing before a baseline config exists (issue #77's sibling)
