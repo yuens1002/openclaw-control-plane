@@ -7,6 +7,22 @@ and uses semantic versioning.
 
 ## [Unreleased]
 
+## [0.6.8] - 2026-08-30
+
+- 2026-08-30 - build(railway): stop redeploying the decision-runtime services on every version bump (#86)
+  - `deploy/decision-runtime/railway.toml` and `worker.railway.toml` listed the
+    repo-root `/package.json` in `build.watchPatterns`. Every release bumps that
+    file's `version`, so every release rebuilt and redeployed the decision-runtime
+    API and worker services -- a `restart-or-redeploy-triggering` operation on a
+    live target caused by a version string rather than by a change to the build
+    input. Observed on 0.6.6 -> 0.6.7, whose only other changes were to the
+    installer and setup-applier packages that neither service builds from.
+  - Both entries are removed and replaced with a comment recording why the root
+    manifest is deliberately absent: neither Dockerfile reads it (each runs
+    `npm ci` and an explicit `tsc -b`, never a root script), and its only
+    build-relevant fields -- `workspaces` and the root dependency sets -- cannot
+    change without rewriting `/package-lock.json`, which stays watched.
+
 ## [0.6.7] - 2026-08-27
 
 - 2026-08-27 - fix(installer): refuse to approve device pairing before a baseline config exists (issue #77's sibling)

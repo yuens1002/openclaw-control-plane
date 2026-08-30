@@ -1,12 +1,17 @@
 [build]
 builder = "dockerfile"
 dockerfilePath = "deploy/decision-runtime/worker.Dockerfile"
+# The repo-root /package.json is deliberately absent from watchPatterns. It
+# moves on every release (version bump) but nothing this image builds reads
+# it: the Dockerfile runs `npm ci` and an explicit `tsc -b`, never a root
+# script. Its only build-relevant fields are `workspaces` and the root
+# dependency sets, and a change to either rewrites /package-lock.json, which
+# is watched. See issue #86.
 watchPatterns = [
   "/apps/worker/**",
   "/packages/contracts/**",
   "/packages/runtime-auth/**",
   "/packages/db/**",
-  "/package.json",
   "/package-lock.json",
   "/tsconfig.json",
   "/tsconfig.base.json",
