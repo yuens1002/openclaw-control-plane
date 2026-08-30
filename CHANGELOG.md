@@ -7,6 +7,19 @@ and uses semantic versioning.
 
 ## [Unreleased]
 
+## [0.6.7] - 2026-08-27
+
+- 2026-08-27 - fix(installer): refuse to approve device pairing before a baseline config exists (issue #77's sibling)
+  - `provisionClientInstance`'s own `approveOwnDevicePairing` call runs before
+    a genuinely fresh instance has any baseline config, and the wrapper's
+    `/setup/api/devices/pending` proxies to a gateway that has not started
+    at all yet -- confirmed live (dogfood-throwaway-01 bootstrap): `{ok:false}`
+    with a 500. `approveOwnDevicePairing` now returns a `status` (`"approved"`
+    / `"no-pending"` / `"not-ready"`) instead of throwing on `ok:false`, and
+    `bootstrapOnboardingCycle` retries it once `apply` has established a
+    baseline -- the exact shape issue #77 already established for
+    `patchAllowedOrigins`.
+
 ## [0.6.6] - 2026-08-27
 
 - 2026-08-27 - fix(wrapper): scoped state export writes zero-byte -wal/-shm placeholders (#79)

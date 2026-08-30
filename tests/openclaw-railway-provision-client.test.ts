@@ -134,6 +134,7 @@ describe("provisionClientInstance — fresh provision", () => {
     expect(result.patchedAllowedOrigins).toBe(true);
     expect(result.allowedOriginsStatus).toBe("patched");
     expect(result.approvedDeviceRequestId).toBe("req_1");
+    expect(result.deviceApprovalStatus).toBe("approved");
   });
 
   it("does not POST an origin patch against a genuinely fresh instance with no gateway.mode yet (issue #77)", async () => {
@@ -151,12 +152,19 @@ describe("provisionClientInstance — fresh provision", () => {
         postConfigRaw: async () => {
           throw new Error("must not POST an origin patch before a baseline config exists");
         },
-        getPendingDevices: async () => ({ ok: true, requestIds: [] })
+        // Confirmed live: on this same genuinely-fresh instance, the
+        // gateway has not started at all yet (no config to start it with),
+        // so /setup/api/devices/pending also answers {ok:false} -- issue
+        // #77's sibling, not the happy-path {ok:true, requestIds:[]} this
+        // suite's other tests use for an already-baseline'd instance.
+        getPendingDevices: async () => ({ ok: false, requestIds: [] })
       })
     );
 
     expect(result.patchedAllowedOrigins).toBe(false);
     expect(result.allowedOriginsStatus).toBe("refused-missing-baseline");
+    expect(result.approvedDeviceRequestId).toBeUndefined();
+    expect(result.deviceApprovalStatus).toBe("not-ready");
   });
 
   it("does not POST a config patch or approve anything when there's nothing to do", async () => {
@@ -177,6 +185,7 @@ describe("provisionClientInstance — fresh provision", () => {
     expect(result.patchedAllowedOrigins).toBe(false);
     expect(result.allowedOriginsStatus).toBe("already-present");
     expect(result.approvedDeviceRequestId).toBeUndefined();
+    expect(result.deviceApprovalStatus).toBe("no-pending");
   });
 
   it("defaults OPENCLAW_TEMPLATE_REF from the injected template-lock reader but allows an explicit override", async () => {

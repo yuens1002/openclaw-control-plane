@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import type { RailwayRunner } from "@openclaw-control-plane/openclaw-railway-installer";
 
+import { describeDeviceApprovalStatus } from "@openclaw-control-plane/openclaw-railway-installer/approve-own-device";
 import { describePatchAllowedOriginsStatus } from "@openclaw-control-plane/openclaw-railway-installer/patch-allowed-origins";
 
 import {
@@ -48,6 +49,12 @@ async function main(): Promise<void> {
     );
     console.log(
       `Patched allowedOrigins (retry after apply): ${describePatchAllowedOriginsStatus(result.allowedOriginsStatus)}`
+    );
+    console.log(
+      `Approved device pairing request (initial provisioning, before setup): ${describeDeviceApprovalStatus(result.provision.deviceApprovalStatus, result.provision.approvedDeviceRequestId)}`
+    );
+    console.log(
+      `Approved device pairing request (retry after apply): ${describeDeviceApprovalStatus(result.deviceApprovalStatus, result.approvedDeviceRequestId)}`
     );
     console.log(`Apply outcome: ${result.apply.outcome}`);
     if (result.apply.mintedKeyHash !== undefined) {

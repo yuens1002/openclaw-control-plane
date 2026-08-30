@@ -17,7 +17,12 @@ import { randomBytes } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
-import { approveOwnDevicePairing, type ApproveOwnDeviceDependencies } from "./approve-own-device.js";
+import {
+  approveOwnDevicePairing,
+  describeDeviceApprovalStatus,
+  type ApproveOwnDeviceDependencies,
+  type ApproveOwnDeviceStatus
+} from "./approve-own-device.js";
 import {
   patchAllowedOrigins,
   describePatchAllowedOriginsStatus,
@@ -126,6 +131,16 @@ export interface InstallResult {
   /** Disambiguates `patchedAllowedOrigins:false` -- see `PatchAllowedOriginsStatus`. */
   allowedOriginsStatus: PatchAllowedOriginsStatus;
   approvedDeviceRequestId?: string;
+  /**
+   * Disambiguates an absent `approvedDeviceRequestId` -- see
+   * `ApproveOwnDeviceStatus`. This flow has no automated apply step to
+   * retry after (the human completes setup via the wizard, per the
+   * handoff's own Next Steps), so a `"not-ready"` reading here can persist
+   * until the operator finishes setup manually -- same situation
+   * `allowedOriginsStatus: "refused-missing-baseline"` already leaves
+   * unretried in this path.
+   */
+  deviceApprovalStatus: ApproveOwnDeviceStatus;
 }
 
 interface RequiredOptions {
@@ -187,7 +202,7 @@ This file is local-only and should not be committed.
 ## Post-Deploy Automation
 
 - Patched allowedOrigins: ${describePatchAllowedOriginsStatus(result.allowedOriginsStatus)}
-- Approved device pairing request: ${result.approvedDeviceRequestId ?? "none pending"}
+- Approved device pairing request: ${describeDeviceApprovalStatus(result.deviceApprovalStatus, result.approvedDeviceRequestId)}
 
 ## Next Steps
 
@@ -262,10 +277,11 @@ export async function installOpenClawOnRailway(
     domain.domain,
     { getConfigRaw: dependencies.getConfigRaw, postConfigRaw: dependencies.postConfigRaw }
   );
-  const approvedDeviceRequestId = await approveOwnDevicePairing(baseUrl, setupAuth, {
-    getPendingDevices: dependencies.getPendingDevices,
-    approveDevice: dependencies.approveDevice
-  });
+  const { requestId: approvedDeviceRequestId, status: deviceApprovalStatus } = await approveOwnDevicePairing(
+    baseUrl,
+    setupAuth,
+    { getPendingDevices: dependencies.getPendingDevices, approveDevice: dependencies.approveDevice }
+  );
 
   const resultBase = {
     serviceId: service.id,
@@ -279,6 +295,7 @@ export async function installOpenClawOnRailway(
     reusedExistingService,
     patchedAllowedOrigins,
     allowedOriginsStatus,
+    deviceApprovalStatus,
     ...(approvedDeviceRequestId ? { approvedDeviceRequestId } : {}),
     ...(service.latestDeployment?.id ? { deploymentId: service.latestDeployment.id } : {})
   } satisfies Omit<InstallResult, "wroteEnvLocal" | "wroteHandoff">;
