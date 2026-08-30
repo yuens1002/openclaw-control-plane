@@ -28,7 +28,16 @@ function parseWatchPatterns(tomlText: string): string[] {
  * inside it both appear, matching the 1:1 mapping this feature's real
  * watchPatterns arrays use.
  */
-function deriveExpectedPatterns(dockerfileText: string, extras: string[]): Set<string> {
+// `exclude` carries deliberate, documented departures from the otherwise 1:1
+// COPY-source -> watchPattern mapping. Issue #86: the repo-root /package.json is
+// copied by both Dockerfiles but is intentionally NOT watched, because its
+// version field moves on every release and would redeploy both live services
+// for a change neither image reads.
+function deriveExpectedPatterns(
+  dockerfileText: string,
+  extras: string[],
+  exclude: string[] = []
+): Set<string> {
   const patterns = new Set<string>(extras);
   for (const line of dockerfileText.split(/\r?\n/)) {
     const copyMatch = line.match(/^COPY\s+(.+)$/);
@@ -45,6 +54,7 @@ function deriveExpectedPatterns(dockerfileText: string, extras: string[]): Set<s
       patterns.add(isFile ? `/${source}` : `/${source}/**`);
     }
   }
+  for (const excluded of exclude) patterns.delete(excluded);
   return patterns;
 }
 
@@ -112,11 +122,32 @@ describe("decision runtime watch patterns", () => {
   });
 
   it("matches a dependency or shared config change to both services", () => {
-    const paths = ["package.json", "package-lock.json", "tsconfig.json", "tsconfig.base.json", ".dockerignore"];
+    const paths = ["package-lock.json", "tsconfig.json", "tsconfig.base.json", ".dockerignore"];
     for (const path of paths) {
       expect(matchesAnyPattern(path, apiPatterns)).toBe(true);
       expect(matchesAnyPattern(path, workerPatterns)).toBe(true);
     }
+  });
+
+  // Issue #86. A release bumps only the root manifest's version field, which no
+  // decision-runtime image reads; watching it redeployed both live services once
+  // per release. Real dependency and workspace changes still rewrite
+  // package-lock.json, which stays watched above.
+  it("matches neither service for a repo-root package.json change", () => {
+    expect(matchesAnyPattern("package.json", apiPatterns)).toBe(false);
+    expect(matchesAnyPattern("package.json", workerPatterns)).toBe(false);
+  });
+
+  // Guards the premise of the exclusion above. Both Dockerfiles run `npm ci`,
+  // which executes root install-lifecycle scripts if any are declared. While none
+  // exist, a root-manifest edit cannot change the built image without also
+  // rewriting package-lock.json. Adding one would break that: the image would
+  // change with no watched path changing, silently skipping both deploys.
+  it("declares no root install-lifecycle scripts, so an unwatched package.json cannot alter the image", async () => {
+    const manifest = JSON.parse(await read("package.json")) as { scripts?: Record<string, string> };
+    const lifecycle = ["preinstall", "install", "postinstall", "prepare", "prepublish", "preprepare", "postprepare"];
+    const declared = lifecycle.filter((name) => manifest.scripts?.[name] !== undefined);
+    expect(declared).toEqual([]);
   });
 
   it("matches a deployment-target change to its own service only", () => {
@@ -147,7 +178,7 @@ describe("decision runtime watch patterns", () => {
       "/deploy/decision-runtime/Dockerfile",
       "/deploy/decision-runtime/railway.toml",
       "/.dockerignore"
-    ]);
+    ], ["/package.json"]);
     expect(new Set(apiPatterns)).toEqual(expected);
   });
 
@@ -156,7 +187,7 @@ describe("decision runtime watch patterns", () => {
       "/deploy/decision-runtime/worker.Dockerfile",
       "/deploy/decision-runtime/worker.railway.toml",
       "/.dockerignore"
-    ]);
+    ], ["/package.json"]);
     expect(new Set(workerPatterns)).toEqual(expected);
   });
 

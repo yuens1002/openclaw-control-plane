@@ -18,10 +18,26 @@ and uses semantic versioning.
     input. Observed on 0.6.6 -> 0.6.7, whose only other changes were to the
     installer and setup-applier packages that neither service builds from.
   - Both entries are removed and replaced with a comment recording why the root
-    manifest is deliberately absent: neither Dockerfile reads it (each runs
-    `npm ci` and an explicit `tsc -b`, never a root script), and its only
-    build-relevant fields -- `workspaces` and the root dependency sets -- cannot
-    change without rewriting `/package-lock.json`, which stays watched.
+    manifest is deliberately absent: neither Dockerfile invokes a root npm
+    script (each runs `npm ci` then an explicit `tsc -b`), and its only
+    build-relevant content -- `workspaces` and the root dependency sets -- is
+    mirrored into `/package-lock.json`, which stays watched.
+  - `tests/decision-runtime-watch-patterns.test.ts` is the drift detector that
+    derives each service's expected patterns from its Dockerfile's `COPY`
+    sources, so the removal had to be declared to it rather than left to fail:
+    `deriveExpectedPatterns` gains an explicit `exclude` argument, and a new
+    case pins that a repo-root `package.json` change now matches neither
+    service. The 1:1 COPY-source rule still holds for every other path.
+  - Two premises of the exclusion are now guarded rather than merely asserted.
+    A new test requires the root manifest to declare no install-lifecycle
+    scripts (`npm ci` would run one, changing the image with no watched path
+    changing -- a silently missed deploy). And `docs/decision-runtime-deployment.md`
+    records that mirroring the release version into `package-lock.json` (via
+    `npm version` or `npm install --package-lock-only`) would reintroduce the
+    per-release redeploy through the still-watched `/package-lock.json`.
+  - `docs/decision-runtime-deployment.md`: trigger matrix corrected (root
+    `package.json` now deploys neither service) and the maintenance rule
+    extended with the exception and its two guards.
 
 ## [0.6.7] - 2026-08-27
 
