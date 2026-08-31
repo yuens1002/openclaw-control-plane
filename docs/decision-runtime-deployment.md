@@ -120,9 +120,11 @@ Two things would invalidate that reasoning, and both are guarded or noted:
 
 **Verification procedure** — covers all three Decision Runtime services
 together, since several steps assert on which siblings *don't* deploy. Generic
-in this repo's sense: no project, service, domain, or deployment identifier
-appears below, so it runs unmodified against any GitHub-connected deployment of
-these services. Repository-relative paths are not identifiers.
+in this repo's sense (see [docs/README.md](README.md)'s Public-Repo Rule): no
+deployment-specific project or service *names*, domains, or deployment IDs
+appear below, so it runs unmodified against any GitHub-connected deployment of
+these services. Repository-relative paths and the services' generic role names
+— "the API", "the worker", "the MCP service" — are not identifiers.
 
 1. Confirm each service's config-as-code path is set to its own file:
    `deploy/decision-runtime/railway.toml` for the API,
