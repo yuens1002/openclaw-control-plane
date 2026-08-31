@@ -118,8 +118,11 @@ Two things would invalidate that reasoning, and both are guarded or noted:
   `/package-lock.json`. Bump `package.json` alone, or re-scope the watch to
   the lockfile's dependency content, if that ever changes.
 
-**Verification procedure** (generic — run against any GitHub-connected
-decision-runtime service, replacing no identifiers below):
+**Verification procedure** — covers all three Decision Runtime services
+together, since several steps assert on which siblings *don't* deploy. Generic
+in this repo's sense: no project, service, domain, or deployment identifier
+appears below, so it runs unmodified against any GitHub-connected deployment of
+these services. Repository-relative paths are not identifiers.
 
 1. Confirm each service's config-as-code path is set to its own file:
    `deploy/decision-runtime/railway.toml` for the API,
