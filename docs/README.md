@@ -28,7 +28,13 @@ Examples:
 - Feature docs describe one product or worker vertical.
 - Operations docs describe setup, deploy, verification, and recovery flows.
 - Plans live under `docs/plans/<feature-slug>/` and are used by the
-  agentic-workflow cadence.
+  agentic-workflow cadence. Like ADRs, a plan and its ACs are a
+  **point-in-time record** — they capture what was designed and what was
+  verified when that feature shipped, and are not updated as the system
+  moves on. A superseded plan stays as written; the living description
+  belongs in the architecture, feature, or operations doc that owns the
+  subject. So a plan asserting something no longer true is history, not
+  drift — when auditing docs against reality, read `docs/plans/**` as a log.
 - ADRs (architecture decision records) live under `docs/adr/`, one
   sequentially numbered file per point-in-time decision (status, context,
   decision, consequences). Unlike architecture docs, an ADR is not updated
