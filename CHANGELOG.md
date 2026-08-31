@@ -7,6 +7,28 @@ and uses semantic versioning.
 
 ## [Unreleased]
 
+## [0.6.11] - 2026-08-31
+
+- 2026-08-31 - docs(ops): bring the deploy-trigger verification procedure up to three services
+  - Found by auditing the repo's docs against reality after #88/#91/#92. The
+    "Build triggers" intro, trigger matrix, and maintenance rule were updated for
+    the MCP service in #91, but the **verification procedure** below them was
+    left two-service and had gone stale in three ways: step 1's
+    `deploy/decision-runtime/*.railway.toml` glob does not match the MCP config;
+    step 4 said a `packages/db/**` change deploys "both services", which is now
+    misleading since the MCP service deliberately excludes the database boundary;
+    and step 5's "neither service" missed a third.
+  - Rewritten for all three services, and extended with two cases the procedure
+    never covered: a `packages/contracts/**` change (shared by all three, so all
+    three should deploy) and a root `package.json` version-only bump (should
+    deploy none -- if any does, `package-lock.json` was rewritten too, which is
+    exactly the failure mode the #86 exception exists to prevent).
+  - `docs/README.md`: records that plans and their ACs are point-in-time records
+    like ADRs, not living docs. The Document Types list stated that freeze rule
+    for ADRs but left it unstated for plans, so a plan asserting something no
+    longer true was ambiguous between history and drift. `docs/plans/**` is a log.
+  - Documentation only.
+
 ## [0.6.10] - 2026-08-30
 
 - 2026-08-30 - docs(architecture): record Decision Runtime project placement as an accepted tradeoff (#90)
