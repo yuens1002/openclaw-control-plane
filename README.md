@@ -62,17 +62,16 @@ run as — it holds no runtime engine of its own.
 See [docs/architecture.md](docs/architecture.md) for the full package and
 deployment-topology breakdown.
 
-## Decision Runtime
+## External MCP Attachments
 
-The authenticated Decision Runtime — the durable execution boundary for typed
-agent and service work (events, approvals, action attempts, artifacts,
-provenance, rebuildable projections) — lives in its own repository,
-`decision-runtime`, independently versioned and deployed. It is not code in
-this repo. A provisioned OpenClaw instance reaches it, when attached, over MCP
-— declared as a profile attachment like any other model provider or channel
+A provisioned OpenClaw instance may attach an external MCP server —
+independently versioned and deployed, and not code in this repo — declared
+as a profile attachment like any other model provider or channel
 (`attachments.mcpServers[]`; see
 [docs/setup-profile-applier.md](docs/setup-profile-applier.md)) — never
-through a workspace dependency.
+through a workspace dependency. This repo does not name or depend on which
+server, if any, a given instance attaches; that server's own architecture
+and docs live in its own repository.
 
 `attachments.mcpServers[]` is a schema capability only today: the setup-profile
 applier parses and validates it, but no code path acts on it yet, so declaring
