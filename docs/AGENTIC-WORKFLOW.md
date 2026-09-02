@@ -37,8 +37,8 @@ frontend to screenshot.
 
 No dev server, no admin login. Instead:
 
-1. `npm run typecheck && npm test && npm run build` green on the branch's
-   base commit.
+1. `npm run precheck` (typecheck + test + build) green on the branch's base
+   commit.
 2. If the feature touches Railway deploy/provisioning: `railway whoami`
    succeeds (confirms the CLI session used by `railway-vars:guard` and
    `railway-proof:verify` is authenticated).

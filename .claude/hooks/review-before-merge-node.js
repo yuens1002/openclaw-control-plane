@@ -77,9 +77,67 @@ function splitShellStatements(command) {
   return statements;
 }
 
-function commandInvokesGhPr(command, subcommand) {
-  const pattern = new RegExp(`^\\s*gh\\s+pr\\s+${subcommand}\\b`);
-  return splitShellStatements(command).some((stmt) => pattern.test(stmt));
+// Word-tokenize one already-isolated shell statement (quote-aware, same
+// quote-tracking rules as splitShellStatements). Used to parse `gh pr
+// merge`'s own arguments without re-scanning the raw command string, which
+// would risk pulling tokens from an unrelated chained command.
+function tokenize(statement) {
+  const tokens = [];
+  let current = "";
+  let quote = null;
+  let inToken = false;
+  for (let i = 0; i < statement.length; i++) {
+    const ch = statement[i];
+    if (quote) {
+      if (ch === quote) {
+        quote = null;
+      } else if (quote === '"' && ch === "\\" && i + 1 < statement.length) {
+        current += statement[++i];
+      } else {
+        current += ch;
+      }
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      inToken = true;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (inToken) tokens.push(current);
+      current = "";
+      inToken = false;
+      continue;
+    }
+    if (ch === "\\" && i + 1 < statement.length) {
+      current += statement[++i];
+      inToken = true;
+      continue;
+    }
+    current += ch;
+    inToken = true;
+  }
+  if (inToken) tokens.push(current);
+  return tokens;
+}
+
+// Finds the actual `gh pr <subcommand>` statement (allowing leading env
+// var assignments, e.g. `FOO=bar gh pr merge ...`, which would otherwise
+// bypass the gate entirely), returning it for further inspection, or null
+// if the command never really invokes it.
+function findGhPrStatement(command, subcommand) {
+  const pattern = new RegExp(`^\\s*(?:[A-Za-z_]\\w*=\\S*\\s+)*gh\\s+pr\\s+${subcommand}\\b`);
+  return splitShellStatements(command).find((stmt) => pattern.test(stmt)) ?? null;
+}
+
+// The statement may carry leading env var assignment tokens before "gh"
+// (that's what makes findGhPrStatement's pattern match them at all) — a
+// fixed slice(3) to drop "gh"/"pr"/<subcommand> would be off by however
+// many of those precede it. Skip them first, then the three fixed tokens.
+function dropGhPrPrefix(tokens, subcommand) {
+  let i = 0;
+  while (i < tokens.length && /^[A-Za-z_]\w*=/.test(tokens[i])) i++;
+  return tokens.slice(i + 3); // "gh", "pr", subcommand
 }
 
 function gh(args) {
@@ -131,14 +189,40 @@ function main(input) {
     process.exit(0);
   }
 
-  if (!commandInvokesGhPr(command, "merge")) {
+  const statement = findGhPrStatement(command, "merge");
+  if (!statement) {
     process.exit(0);
   }
 
-  // Extract an explicit PR number/branch argument if present; otherwise
-  // `gh pr view` resolves the PR for the current branch.
-  const argMatch = command.match(/\bgh\s+pr\s+merge\s+(?:--\S+\s+)*(\d+|\S+)/);
-  const target = argMatch && !argMatch[1].startsWith("-") ? argMatch[1] : "";
+  const tokens = dropGhPrPrefix(tokenize(statement), "merge");
+
+  // `gh pr merge --help`/`-h` never merges anything — don't gate it.
+  if (tokens.includes("--help") || tokens.includes("-h")) {
+    process.exit(0);
+  }
+
+  // Value-taking flags per `gh pr merge --help` — their value token must
+  // not be mistaken for the merge target (a bare regex over the whole
+  // command previously could, e.g., capture `--subject`'s value).
+  const VALUE_FLAGS = new Set([
+    "-A", "--author-email",
+    "-b", "--body",
+    "-F", "--body-file",
+    "--match-head-commit",
+    "-t", "--subject",
+    "-R", "--repo",
+  ]);
+  let target = "";
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i];
+    if (tok.startsWith("-")) {
+      const [flag] = tok.split("=");
+      if (VALUE_FLAGS.has(flag) && !tok.includes("=")) i++; // skip its value token
+      continue;
+    }
+    target = tok;
+    break;
+  }
 
   let pr;
   try {

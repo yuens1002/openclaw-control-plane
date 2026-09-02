@@ -73,8 +73,17 @@ function main() {
     fail("Usage: node scripts/check-acs-coverage.mjs <plan.md> <ACs.md>");
   }
 
-  const planText = readFileSync(planPath, "utf8");
-  const acsText = readFileSync(acsPath, "utf8");
+  let planText, acsText;
+  try {
+    planText = readFileSync(planPath, "utf8");
+  } catch (err) {
+    fail(`Gate 1: could not read plan file "${planPath}" (${err.code ?? err.message}).`);
+  }
+  try {
+    acsText = readFileSync(acsPath, "utf8");
+  } catch (err) {
+    fail(`Gate 1: could not read ACs file "${acsPath}" (${err.code ?? err.message}).`);
+  }
 
   const deliverableIds = parseDeliverableIds(planText);
   const acRows = parseAcPlanRefs(acsText);

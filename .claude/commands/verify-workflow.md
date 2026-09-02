@@ -17,7 +17,7 @@ discipline) rather than spawning a sub-agent for a one-or-two-AC change.
 ## Protocol
 
 1. Implement per the plan + ACs (Phase 2, unchanged).
-2. Run `npm run typecheck && npm test && npm run build`. Fix immediately on failure.
+2. Run `npm run precheck` (typecheck + test + build). Fix immediately on failure.
 3. Re-run Gate 1 (`node scripts/check-acs-coverage.mjs <plan> <ACs>`).
 4. Walk every AC row yourself, in the main thread, using the same protocol as `/ac-verify` (adversarial direct-calls for predicates, live-artifact fetch for anything posted outside the tree, DEFERRED for anything needing live Railway credentials).
 5. Write the **Agent** column yourself (there is no separate sub-agent report to transcribe) and immediately follow with your own **QC** column per Phase 4's mandatory protocol — don't skip QC just because one thread did both.

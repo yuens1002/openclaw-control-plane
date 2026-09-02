@@ -19,7 +19,7 @@ generic doc's Playwright/screenshot instructions, which don't apply — see
    - Run `npm test` and record pass/fail counts.
    - **Gate 3 per row:** does the named test actually assert the `Pass` invariant, or does it pin a literal that would pass vacuously? A green test that doesn't verify the stated intent is a FAIL.
    - **Adversarial direct-call check** (retro-sourced, from `/agentic-orca`): for any deliverable whose "what" is a pure function/predicate (filter, validator, parser), import the module yourself and call the exported function with at least one input you construct — not one copied from the test file — that probes the boundary between two plausible readings of its stated rule. Do not limit verification to inputs the test suite already covers.
-4. **Regression ACs (`AC-REG-*`)** — `npm test`, `npm run typecheck`, `npm run build` all clean.
+4. **Regression ACs (`AC-REG-*`)** — `npm run precheck` (typecheck + test + build) all clean.
 5. **Ops/deploy-adjacent ACs** — if the deliverable touches Railway config, prefer `npm run railway-template:check` / reading the Dockerfile diff over asserting against a live instance; live-instance verification is out of scope for a sub-agent (no credentials, no live writes) and should be recorded as DEFERRED with a note for the human reviewer, not PASS.
 6. **External-artifact ACs** (retro-sourced): if a deliverable's action posts something outside the tracked tree (a GitHub issue, an upstream issue draft filed by the operator), fetch the *live* artifact (`gh issue view --json body`, not the drafted file) before marking PASS — a clean `git diff` proves nothing about what actually got posted.
 

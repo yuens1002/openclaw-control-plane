@@ -60,9 +60,64 @@ function splitShellStatements(command) {
   return statements;
 }
 
-function commandInvokesGhPr(command, subcommand) {
-  const pattern = new RegExp(`^\\s*gh\\s+pr\\s+${subcommand}\\b`);
-  return splitShellStatements(command).some((stmt) => pattern.test(stmt));
+// Word-tokenize one already-isolated shell statement — same quote-tracking
+// rules as splitShellStatements. Used only to check for --help/-h below.
+function tokenize(statement) {
+  const tokens = [];
+  let current = "";
+  let quote = null;
+  let inToken = false;
+  for (let i = 0; i < statement.length; i++) {
+    const ch = statement[i];
+    if (quote) {
+      if (ch === quote) {
+        quote = null;
+      } else if (quote === '"' && ch === "\\" && i + 1 < statement.length) {
+        current += statement[++i];
+      } else {
+        current += ch;
+      }
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      inToken = true;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (inToken) tokens.push(current);
+      current = "";
+      inToken = false;
+      continue;
+    }
+    if (ch === "\\" && i + 1 < statement.length) {
+      current += statement[++i];
+      inToken = true;
+      continue;
+    }
+    current += ch;
+    inToken = true;
+  }
+  if (inToken) tokens.push(current);
+  return tokens;
+}
+
+// Finds the actual `gh pr <subcommand>` statement, allowing leading env
+// var assignments (e.g. `FOO=bar gh pr create ...`), which would otherwise
+// bypass the gate entirely.
+function findGhPrStatement(command, subcommand) {
+  const pattern = new RegExp(`^\\s*(?:[A-Za-z_]\\w*=\\S*\\s+)*gh\\s+pr\\s+${subcommand}\\b`);
+  return splitShellStatements(command).find((stmt) => pattern.test(stmt)) ?? null;
+}
+
+// See the matching comment in review-before-merge-node.js: the statement
+// may carry leading env var assignment tokens before "gh", so a fixed
+// slice(3) to drop "gh"/"pr"/<subcommand> would be off by however many of
+// those precede it.
+function dropGhPrPrefix(tokens, subcommand) {
+  let i = 0;
+  while (i < tokens.length && /^[A-Za-z_]\w*=/.test(tokens[i])) i++;
+  return tokens.slice(i + 3); // "gh", "pr", subcommand
 }
 
 // `gh pr create` may run from a subdirectory (`cd packages/foo && gh ...`
@@ -89,7 +144,14 @@ function main(input) {
     process.exit(0);
   }
 
-  if (!commandInvokesGhPr(command, "create")) {
+  const statement = findGhPrStatement(command, "create");
+  if (!statement) {
+    process.exit(0);
+  }
+
+  // `gh pr create --help`/`-h` never creates anything — don't gate it.
+  const tokens = dropGhPrPrefix(tokenize(statement), "create");
+  if (tokens.includes("--help") || tokens.includes("-h")) {
     process.exit(0);
   }
 
