@@ -74,7 +74,7 @@ definition. The engine ships empty; the policy repo fills it.
 ### 1.4 The attribution contract is faithfully implemented
 
 `ActionAttributionSchema` (`packages/contracts/src/runtime.ts:266`) implements
-the private state contract's `action_attempt` shape field for field:
+the private state contract's `action_attempt` shape, field-for-field:
 `correlation_id`, `request_id`, `tool_invocation_id` (optional),
 `causation_ref`, `command_digest`, `canonicalization_version` as a
 `z.literal("jcs-rfc8785-v1")`, `input_refs`, `outcome`.
@@ -101,7 +101,7 @@ Observability is a by-product of the same record.
 
 ### 1.5 The engine is not yet vocabulary-free — one leak
 
-`packages/contracts/src/control-plane.ts:45` defines `ArtifactKindSchema` as a
+`packages/contracts/src/control-plane.ts:44` defines `ArtifactKindSchema` as a
 **closed enum**: `briefing`, `lead_snapshot`, `call_transcript`,
 `call_summary`, `follow_up_draft`, `audit_note`. These are agency-specific
 terms compiled into the engine's contracts.
@@ -113,10 +113,10 @@ an engine change rather than a registration.
 
 ### 1.6 The runtime-to-instance integration is wired entirely by hand
 
-`DECISION_RUNTIME_*` appears **nowhere** in this repository — not in
-TypeScript, not in the PowerShell provisioning scripts, not in documentation
-outside `docs/plans`. Nine such variables are nonetheless set on the live
-instance, including a private signing key.
+`DECISION_RUNTIME_*` appears nowhere in code or provisioning scripts — not in
+TypeScript, not in the PowerShell provisioning scripts — and nowhere in
+documentation outside `docs/plans`. Nine such variables are nonetheless set on
+the live instance, including a private signing key.
 
 The one existing integration was configured out of band. Nothing provisions,
 documents, or tests it.
@@ -151,10 +151,10 @@ like any other MCP server."
 
 ### 1.9 Verification and signal gaps
 
-- **The CI gate is unit tests only.** `.github/workflows/ci.yml` runs
-  `npm test`, `npm run build`, and `npm audit`. It never runs
-  `verify:decision-runtime`, which is the strongest verification in the
-  repository — a local convention that can be skipped.
+- **CI never runs `verify:decision-runtime`.** `.github/workflows/ci.yml` runs
+  `npm test`, `npm run build`, and `npm audit`, but not
+  `verify:decision-runtime` — the strongest verification in the repository is
+  a local convention that can be skipped.
 - **`verify:decision-runtime` covers the API image only.** It builds
   `deploy/decision-runtime/Dockerfile`; the worker and MCP images are never
   container-verified. It also tests a fresh install and never an upgrade.
