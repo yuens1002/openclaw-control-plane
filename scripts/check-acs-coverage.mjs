@@ -92,7 +92,16 @@ function main() {
   const orphanAcs = [];
 
   for (const { acId, planRef } of acRows) {
-    if (planRef === "" || planRef === "—" || planRef === "-") continue; // AC-REG-style rows are allowed to have no plan ref
+    const isBlank = planRef === "" || planRef === "—" || planRef === "-";
+    if (isBlank) {
+      // Only AC-REG-* rows (whole-suite regression checks with no single
+      // owning deliverable) may omit a Plan ref. Any other prefix with a
+      // blank cell is a real traceability gap, not a legitimate exception —
+      // catching it here is the point of this check.
+      if (/^AC-REG-/i.test(acId)) continue;
+      orphanAcs.push({ acId, planRef: "(blank)", invalidIds: ["(missing Plan ref)"] });
+      continue;
+    }
     const ids = planRef.split(",").map((s) => s.trim());
     // Hard-fail on ANY invalid ID in the cell, not just when every ID is
     // invalid — a mixed cell like "D1, D999" is still a real orphan

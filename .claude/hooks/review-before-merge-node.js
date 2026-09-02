@@ -121,23 +121,27 @@ function tokenize(statement) {
   return tokens;
 }
 
-// Finds the actual `gh pr <subcommand>` statement (allowing leading env
-// var assignments, e.g. `FOO=bar gh pr merge ...`, which would otherwise
-// bypass the gate entirely), returning it for further inspection, or null
-// if the command never really invokes it.
-function findGhPrStatement(command, subcommand) {
-  const pattern = new RegExp(`^\\s*(?:[A-Za-z_]\\w*=\\S*\\s+)*gh\\s+pr\\s+${subcommand}\\b`);
-  return splitShellStatements(command).find((stmt) => pattern.test(stmt)) ?? null;
-}
-
-// The statement may carry leading env var assignment tokens before "gh"
-// (that's what makes findGhPrStatement's pattern match them at all) — a
-// fixed slice(3) to drop "gh"/"pr"/<subcommand> would be off by however
-// many of those precede it. Skip them first, then the three fixed tokens.
-function dropGhPrPrefix(tokens, subcommand) {
-  let i = 0;
-  while (i < tokens.length && /^[A-Za-z_]\w*=/.test(tokens[i])) i++;
-  return tokens.slice(i + 3); // "gh", "pr", subcommand
+// Finds the `gh pr <subcommand>` invocation across all statements in the
+// command, allowing leading env var assignments (e.g. `FOO=bar gh pr merge
+// ...`, or `FOO="a b" gh pr merge ...`), which would otherwise bypass the
+// gate entirely. Returns the invocation's own argument tokens (with "gh",
+// "pr", <subcommand>, and any leading env assignments already stripped),
+// or null if no statement actually invokes it.
+//
+// Tokenizes each statement FIRST, then walks tokens — rather than matching
+// env assignments with a `\S*` regex against the raw string — because a
+// whitespace-based regex can't see past a space inside a quoted value
+// (`FOO="a b"` is one token after tokenize(), two words to a naive regex).
+function findGhPrInvocation(command, subcommand) {
+  for (const stmt of splitShellStatements(command)) {
+    const tokens = tokenize(stmt);
+    let i = 0;
+    while (i < tokens.length && /^[A-Za-z_]\w*=/.test(tokens[i])) i++;
+    if (tokens[i] === "gh" && tokens[i + 1] === "pr" && tokens[i + 2] === subcommand) {
+      return tokens.slice(i + 3);
+    }
+  }
+  return null;
 }
 
 function gh(args) {
@@ -189,12 +193,10 @@ function main(input) {
     process.exit(0);
   }
 
-  const statement = findGhPrStatement(command, "merge");
-  if (!statement) {
+  const tokens = findGhPrInvocation(command, "merge");
+  if (!tokens) {
     process.exit(0);
   }
-
-  const tokens = dropGhPrPrefix(tokenize(statement), "merge");
 
   // `gh pr merge --help`/`-h` never merges anything — don't gate it.
   if (tokens.includes("--help") || tokens.includes("-h")) {

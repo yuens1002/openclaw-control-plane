@@ -66,10 +66,14 @@ No dev server, no admin login. Instead:
 - A deliverable ID (`D1`, `D2`, …, or letter-suffixed like `D8b`/`D8c` — see
   `docs/plans/live-instance-operations/plan.md` for real examples) in the
   plan's `## Deliverables` table with no AC row citing it in `Plan ref`.
-- An AC row's `Plan ref` that doesn't match any deliverable ID (a bare `—`
-  is allowed — regression-style ACs, e.g. `AC-REG-*`, don't trace to a
-  deliverable). AC IDs may also carry a letter suffix (`AC-FN-008a`/`008b` —
-  see `docs/plans/setup-profile-applier/ACs.md`); the coverage script
+- An AC row's `Plan ref` that doesn't match any deliverable ID. A bare `—`
+  is allowed **only for `AC-REG-*` rows** — whole-suite regression checks
+  (all tests pass, typecheck/build clean) with no single owning
+  deliverable. Any other prefix (`AC-FN-*`, `AC-TST-*`, `AC-UI-*`, …) with
+  a blank `Plan ref` is a real traceability gap and fails Gate 1 — it is
+  not a general exception for "doesn't map to one deliverable." AC IDs may
+  also carry a letter suffix (`AC-FN-008a`/`008b` — see
+  `docs/plans/setup-profile-applier/ACs.md`); the coverage script
   recognizes both forms.
 
 Run it locally before Implement, and again in Phase 3/`/agentic-orca`
