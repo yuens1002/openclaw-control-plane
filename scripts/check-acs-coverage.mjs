@@ -34,6 +34,22 @@ function parseDeliverableIds(planText) {
 }
 
 function parseAcPlanRefs(acsText) {
+  // Pre-adoption ACs tables (e.g. docs/plans/decision-runtime-deployment/
+  // ACs.md) use a different column shape entirely — "ID | Acceptance
+  // criterion | Executable pass condition | ...", no Plan ref at all.
+  // Without this check, the row regex below would silently treat that
+  // free-text second column as a Plan ref value and report a confusing
+  // "invalid Plan ref" failure instead of a clear format error.
+  if (!/\|\s*Plan ref\s*\|/i.test(acsText)) {
+    fail(
+      "Gate 1: ACs.md has no 'Plan ref' column header. This looks like a " +
+        "pre-adoption ACs table (see docs/plans/decision-runtime-deployment/" +
+        "ACs.md for the older ID/Acceptance-criterion/Executable-pass-" +
+        "condition shape) — Gate 1 only applies to tables using the current " +
+        "convention (Plan ref + Role columns; see docs/AGENTIC-WORKFLOW.md)."
+    );
+  }
+
   // Matches any "| AC-XXX-N | <plan ref> | ..." row across all AC tables.
   // Letter-suffixed AC IDs are real in this repo, e.g. AC-FN-008a/008b
   // (docs/plans/setup-profile-applier/ACs.md).

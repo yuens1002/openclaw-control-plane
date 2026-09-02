@@ -6,13 +6,20 @@ not a repo-relative path, so it won't resolve as a link from GitHub). This
 file states only what's specific to `openclaw-control-plane` — read the
 generic skill first for phases, gates, and cadences.
 
-Every feature already used the artifact shape below (see the dozens of
-directories under `docs/plans/`); what this adoption adds is the mechanical
-enforcement — `.claude/verification-status.json`, the coverage gate script,
-and the two project-specific hooks — that were consistently skipped as
-"structural exception, out of scope for this issue" (see e.g.
+Most recent features already used the artifact shape below (see the dozens
+of directories under `docs/plans/`); what this adoption adds is the
+mechanical enforcement — `.claude/verification-status.json`, the coverage
+gate script, and the two project-specific hooks — that were consistently
+skipped as "structural exception, out of scope for this issue" (see e.g.
 `docs/plans/wrapper-scoped-export-and-import-restart/plan.md`, "Current
 State").
+
+**Not every plan directory qualifies, though.** Older plans predate the
+Plan ref/Role column convention entirely — `docs/plans/decision-runtime-
+deployment/ACs.md` uses an `ID | Acceptance criterion | Executable pass
+condition | ...` shape with no Plan ref column at all. Gate 1 detects this
+and fails with a clear message rather than mis-parsing; it does not
+retroactively apply to those older directories.
 
 ## This repo has no browser UI
 
