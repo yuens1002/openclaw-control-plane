@@ -16,9 +16,6 @@
     "sourceMap": true,
     "baseUrl": ".",
     "paths": {
-      "@openclaw-control-plane/contracts": ["packages/contracts/src/index.ts"],
-      "@openclaw-control-plane/runtime-auth": ["packages/runtime-auth/src/index.ts"],
-      "@openclaw-control-plane/db": ["packages/db/src/index.ts"],
       "@openclaw-control-plane/openclaw-railway-installer": ["packages/openclaw-railway-installer/src/index.ts"],
       "@openclaw-control-plane/openclaw-railway-installer/approve-own-device": ["packages/openclaw-railway-installer/src/approve-own-device.ts"],
       "@openclaw-control-plane/openclaw-railway-installer/cli": ["packages/openclaw-railway-installer/src/cli.ts"],
@@ -28,18 +25,12 @@
       "@openclaw-control-plane/openclaw-railway-installer/setup-auth": ["packages/openclaw-railway-installer/src/setup-auth.ts"],
       "@openclaw-control-plane/openclaw-railway-installer/template-lock": ["packages/openclaw-railway-installer/src/template-lock.ts"],
       "@openclaw-control-plane/openclaw-railway-installer/verify-proof": ["packages/openclaw-railway-installer/src/verify-proof.ts"],
-      "@openclaw-control-plane/openclaw-adapter": ["packages/openclaw-adapter/src/index.ts"],
-      "@openclaw-control-plane/mcp-service": ["packages/mcp-service/src/index.ts"],
-      "@openclaw-control-plane/decision-runtime-mcp": ["packages/decision-runtime-mcp/src/index.ts"],
-      "@openclaw-control-plane/decision-runtime-mcp/token-provider": ["packages/decision-runtime-mcp/src/token-provider.ts"],
       "@openclaw-control-plane/openclaw-setup-applier/profile-schema": ["packages/openclaw-setup-applier/src/profile-schema.ts"],
       "@openclaw-control-plane/openclaw-setup-applier/setup-api-client": ["packages/openclaw-setup-applier/src/setup-api-client.ts"],
       "@openclaw-control-plane/openclaw-setup-applier/railway-variables": ["packages/openclaw-setup-applier/src/railway-variables.ts"],
       "@openclaw-control-plane/openclaw-setup-applier/apply-profile": ["packages/openclaw-setup-applier/src/apply-profile.ts"],
       "@openclaw-control-plane/openclaw-setup-applier/openrouter-provisioning": ["packages/openclaw-setup-applier/src/openrouter-provisioning.ts"],
       "@openclaw-control-plane/openclaw-setup-applier/cli": ["packages/openclaw-setup-applier/src/cli.ts"],
-      "@openclaw-control-plane/api": ["apps/api/src/index.ts"],
-      "@openclaw-control-plane/mcp": ["apps/mcp/src/index.ts"],
       "@openclaw-control-plane/vending-worker": ["workers/vending/src/index.ts"]
     }
   }
