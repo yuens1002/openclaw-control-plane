@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "denylist": [
+    "[private-repo-2]",
+    "[private-repo]",
+    "[private-repo]",
+    "[private-org]"
+  ]
+}
