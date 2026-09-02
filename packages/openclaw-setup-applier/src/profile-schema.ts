@@ -49,10 +49,29 @@ const ChannelAttachmentSchema = z
   })
   .passthrough();
 
+// Finding 1.7 (product-separation findings-and-decisions.md): a profile could
+// not express an MCP server as an attachment. This closes that gap for any
+// generic MCP server — this schema stays consumer-agnostic on purpose, the
+// same way ChannelAttachmentSchema's `type` is a free string rather than an
+// enum of known channel names: no server name (e.g. a specific runtime
+// engine) is hardcoded here. `transport` is likewise a free string (e.g.
+// "http", "sse", "stdio") rather than an enum, for the same reason. `url` is
+// optional because a locally-launched (stdio) server has no network endpoint
+// to declare.
+const McpServerAttachmentSchema = z
+  .object({
+    name: z.string().min(1),
+    transport: z.string().min(1),
+    url: z.string().min(1).optional(),
+    requiredSecretNames: z.array(z.string().min(1))
+  })
+  .passthrough();
+
 const AttachmentsSchema = z
   .object({
     modelProviders: z.array(ModelProviderAttachmentSchema).default([]),
-    channels: z.array(ChannelAttachmentSchema).default([])
+    channels: z.array(ChannelAttachmentSchema).default([]),
+    mcpServers: z.array(McpServerAttachmentSchema).default([])
   })
   .passthrough();
 
@@ -65,6 +84,7 @@ export const ClientProfileSchema = z
 export type KeyProvisioning = z.infer<typeof KeyProvisioningSchema>;
 export type ModelProviderAttachment = z.infer<typeof ModelProviderAttachmentSchema>;
 export type ChannelAttachment = z.infer<typeof ChannelAttachmentSchema>;
+export type McpServerAttachment = z.infer<typeof McpServerAttachmentSchema>;
 export type ClientProfile = z.infer<typeof ClientProfileSchema>;
 
 /**

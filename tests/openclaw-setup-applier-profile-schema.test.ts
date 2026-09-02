@@ -29,6 +29,32 @@ describe("client profile schema", () => {
     expect(profile.attachments.channels[0]?.type).toBe("telegram");
   });
 
+  it("parses a profile with an MCP server attachment", () => {
+    const profile = parseClientProfile(readFixture("mcp-server.json"));
+
+    expect(profile.attachments.mcpServers[0]?.name).toBe("example-mcp-server");
+    expect(profile.attachments.mcpServers[0]?.transport).toBe("http");
+    expect(profile.attachments.mcpServers[0]?.url).toBe("https://example-mcp-server.internal/mcp");
+    expect(profile.attachments.mcpServers[0]?.requiredSecretNames).toEqual([
+      "EXAMPLE_MCP_SERVER_BEARER_TOKEN"
+    ]);
+  });
+
+  it("defaults mcpServers to an empty array when the profile omits it", () => {
+    const profile = parseClientProfile(readFixture("channel.json"));
+
+    expect(profile.attachments.mcpServers).toEqual([]);
+  });
+
+  it("passes through an unrecognized field on an MCP server attachment instead of failing", () => {
+    const withExtraField = readFixture("mcp-server.json") as {
+      attachments: { mcpServers: Array<Record<string, unknown>> };
+    };
+    withExtraField.attachments.mcpServers[0]!.description = "Example MCP server";
+
+    expect(() => parseClientProfile(withExtraField)).not.toThrow();
+  });
+
   it("passes through an unrecognized field instead of failing", () => {
     const withExtraField = readFixture("plain-secret-provider.json") as {
       attachments: { modelProviders: Array<Record<string, unknown>> };
