@@ -55,7 +55,8 @@ ad hoc command — lives in
 A **client profile**: a JSON document produced by a private agency/client
 profile repo (this package does not depend on any one such repo — the
 schema is intentionally tolerant of fields it doesn't recognize). The
-fields this applier reads:
+fields this applier parses and validates — of which only `modelProviders[]`
+and `channels[]` are acted on today; see the `mcpServers[]` note below:
 
 - `attachments.modelProviders[]` / `attachments.channels[]` /
   `attachments.mcpServers[]` — one entry per provider, channel, or MCP server

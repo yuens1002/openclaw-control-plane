@@ -5,10 +5,10 @@ Source: `docs/plans/product-separation/findings-and-decisions.md` (Part 3, D-1)
 Cross-repo overview: `docs/appendix/cross-repo/product-separation.md` — read
 that first. This file describes only `openclaw-control-plane`'s own work.
 
-> **Status: draft, awaiting approval.** Nothing below has been executed.
-> Session 2's deliverables are additionally gated on external state (the new
-> `decision-runtime` repo existing and its services confirmed live) that
-> doesn't exist yet — see Dependencies.
+> **Status: approved 2026-09-02 (see Dependencies); D1 executed in Session 1,
+> D2-D6 executed in Session 2.** The external state Session 2 was gated on —
+> the `decision-runtime` repo existing with its services confirmed live — was
+> satisfied before D2's deletions were made.
 
 ## Summary
 
@@ -58,10 +58,17 @@ source anywhere.
 | D3 | Update `package.json` workspaces list, `.github/workflows/ci.yml`, and any script referencing the removed paths (`verify:decision-runtime`, etc.) | config | `/devops` | Sequential mechanical, depends on D2 |
 | D4 | Update `docs/AGENTIC-WORKFLOW.md`'s verification-tools table and remove/redirect the `docs/plans/decision-runtime-*/` directories per the cross-repo overview's S-4 (they move with the engine) | docs | `/project-manager` | Sequential mechanical, depends on D2/D3 |
 | D5 | Confirm `npm run precheck` (typecheck + test + build) green on the slimmed repo, zero references to removed packages | test/regression | `/test-engineer` | Sequential mechanical, depends on D2-D4 |
+| D6 | Add a generic `attachments.mcpServers[]` entry to the client profile schema (`packages/openclaw-setup-applier/src/profile-schema.ts`), closing finding 1.7 — schema capability only, no consumer wired | feature | `/backend-architect` | Sequential mechanical, independent of D2-D5 |
 
-Only D1 is in scope for Session 1. D2-D5 are listed now so Gate 1 has the
-full deliverable set to check ACs against once Session 2 is authored, but
-their ACs are **not** drafted in this session — see Dependencies.
+Only D1 was in scope for Session 1. D2-D5 were listed there so Gate 1 had the
+full deliverable set to check ACs against once Session 2 was authored. D6 was
+folded into the same Session 2 later, from the cross-repo overview's Stage 4
+(see `docs/appendix/cross-repo/product-separation.md`) — it is independent of
+the extraction, so it carries no gating dependency. D2-D6 all executed in
+Session 2.
+
+(Deliverable ids `D1`-`D6` here are distinct from the `D-1`-`D-6` *decision*
+ids in `findings-and-decisions.md`; the two sets are unrelated.)
 
 ### Files to Create
 

@@ -15,11 +15,12 @@ skipped as "structural exception, out of scope for this issue" (see e.g.
 State").
 
 **Not every plan directory qualifies, though.** Older plans predate the
-Plan ref/Role column convention entirely — `docs/plans/durable-runtime-
-state/ACs.md` uses an `ID | Acceptance criterion | Executable pass
-condition | ...` shape with no Plan ref column at all. Gate 1 detects this
-and fails with a clear message rather than mis-parsing; it does not
-retroactively apply to those older directories.
+Plan ref/Role column convention entirely — `docs/plans/runtime-registry-
+version-compatibility/ACs.md`, the one such file left in this repo, uses an
+`AC | Deliverable | What | Test | Pass condition | ...` shape with no Plan
+ref column at all. Gate 1 detects this and fails with a clear message rather
+than mis-parsing; it does not retroactively apply to those older
+directories.
 
 ## This repo has no browser UI
 
