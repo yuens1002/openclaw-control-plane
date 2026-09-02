@@ -25,7 +25,6 @@
     "precheck": "npm run typecheck && npm test && node scripts/write-precheck-stamp.mjs"
   },
   "workspaces": [
-    "apps/*",
     "packages/*",
     "workers/*"
   ],

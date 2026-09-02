@@ -42,11 +42,12 @@ async function main(): Promise<void> {
   const openRouterManagementKey = requireEnv("OPENROUTER_MANAGEMENT_KEY");
   // OPENCLAW_INSTANCE_SETUP_PASSWORD/USERNAME are the *target OpenClaw
   // instance's* setup credentials, deliberately not named SETUP_PASSWORD/
-  // OPENCLAW_SETUP_USERNAME -- this repo's own apps/api reads those exact
-  // names for a completely different server's auth gate (apps/api/src/
-  // index.ts), and this CLI can run in the same environment as that server
-  // when bootstrapping this repo's own agency instance from a profile of
-  // itself. See docs/plans/setup-api-basic-auth/plan.md.
+  // OPENCLAW_SETUP_USERNAME -- an OpenClaw instance's own setup auth gate
+  // reads those exact names (see the wrapper patch in this repo's Dockerfile
+  // and deploy/openclaw-railway/.env.example), and this CLI can run in the
+  // same environment as an instance when bootstrapping this repo's own
+  // agency instance from a profile of itself. Reusing the names would make
+  // the two indistinguishable. See docs/plans/setup-api-basic-auth/plan.md.
   const setupPassword = requireEnv("OPENCLAW_INSTANCE_SETUP_PASSWORD");
   const setupUsername = process.env.OPENCLAW_INSTANCE_SETUP_USERNAME ?? "openclaw";
 

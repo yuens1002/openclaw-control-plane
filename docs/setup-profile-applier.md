@@ -110,11 +110,13 @@ no real credentials).
 | `OPENCLAW_INSTANCE_SETUP_USERNAME` | Basic auth username for the target instance. Optional, defaults to `openclaw`. |
 
 These are deliberately **not** named `SETUP_PASSWORD`/`OPENCLAW_SETUP_USERNAME`:
-this control-plane repo's own `apps/api` reads those exact names to gate its
-own, completely different, API server. Reusing the names would collide when
-this CLI runs in the same environment as that server — including the normal
-case of using this repo to bootstrap its own agency instance from a profile
-of itself.
+an OpenClaw instance's *own* setup auth gate reads those exact names (see the
+wrapper patch in this repo's `Dockerfile` and
+`deploy/openclaw-railway/.env.example`). Reusing the names would make "the
+instance I am running on" and "the instance I am configuring" indistinguishable
+whenever this CLI runs in the same environment as an instance — including the
+normal case of using this repo to bootstrap its own agency instance from a
+profile of itself.
 
 A Railway API token with access to the target service is also required for
 the apply path; it is supplied at run time, never committed.
