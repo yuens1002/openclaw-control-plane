@@ -30,11 +30,10 @@ bump both files by hand.
 
 ## What this does NOT cover yet
 
-- **Post-separation** (this landed — the Decision Runtime now lives in its
-  own `decision-runtime` repository per `findings-and-decisions.md` D-1/D-2),
+- **Post-separation** (this landed per `findings-and-decisions.md` D-1/D-2),
   this repo's `version`/`CHANGELOG.md` cover only the vending/provisioning
-  tooling and the wrapper image. The Decision Runtime versions independently
-  in its own repository; this protocol has no bearing on it.
+  tooling and the wrapper image. Any externally attached MCP server versions
+  independently, in its own repository; this protocol has no bearing on it.
 - **PR #94** drafted a release-versioning scheme before the product
   boundary was understood and is marked superseded. Resolve it before
   treating it as this repo's forward plan.

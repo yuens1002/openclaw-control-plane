@@ -2,16 +2,17 @@
 
 The control plane is a reusable TypeScript monorepo for the vending and
 provisioning tooling that stands up an OpenClaw instance, and for the wrapper
-image that instance runs as. It does not contain a runtime engine: the
-Decision Runtime that a provisioned instance talks to lives in a separate
-repository, `decision-runtime`, and is reached only over the network — never
-as a workspace package.
+image that instance runs as. It does not contain a runtime engine of its own:
+whatever external MCP servers a provisioned instance talks to are reached only
+over the network — never as a workspace package — and this repo neither names
+nor depends on which ones, if any, a given instance attaches.
 
 OpenClaw manages the system; it does not become the system. This repository's
 own job is narrower still: it provisions and configures the OpenClaw instance,
 and builds the wrapper image that instance runs as. Domain behavior for a
 deployed instance lives in that instance's own configuration and, where
-attached, the external Decision Runtime — not in this repo.
+attached, whatever external MCP servers its profile declares — not in this
+repo.
 
 ## Packages
 
@@ -22,7 +23,8 @@ attached, the external Decision Runtime — not in this repo.
   drives a live OpenClaw instance's `/setup` API idempotently — see
   [docs/setup-profile-applier.md](setup-profile-applier.md). The profile's
   `attachments.mcpServers[]` is where a client declares an external MCP
-  server, such as a Decision Runtime deployment, for the instance to use.
+  server for the instance to use — this repo does not know or care which
+  server that is.
 - `workers/vending`: Fake/manual example worker package.
 - root `Dockerfile` + `scripts/*.mjs` + `railway.toml`: the wrapper image —
   pulls and patches the upstream OpenClaw Railway template. Builds no
@@ -34,14 +36,12 @@ attached, the external Decision Runtime — not in this repo.
   scheduling decisions, management commands, and notifications.
 - This repository owns provisioning a client's OpenClaw instance and the
   wrapper image that instance runs as — not any runtime engine.
-- The **Decision Runtime** (a separate repository) is an external dependency
-  a provisioned instance may talk to over MCP, declared as a profile
-  attachment like any other (see `attachments.mcpServers[]` above), never as
-  code in this repo. It owns durable entities, state transitions, event
-  ingestion, idempotency, audit records, approval records, artifact records,
-  and worker registry state for the client that attaches it. Its own
-  architecture, API surface, and deployment topology are documented in that
-  repository, not here.
+- An **external MCP server** is an optional dependency a provisioned
+  instance may talk to over MCP, declared as a profile attachment (see
+  `attachments.mcpServers[]` above), never as code in this repo. Whatever
+  domain state, entities, or behavior it owns belongs entirely to that
+  server's own repository and documentation — this repo neither names nor
+  assumes which server, if any, is attached.
 
 ## Public Baseline
 
@@ -62,21 +62,21 @@ history: the wrapper image, sourced from the root `railway.toml` and
 the tracked branch — deliberate, since the wrapper image is the one service
 this repository directly owns and ships.
 
-Everything else a provisioned instance depends on — a Decision Runtime
-attachment included — is provisioned and versioned independently, in its own
-repository, on its own Railway project/service boundary, and reached only
-over the network (HTTP/MCP) once live. This repository's provisioning
-tooling (`packages/openclaw-railway-installer`, `packages/openclaw-setup-
-applier`) drives that setup from the outside; it does not build or deploy
-those services itself.
+Everything else a provisioned instance depends on — any MCP server
+attachment included — is provisioned and versioned independently, in its
+own repository, on its own infrastructure boundary, and reached only over
+the network (HTTP/MCP) once live. This repository's provisioning tooling
+(`packages/openclaw-railway-installer`, `packages/openclaw-setup-applier`)
+drives instance setup from the outside; it does not build or deploy any
+attached server itself.
 
 ```text
 repo (one default branch)
  └─ railway.toml   → OpenClaw wrapper service
                       (no watchPatterns; deploys on every commit)
 
-external, per attached instance:
- └─ decision-runtime repo → its own Railway project/services
+external, per attached instance (if any):
+ └─ whatever repository an attached MCP server comes from
                              (reached over MCP, declared as a profile
                               attachment; no code dependency either way)
 ```

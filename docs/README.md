@@ -49,9 +49,10 @@ Examples:
   profile (model providers, channels, MCP server attachments) drives a live
   OpenClaw instance's `/setup` API.
 
-The Decision Runtime engine this repo's provisioned instances may attach to
-over MCP now lives in a separate repository; its architecture, authentication,
-and deployment docs live there, not here.
+A provisioned instance may attach an external MCP server, declared via
+`attachments.mcpServers[]` (see [Setup Profile Applier](setup-profile-applier.md)).
+This repo does not name, depend on, or document any specific server's
+architecture — that lives wherever the attached server's own repository is.
 
 ## Public-Repo Rule
 
