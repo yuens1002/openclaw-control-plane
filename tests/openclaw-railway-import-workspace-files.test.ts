@@ -134,12 +134,21 @@ describe("importWorkspaceFiles has no production callers", () => {
   const moduleUnderTestPath = join("packages", "openclaw-railway-installer", "src", "import-workspace-files.ts");
 
   async function listProductionTsFiles(root: string): Promise<string[]> {
-    const entries = await readdir(root, { withFileTypes: true, recursive: true });
-    return entries
-      .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
-      .map((entry) => join(entry.parentPath ?? entry.path, entry.name))
-      .filter((path) => path.split(/[\\/]/).includes("src"))
-      .filter((path) => !path.endsWith(moduleUnderTestPath));
+    // `apps/` no longer exists in this repo (the Decision Runtime that lived
+    // there moved to its own repository) -- a workspace root with nothing
+    // left under it is "no files to scan", not a failure, so an absent
+    // directory is treated the same as an empty one rather than throwing.
+    try {
+      const entries = await readdir(root, { withFileTypes: true, recursive: true });
+      return entries
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
+        .map((entry) => join(entry.parentPath ?? entry.path, entry.name))
+        .filter((path) => path.split(/[\\/]/).includes("src"))
+        .filter((path) => !path.endsWith(moduleUnderTestPath));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw err;
+    }
   }
 
   it("no file under apps/*/src, packages/*/src, or workers/*/src imports import-workspace-files.js", async () => {
