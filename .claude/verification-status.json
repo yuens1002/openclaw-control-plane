@@ -1,11 +1,11 @@
 {
   "branches": {
     "feat/product-separation": {
-      "status": "planning",
+      "status": "verified",
       "acs_passed": 0,
       "acs_total": 0,
-      "tasks": [],
-      "notes": "Workflow initiated. Plan drafted (docs/plans/product-separation/plan.md + docs/appendix/cross-repo/product-separation.md, generic role names only, no private repo names/paths), awaiting human approval. Session 2 additionally gated on decision-runtime repo existing and agency-instance incident resolution."
+      "tasks": ["D1", "D2", "D3", "D4", "D5", "D6"],
+      "notes": "Plan approved 2026-09-02 (docs/plans/product-separation/plan.md, Dependencies). D1 executed in Session 1; D2-D6 in Session 2, after the gating external state (decision-runtime repo existing with its services live) was confirmed. This plan carries no ACs.md, so acs_total is 0 by design and Gate 1 does not apply — verification is D5's own criterion: npm run precheck (typecheck + 268 tests + build) green, npm audit --omit=dev clean, and zero remaining references to the removed paths."
     }
   }
 }
