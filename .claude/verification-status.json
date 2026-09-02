@@ -1,3 +1,11 @@
 {
-  "branches": {}
+  "branches": {
+    "feat/product-separation": {
+      "status": "planning",
+      "acs_passed": 0,
+      "acs_total": 0,
+      "tasks": [],
+      "notes": "Workflow initiated. Plan drafted (docs/plans/product-separation/plan.md + docs/appendix/cross-repo/product-separation.md, generic role names only, no private repo names/paths), awaiting human approval. Session 2 additionally gated on decision-runtime repo existing and agency-instance incident resolution."
+    }
+  }
 }
