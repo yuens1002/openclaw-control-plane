@@ -55,19 +55,33 @@ ad hoc command — lives in
 A **client profile**: a JSON document produced by a private agency/client
 profile repo (this package does not depend on any one such repo — the
 schema is intentionally tolerant of fields it doesn't recognize). The
-fields this applier reads:
+fields this applier parses and validates — of which only `modelProviders[]`
+and `channels[]` are acted on today; see the `mcpServers[]` note below:
 
-- `attachments.modelProviders[]` / `attachments.channels[]` — one entry per
-  provider or channel to attach.
+- `attachments.modelProviders[]` / `attachments.channels[]` /
+  `attachments.mcpServers[]` — one entry per provider, channel, or MCP server
+  to attach. All three default to an empty array when omitted.
 - For providers, each attachment's `nonSecretConfig`: `authGroup`,
   `authChoice`, `flow` (`quickstart` | `advanced` | `manual`), and an
   optional `keyProvisioning` block (`method: "openrouter-provisioning-api"`,
   `spendLimitUsd`, `limitReset`) signaling that the attachment's secret must
   be minted rather than supplied. For channels, a top-level `type` field
-  (e.g. `"slack"`, `"telegram"`) — channels carry no `nonSecretConfig`.
+  (e.g. `"slack"`, `"telegram"`) — channels carry no `nonSecretConfig`. For
+  MCP servers, `name` (identifies the server), `transport` (a free string,
+  e.g. `"http"`, `"sse"`, `"stdio"` — not an enum, matching how `channels[].type`
+  is not an enum of known channel names) and an optional `url` (the
+  connection endpoint for a network transport; omitted for a locally-launched
+  one).
 - Each attachment's `requiredSecretNames[]` — the exact Railway variable
   names holding the secrets this profile needs. The profile never contains
   a secret *value*, only the *name* of the Railway variable that holds it.
+
+`attachments.mcpServers[]` is a schema-only capability today: this package
+parses and validates it like any other attachment, but neither the dry-run
+nor apply path reads or acts on it yet — declaring one has no effect until a
+future change wires a consumer. It intentionally declares no fixed server
+name or vocabulary: any MCP server a profile wants an OpenClaw instance to
+use, a company's own runtime engine included, is expressed the same way.
 
 `/setup/api/run` only accepts three channel `type`s, confirmed live against
 the real wizard's own request-building source: `"telegram"` and
@@ -97,11 +111,13 @@ no real credentials).
 | `OPENCLAW_INSTANCE_SETUP_USERNAME` | Basic auth username for the target instance. Optional, defaults to `openclaw`. |
 
 These are deliberately **not** named `SETUP_PASSWORD`/`OPENCLAW_SETUP_USERNAME`:
-this control-plane repo's own `apps/api` reads those exact names to gate its
-own, completely different, API server. Reusing the names would collide when
-this CLI runs in the same environment as that server — including the normal
-case of using this repo to bootstrap its own agency instance from a profile
-of itself.
+an OpenClaw instance's *own* setup auth gate reads those exact names (see the
+wrapper patch in this repo's `Dockerfile` and
+`deploy/openclaw-railway/.env.example`). Reusing the names would make "the
+instance I am running on" and "the instance I am configuring" indistinguishable
+whenever this CLI runs in the same environment as an instance — including the
+normal case of using this repo to bootstrap its own agency instance from a
+profile of itself.
 
 A Railway API token with access to the target service is also required for
 the apply path; it is supplied at run time, never committed.

@@ -69,9 +69,10 @@ function findPlanRefColumnIndex(acsText) {
 }
 
 function parseAcPlanRefs(acsText) {
-  // Pre-adoption ACs tables (e.g. docs/plans/decision-runtime-deployment/
-  // ACs.md) use a different column shape entirely — "ID | Acceptance
-  // criterion | Executable pass condition | ...", no Plan ref at all.
+  // Pre-adoption ACs tables (the one remaining example in this repo is
+  // docs/plans/runtime-registry-version-compatibility/ACs.md) use a
+  // different column shape entirely — "AC | Deliverable | What | Test |
+  // Pass condition | ...", no Plan ref at all.
   // Without this check, the row regex below would silently treat that
   // free-text second column as a Plan ref value and report a confusing
   // "invalid Plan ref" failure instead of a clear format error.
@@ -80,9 +81,9 @@ function parseAcPlanRefs(acsText) {
     fail(
       "Gate 1: ACs.md has no 'Plan ref' table column header (a real markdown " +
         "table header row immediately followed by a '| --- |' separator row). " +
-        "This looks like a pre-adoption ACs table (see docs/plans/decision-runtime-" +
-        "deployment/ACs.md for the older ID/Acceptance-criterion/Executable-pass-" +
-        "condition shape) — Gate 1 only applies to tables using the current " +
+        "This looks like a pre-adoption ACs table (see docs/plans/runtime-registry-" +
+        "version-compatibility/ACs.md for the older AC/Deliverable/What/Test/" +
+        "Pass-condition shape) — Gate 1 only applies to tables using the current " +
         "convention (Plan ref + Role columns; see docs/AGENTIC-WORKFLOW.md)."
     );
   }
@@ -154,7 +155,7 @@ function main() {
       // Only AC-REG-*/AC-REGRESSION-* rows (whole-suite regression checks
       // with no single owning deliverable) may omit a Plan ref. Both
       // prefixes are real, current-convention usage in this repo (compare
-      // docs/plans/decision-runtime-mcp/ACs.md's AC-REGRESSION-001, a fully
+      // docs/plans/mcp-workload-jwt-auth/ACs.md's AC-REGRESSION-001, a fully
       // Plan-ref/Role-conforming file, against the more common AC-REG-001
       // spelling elsewhere). Any other prefix with a blank cell is a real
       // traceability gap, not a legitimate exception — catching it here is

@@ -15,16 +15,17 @@ skipped as "structural exception, out of scope for this issue" (see e.g.
 State").
 
 **Not every plan directory qualifies, though.** Older plans predate the
-Plan ref/Role column convention entirely — `docs/plans/decision-runtime-
-deployment/ACs.md` uses an `ID | Acceptance criterion | Executable pass
-condition | ...` shape with no Plan ref column at all. Gate 1 detects this
-and fails with a clear message rather than mis-parsing; it does not
-retroactively apply to those older directories.
+Plan ref/Role column convention entirely — `docs/plans/runtime-registry-
+version-compatibility/ACs.md`, the one such file left in this repo, uses an
+`AC | Deliverable | What | Test | Pass condition | ...` shape with no Plan
+ref column at all. Gate 1 detects this and fails with a clear message rather
+than mis-parsing; it does not retroactively apply to those older
+directories.
 
 ## This repo has no browser UI
 
-`openclaw-control-plane` is a backend/infra monorepo: Railway installer
-CLI, an HTTP+worker+MCP runtime, and build-time wrapper patches. There is no
+`openclaw-control-plane` is a backend/infra monorepo: a Railway installer
+CLI, a setup-profile applier, and build-time wrapper patches. There is no
 frontend to screenshot.
 
 - **`/ui-verify` does not apply here.** Do not stub it — UI ACs simply don't
@@ -53,8 +54,7 @@ No dev server, no admin login. Instead:
 | Type check | `npm run typecheck` |
 | Build | `npm run build` |
 | Playwright (UI/E2E) | N/A — no UI |
-| Decision Runtime container verify | `npm run verify:decision-runtime` — builds `deploy/decision-runtime/Dockerfile`, API image only (see findings-and-decisions.md 1.9 for the coverage gap) |
-| Railway proof verify | `npm run railway-proof:verify` — requires `RAILWAY_*` secrets; currently unconfigured on this repo (see findings-and-decisions.md 1.9) |
+| Railway proof verify | `npm run railway-proof:verify` — manual command only; the scheduled/dispatchable `Railway Proof Verify` CI workflow was deleted (see product-separation findings-and-decisions.md S-6 — it watched nothing and provided no coverage). Requires `RAILWAY_*` secrets when run against a live proof deployment. |
 | Railway template lock check | `npm run railway-template:check` |
 | Dependency audit | `npm audit --omit=dev` |
 
@@ -70,7 +70,7 @@ No dev server, no admin login. Instead:
   is allowed **only for `AC-REG-*`/`AC-REGRESSION-*` rows** — whole-suite
   regression checks (all tests pass, typecheck/build clean) with no single
   owning deliverable; both spellings are real, current-convention usage
-  (`AC-REGRESSION-001` in `docs/plans/decision-runtime-mcp/ACs.md`,
+  (`AC-REGRESSION-001` in `docs/plans/mcp-workload-jwt-auth/ACs.md`,
   `AC-REG-001` elsewhere). A different, narrower pattern exists in a couple
   of older plans (`AC-TST-002` "full project verification" in
   `setup-run-payload-contract`/`setup-api-basic-auth`) that blanks a

@@ -1,0 +1,15 @@
+{
+  "attachments": {
+    "modelProviders": [],
+    "channels": [],
+    "mcpServers": [
+      {
+        "id": "mcp-example-server",
+        "name": "example-mcp-server",
+        "transport": "http",
+        "url": "https://example-mcp-server.internal/mcp",
+        "requiredSecretNames": ["EXAMPLE_MCP_SERVER_BEARER_TOKEN"]
+      }
+    ]
+  }
+}

@@ -45,57 +45,52 @@ handlers; deployments inject their own consumer registrations and behavior.
 
 ## Architecture
 
-OpenClaw manages the system; it does not become the system.
+OpenClaw manages the system; it does not become the system. This repository
+provisions and configures OpenClaw instances and builds the wrapper image they
+run as — it holds no runtime engine of its own.
 
-- `apps/api`: control-plane HTTP API
-- `apps/worker`: background worker runner
-- `packages/contracts`: shared schemas and TypeScript types
-- `packages/db`: migrations and typed persistence primitives
-- `packages/openclaw-adapter`: OpenClaw-facing API wrappers
-- `packages/mcp-service`: reusable first-party MCP module host and transports
-- `packages/decision-runtime-mcp`: Decision Runtime MCP tools and OIDC client
-- `apps/mcp`: independently deployable MCP composition service
-- `workers/vending`: fake/manual example worker package
-- `deploy/openclaw-railway`: OpenClaw Railway template installer and
-  agency-controlled per-client provisioning
-- `docs`: architecture, feature, and operations documentation
+- `packages/openclaw-railway-installer`: OpenClaw Railway template installer
+  and agency-controlled per-client provisioning — see
+  [deploy/openclaw-railway](deploy/openclaw-railway/README.md).
+- `packages/openclaw-setup-applier`: reads a generated client profile and
+  drives a live OpenClaw instance's `/setup` API idempotently — see
+  [docs/setup-profile-applier.md](docs/setup-profile-applier.md).
+- `workers/vending`: fake/manual example worker package.
+- root `Dockerfile` + `scripts/*.mjs` + `railway.toml`: the wrapper image.
+- `docs`: architecture, feature, and operations documentation.
+
+See [docs/architecture.md](docs/architecture.md) for the full package and
+deployment-topology breakdown.
 
 ## Decision Runtime
 
-The authenticated Decision Runtime is the durable execution boundary for typed
-agent and service work. It records events, work items, approvals, action
-attempts, results, artifacts, provenance, audit history, and rebuildable
-projections without embedding a client workflow in the public control plane.
+The authenticated Decision Runtime — the durable execution boundary for typed
+agent and service work (events, approvals, action attempts, artifacts,
+provenance, rebuildable projections) — lives in its own repository,
+`decision-runtime`, independently versioned and deployed. It is not code in
+this repo. A provisioned OpenClaw instance reaches it, when attached, over MCP
+— declared as a profile attachment like any other model provider or channel
+(`attachments.mcpServers[]`; see
+[docs/setup-profile-applier.md](docs/setup-profile-applier.md)) — never
+through a workspace dependency.
 
-Start with [Decision Runtime](docs/decision-runtime.md) for the architecture,
-runtime model, complete API surface, HTTP examples, typed tool usage, and the
-extension path. Then use
-[Runtime Authentication And Authorization](docs/runtime-authentication.md) and
-[Private Decision Runtime Deployment](docs/decision-runtime-deployment.md) for
-the trust and operating contracts.
-
-Agents can discover the same authenticated boundary through the
-[MCP Service Host And Decision Runtime Module](docs/mcp-service.md). MCP is the
-agent-facing transport; HTTP remains the service API and runtime authorization
-remains authoritative.
+`attachments.mcpServers[]` is a schema capability only today: the setup-profile
+applier parses and validates it, but no code path acts on it yet, so declaring
+an MCP server in a profile does not by itself attach one. Wiring a consumer is
+separate, still-unlanded work.
 
 ## Local Setup
 
 ```bash
 npm install
-docker compose up -d postgres
 npm test
 npm run build
-npm run --workspace @openclaw-control-plane/api dev
 ```
 
-The API listens on `PORT` from `.env` or `8787` by default. For local
-legacy-shell testing only, set `RUNTIME_ENABLE_BASIC_AUTH=true` and
-`SETUP_PASSWORD` to require HTTP Basic auth on the API root and legacy routes.
-The default username is `openclaw`; override it with
-`OPENCLAW_SETUP_USERNAME`. `/health` stays public for platform health checks.
-Production typed-runtime routes use the OIDC and policy boundary documented in
-[`docs/runtime-authentication.md`](docs/runtime-authentication.md).
+There is no local HTTP API to run in this repo; its packages are provisioning
+tooling (CLIs and library code invoked by `tsx`) plus the wrapper image build.
+See [docs/setup-profile-applier.md](docs/setup-profile-applier.md) for driving
+a live OpenClaw instance's `/setup` API from a generated profile.
 
 ## Verification
 
@@ -105,15 +100,13 @@ npm test
 npm run build
 ```
 
-The test suite covers contracts, authentication and authorization, the typed
-runtime API and tool adapter, PostgreSQL persistence and migration, attribution,
-idempotency, approvals, provenance, projections, and Railway install behavior.
-The production runtime container, restart, and recovery flow can be verified
-locally with `npm run verify:decision-runtime`. Live Railway smoke tests remain
-opt-in so normal CI does not create cloud resources.
+The test suite covers the Railway installer and the setup-profile applier —
+provisioning, template-lock checks, onboarding, and Railway variable guard
+behavior. Live Railway smoke tests remain opt-in so normal CI does not create
+cloud resources.
 
 Workspace packages are marked `private: true` intentionally. The GitHub repo can
-be public while npm publishing remains out of scope for the M1 baseline.
+be public while npm publishing remains out of scope.
 
 ## OpenClaw on Railway
 

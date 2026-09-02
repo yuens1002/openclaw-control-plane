@@ -1,8 +1,8 @@
 # Product Separation — Findings, Decisions, and Target End State
 
 Status: **decision record**. Supersedes the premises of
-`docs/plans/runtime-release-versioning/plan.md` (draft, PR #94), which was
-written before the product boundary was understood.
+`docs/plans/runtime-release-versioning/plan.md` (PR #94, closed without
+merge), which was written before the product boundary was understood.
 
 This document exists so the implementation plan that follows has nothing left
 to re-derive. Part 1 is what is true today, verified against the code. Part 2

@@ -121,12 +121,15 @@ describe("importWorkspaceFiles has no production callers", () => {
   // production module imports this one, this test fails and points here
   // instead of the caller finding out from an incident.
   //
-  // Source-text scan across every production src tree (apps/*/src,
-  // packages/*/src, workers/*/src), not an import-graph walk -- same
+  // Source-text scan across every production src tree (packages/*/src,
+  // workers/*/src), not an import-graph walk -- same
   // known limitation as the G4 closure's equivalent check: it cannot
   // catch a future re-export of this module under an unrelated name.
   const forbiddenImportPattern = /(?:from\s+|import\s*\(\s*|import\s+)["'`][^"'`]*import-workspace-files[^"'`]*["'`]/;
-  const productionSourceRoots = ["apps", "packages", "workers"];
+  // Mirrors package.json's `workspaces` globs. `apps/` is deliberately absent:
+  // the Decision Runtime that lived there moved to its own repository, and the
+  // glob was dropped from `workspaces` with it.
+  const productionSourceRoots = ["packages", "workers"];
   // Excluded by its exact path, not by bare filename -- a filename-only
   // exclusion would silently skip any *future* file elsewhere in the tree
   // that happened to share this name, defeating the tripwire for exactly
@@ -134,6 +137,9 @@ describe("importWorkspaceFiles has no production callers", () => {
   const moduleUnderTestPath = join("packages", "openclaw-railway-installer", "src", "import-workspace-files.ts");
 
   async function listProductionTsFiles(root: string): Promise<string[]> {
+    // Deliberately not ENOENT-tolerant: a root listed here that isn't on disk
+    // means this scan is silently covering less than it claims, which is the
+    // one failure mode a tripwire test must never swallow.
     const entries = await readdir(root, { withFileTypes: true, recursive: true });
     return entries
       .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
@@ -142,7 +148,7 @@ describe("importWorkspaceFiles has no production callers", () => {
       .filter((path) => !path.endsWith(moduleUnderTestPath));
   }
 
-  it("no file under apps/*/src, packages/*/src, or workers/*/src imports import-workspace-files.js", async () => {
+  it("no file under packages/*/src or workers/*/src imports import-workspace-files.js", async () => {
     const files = (
       await Promise.all(productionSourceRoots.map((root) => listProductionTsFiles(root)))
     ).flat();
