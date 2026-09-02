@@ -22,15 +22,22 @@ than the original.
 Dependency graph, verified in both directions:
 
 ```text
-Decision Runtime                      Vending / provisioning        Wrapper image
-apps/api    → contracts, db,          openclaw-railway-installer    root Dockerfile
-              runtime-auth              → (no workspace deps)       + scripts/*.mjs
-apps/worker → db, runtime-auth        openclaw-setup-applier        + railway.toml
-apps/mcp    → decision-runtime-mcp,     → installer
-              mcp-service
-db → contracts   runtime-auth → contracts
-decision-runtime-mcp → contracts, mcp-service, openclaw-adapter
-openclaw-adapter → contracts
+Decision Runtime (apps/api, apps/worker, apps/mcp)
+  apps/api    → contracts, db, runtime-auth
+  apps/worker → db, runtime-auth
+  apps/mcp    → decision-runtime-mcp, mcp-service
+
+  db                   → contracts
+  runtime-auth         → contracts
+  decision-runtime-mcp → contracts, mcp-service, openclaw-adapter
+  openclaw-adapter     → contracts
+
+Vending / provisioning
+  openclaw-railway-installer → (no workspace deps)
+  openclaw-setup-applier     → openclaw-railway-installer
+
+Wrapper image
+  root Dockerfile + scripts/*.mjs + railway.toml
 ```
 
 - `openclaw-railway-installer` declares **no workspace dependencies at all**.
@@ -83,9 +90,12 @@ the private state contract's `action_attempt` shape, field-for-field:
 `effective_actor`, `on_behalf_of_principal_ref`, `request_origin`, and
 `authorization`. `AuthorizationEvidenceSchema` carries `decision_id`, `action`,
 `result: allowed | denied`, **`policy_version`**, and `reason_codes`.
-`AuthorizationDenialAuditPayloadSchema` records refusals with the same
-evidence. Causation is additionally modelled relationally —
-`record_edges.relation` carries `caused_by`, `derived_from`, `produced`.
+`AuthorizationDenialAuditPayloadSchema` records refusals with `request_id`,
+`tool_invocation_id` (optional), `decision_id`, `policy_version`, and
+`reason_codes` — not the full `AuthorizationEvidenceSchema` shape. Causation
+is additionally modelled relationally — `record_edges.relation` is one of
+`caused_by`, `derived_from`, `attempted_by`, `produced`, `approved_by`,
+`supersedes`.
 
 **Correction on the record:** an earlier pass reported that the schema had no
 correlation field and modelled no link to agent telemetry. That was wrong — it
@@ -162,8 +172,13 @@ like any other MCP server."
   surfaces `CONTROL_PLANE_VERSION` from the root `package.json` baked at build
   time, but version-bump commits deliberately no longer trigger redeploys
   (issues #86, #89). The API reports no version at all.
-- **`Railway Proof Verify` has never worked.** Failing every Monday since at
-  least 2026-08-17 on unconfigured secrets. It watches nothing and provides no
+- **`Railway Proof Verify` runs against unconfigured secrets.**
+  `.github/workflows/railway-proof-verify.yml` runs weekly
+  (`cron: "41 15 * * 1"`) or on manual dispatch, and depends on
+  `RAILWAY_PROJECT_ID`, `RAILWAY_ENVIRONMENT_ID`, `RAILWAY_SERVICE_ID`,
+  `RAILWAY_TOKEN` secrets and a `RAILWAY_PROOF_URL` var, none of which are set
+  on this repository. Its three most recent scheduled runs (2026-08-17,
+  2026-08-24, 2026-08-31) all failed. It watches nothing and provides no
   coverage.
 
 ### 1.10 Rollback does not behave as a naive reading suggests
