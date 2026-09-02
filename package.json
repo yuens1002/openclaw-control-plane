@@ -21,7 +21,9 @@
     "railway-template:check": "tsx packages/openclaw-railway-installer/src/check-template-lock.ts",
     "railway-proof:verify": "tsx packages/openclaw-railway-installer/src/verify-proof-cli.ts",
     "railway-vars:guard": "tsx packages/openclaw-railway-installer/src/guard-cli.ts",
-    "onboarding-cycle": "tsx packages/openclaw-setup-applier/src/onboarding-cycle-cli.ts"
+    "onboarding-cycle": "tsx packages/openclaw-setup-applier/src/onboarding-cycle-cli.ts",
+    "check:acs-coverage": "node scripts/check-acs-coverage.mjs",
+    "precheck": "npm run typecheck && npm test && npm run build && node scripts/write-precheck-stamp.mjs"
   },
   "workspaces": [
     "apps/*",
