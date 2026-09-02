@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "denylist": [
+    "cot-memory",
+    "openClaw-CoT-agency-profile",
+    "openclaw-cot-agency-profile",
+    "dev-yuen-agency"
+  ]
+}
