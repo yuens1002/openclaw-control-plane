@@ -99,13 +99,18 @@ for a human:
   the new repo (import paths, `package.json` workspace refs), lockfile
   regen, CI scaffold copy. Each step depends on the prior succeeding — one
   agent or a short `pipeline()`, not a fan-out.
-- **Independent hardening** — `ArtifactKindSchema` → registration (1.5),
-  the MCP attachment type in `profile-schema.ts` (1.7),
-  `verify:decision-runtime` worker/MCP image coverage, the upgrade-path test.
-  These have no ordering dependency on each other once `decision-runtime`
-  exists with its own passing CI. **This is the fan-out-shaped work** —
-  `parallel()`/`pipeline()` over the four deliverables, each with its own
-  implement→verify stage, per `/agentic-orca`'s own template.
+- **Independent hardening, split across two repos (corrected 2026-09-02 —
+  `profile-schema.ts` lives in `packages/openclaw-setup-applier`, which
+  stays in control-plane, not decision-runtime):**
+  - In `decision-runtime`: `ArtifactKindSchema` → registration (1.5),
+    `verify:decision-runtime` worker/MCP image coverage, the upgrade-path
+    test. No ordering dependency between these three once the repo exists
+    with its own passing CI — fan-out-shaped, `parallel()`/`pipeline()`
+    per `/agentic-orca`'s own template.
+  - In `control-plane`: the MCP attachment type in `profile-schema.ts`
+    (1.7) — folded into control-plane's own Stage 4 (Slim) session as an
+    additional deliverable, since that's control-plane's own next piece of
+    work anyway, rather than standing up a separate session for one item.
 
 ## What `/agentic-orca` (via Workflow) does here
 
@@ -133,14 +138,17 @@ review point is the final state, not each stage boundary:
    into CI (S-5), tests green. Then reconnects the three Railway service
    sources and migrates the `DECISION_RUNTIME_*` variables, and verifies
    (not assumes) all three services are live and serving before continuing.
-3. **Harden** — the independent-hardening `parallel()`/`pipeline()` stream,
-   in the new repo, once its services are confirmed live. This is the
-   deliverable set `/agentic-orca`'s own implement→verify template was built
-   for. Each PR opened here gets at most 2 Copilot review rounds (nitpicks
-   don't block past round 2; a genuine functional defect gets one more
-   direct fix pass, then merges).
+3. **Harden** — the independent-hardening `parallel()`/`pipeline()` stream
+   *in the new repo* (three of the four deliverables — see the corrected
+   execution-class list above), once its services are confirmed live. This
+   is the deliverable set `/agentic-orca`'s own implement→verify template
+   was built for. Each PR opened here gets at most 2 Copilot review rounds
+   (nitpicks don't block past round 2; a genuine functional defect gets one
+   more direct fix pass, then merges).
 4. **Slim** — back in `openclaw-control-plane`: this repo's own Session 2
-   (D2-D5) — delete the extracted paths, update config/CI/docs, confirm
+   (D2-D5, plus the fourth hardening deliverable — the MCP attachment type
+   in `profile-schema.ts`, folded in as D6) — delete the extracted paths,
+   update config/CI/docs, confirm
    precheck green. Sequential mechanical, independent of stage 3 once
    stage 2's services are confirmed live. Same 2-round Copilot cadence.
 
