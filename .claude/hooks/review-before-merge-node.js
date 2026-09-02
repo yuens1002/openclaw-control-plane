@@ -19,19 +19,67 @@ function deny(reason) {
   process.exit(2);
 }
 
-// Anchor to the START of the command only (matching this repo's existing
-// verify-before-commit-node.js convention: `/^\s*git commit/i`), plus one
-// allowed `cd <path> &&` prefix (an allowlisted pattern for `gh` in
-// ~/.claude/settings.json). Do NOT scan for the phrase anywhere in the
-// string or split on every `&&`/`;`/`|`/newline — both are unsafe: a plain
-// substring match false-fires on prose that merely mentions the phrase
-// (caught live: a commit message describing this hook tripped it), and
-// naive splitting on separators breaks inside quoted strings (also caught
-// live: a test payload's JSON value containing "&&" got split mid-string,
-// producing a fragment that happened to start with "gh pr merge").
+// Quote-aware statement splitter. Three failure modes were caught live
+// while iterating on this detector, and this is the one approach that
+// avoids all three:
+//   1. A plain substring match (`\bgh\s+pr\s+merge\b` anywhere in the
+//      string) false-fires on prose that merely mentions the phrase, e.g.
+//      a commit message describing this hook.
+//   2. Splitting on every `&&`/`;`/`|`/newline WITHOUT tracking quotes
+//      breaks apart inside a quoted string (e.g. a JSON test payload whose
+//      string value happens to contain "&&"), producing a fragment that
+//      accidentally starts with the target phrase.
+//   3. Anchoring to only the very start of the whole command (plus one
+//      allowed `cd ... &&` prefix) is bypassable: `npm test && gh pr merge
+//      ...` never matches the anchor, yet the merge still runs.
+// Splitting on unquoted separators only, then checking each resulting
+// statement's own start, avoids all three: quoted content never produces a
+// false split, and every real command position (chained, sequenced, or
+// piped) is still checked.
+function splitShellStatements(command) {
+  const statements = [];
+  let current = "";
+  let quote = null;
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (quote) {
+      current += ch;
+      if (ch === quote) quote = null;
+      else if (quote === '"' && ch === "\\" && i + 1 < command.length) {
+        current += command[++i];
+      }
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === "\\" && i + 1 < command.length) {
+      current += ch + command[i + 1];
+      i++;
+      continue;
+    }
+    if (command.startsWith("&&", i) || command.startsWith("||", i)) {
+      statements.push(current);
+      current = "";
+      i++;
+      continue;
+    }
+    if (ch === ";" || ch === "\n" || ch === "|") {
+      statements.push(current);
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim().length > 0) statements.push(current);
+  return statements;
+}
+
 function commandInvokesGhPr(command, subcommand) {
-  const stripped = command.replace(/^\s*cd\s+\S+\s*&&\s*/i, "");
-  return new RegExp(`^\\s*gh\\s+pr\\s+${subcommand}\\b`).test(stripped);
+  const pattern = new RegExp(`^\\s*gh\\s+pr\\s+${subcommand}\\b`);
+  return splitShellStatements(command).some((stmt) => pattern.test(stmt));
 }
 
 function gh(args) {

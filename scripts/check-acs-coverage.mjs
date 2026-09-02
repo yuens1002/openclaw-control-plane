@@ -69,14 +69,14 @@ function main() {
   for (const { acId, planRef } of acRows) {
     if (planRef === "" || planRef === "—" || planRef === "-") continue; // AC-REG-style rows are allowed to have no plan ref
     const ids = planRef.split(",").map((s) => s.trim());
-    let anyMatched = false;
+    // Hard-fail on ANY invalid ID in the cell, not just when every ID is
+    // invalid — a mixed cell like "D1, D999" is still a real orphan
+    // reference (D999) and must not pass silently just because D1 is valid.
+    const invalidIds = ids.filter((id) => !deliverableIds.has(id));
     for (const id of ids) {
-      if (deliverableIds.has(id)) {
-        referenced.add(id);
-        anyMatched = true;
-      }
+      if (deliverableIds.has(id)) referenced.add(id);
     }
-    if (!anyMatched) orphanAcs.push({ acId, planRef });
+    if (invalidIds.length > 0) orphanAcs.push({ acId, planRef, invalidIds });
   }
 
   const orphanDeliverables = [...deliverableIds].filter((id) => !referenced.has(id));
@@ -88,8 +88,10 @@ function main() {
       for (const id of orphanDeliverables) lines.push(`  - ${id}`);
     }
     if (orphanAcs.length > 0) {
-      lines.push(`\nAC rows whose Plan ref matches no deliverable:`);
-      for (const { acId, planRef } of orphanAcs) lines.push(`  - ${acId} (Plan ref: "${planRef}")`);
+      lines.push(`\nAC rows with an invalid Plan ref (matches no deliverable):`);
+      for (const { acId, planRef, invalidIds } of orphanAcs) {
+        lines.push(`  - ${acId} (Plan ref: "${planRef}", invalid: ${invalidIds.join(", ")})`);
+      }
     }
     fail(lines.join("\n"));
   }

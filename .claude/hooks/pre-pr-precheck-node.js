@@ -15,15 +15,54 @@ function deny(reason) {
   process.exit(2);
 }
 
-// See the matching comment in review-before-merge-node.js: anchor to the
-// start of the command (plus one allowed `cd <path> &&` prefix) rather than
-// scanning for the phrase anywhere or splitting on shell separators —
-// both approaches false-fired in practice while authoring this pair of
-// hooks (prose containing the phrase; a naive split breaking inside a
-// quoted string).
+// Quote-aware statement splitter — see the full explanation of the three
+// failure modes this avoids in review-before-merge-node.js's copy of this
+// function (prose false-match; naive-split-inside-quotes false-match;
+// start-anchor-only bypass via `other-cmd && gh pr create`).
+function splitShellStatements(command) {
+  const statements = [];
+  let current = "";
+  let quote = null;
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (quote) {
+      current += ch;
+      if (ch === quote) quote = null;
+      else if (quote === '"' && ch === "\\" && i + 1 < command.length) {
+        current += command[++i];
+      }
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === "\\" && i + 1 < command.length) {
+      current += ch + command[i + 1];
+      i++;
+      continue;
+    }
+    if (command.startsWith("&&", i) || command.startsWith("||", i)) {
+      statements.push(current);
+      current = "";
+      i++;
+      continue;
+    }
+    if (ch === ";" || ch === "\n" || ch === "|") {
+      statements.push(current);
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim().length > 0) statements.push(current);
+  return statements;
+}
+
 function commandInvokesGhPr(command, subcommand) {
-  const stripped = command.replace(/^\s*cd\s+\S+\s*&&\s*/i, "");
-  return new RegExp(`^\\s*gh\\s+pr\\s+${subcommand}\\b`).test(stripped);
+  const pattern = new RegExp(`^\\s*gh\\s+pr\\s+${subcommand}\\b`);
+  return splitShellStatements(command).some((stmt) => pattern.test(stmt));
 }
 
 // `gh pr create` may run from a subdirectory (`cd packages/foo && gh ...`
