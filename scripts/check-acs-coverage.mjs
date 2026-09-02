@@ -94,11 +94,15 @@ function main() {
   for (const { acId, planRef } of acRows) {
     const isBlank = planRef === "" || planRef === "—" || planRef === "-";
     if (isBlank) {
-      // Only AC-REG-* rows (whole-suite regression checks with no single
-      // owning deliverable) may omit a Plan ref. Any other prefix with a
-      // blank cell is a real traceability gap, not a legitimate exception —
-      // catching it here is the point of this check.
-      if (/^AC-REG-/i.test(acId)) continue;
+      // Only AC-REG-*/AC-REGRESSION-* rows (whole-suite regression checks
+      // with no single owning deliverable) may omit a Plan ref. Both
+      // prefixes are real, current-convention usage in this repo (compare
+      // docs/plans/decision-runtime-mcp/ACs.md's AC-REGRESSION-001, a fully
+      // Plan-ref/Role-conforming file, against the more common AC-REG-001
+      // spelling elsewhere). Any other prefix with a blank cell is a real
+      // traceability gap, not a legitimate exception — catching it here is
+      // the point of this check.
+      if (/^AC-REG(?:RESSION)?-/i.test(acId)) continue;
       orphanAcs.push({ acId, planRef: "(blank)", invalidIds: ["(missing Plan ref)"] });
       continue;
     }

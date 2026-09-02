@@ -67,12 +67,20 @@ No dev server, no admin login. Instead:
   `docs/plans/live-instance-operations/plan.md` for real examples) in the
   plan's `## Deliverables` table with no AC row citing it in `Plan ref`.
 - An AC row's `Plan ref` that doesn't match any deliverable ID. A bare `—`
-  is allowed **only for `AC-REG-*` rows** — whole-suite regression checks
-  (all tests pass, typecheck/build clean) with no single owning
-  deliverable. Any other prefix (`AC-FN-*`, `AC-TST-*`, `AC-UI-*`, …) with
-  a blank `Plan ref` is a real traceability gap and fails Gate 1 — it is
-  not a general exception for "doesn't map to one deliverable." AC IDs may
-  also carry a letter suffix (`AC-FN-008a`/`008b` — see
+  is allowed **only for `AC-REG-*`/`AC-REGRESSION-*` rows** — whole-suite
+  regression checks (all tests pass, typecheck/build clean) with no single
+  owning deliverable; both spellings are real, current-convention usage
+  (`AC-REGRESSION-001` in `docs/plans/decision-runtime-mcp/ACs.md`,
+  `AC-REG-001` elsewhere). A different, narrower pattern exists in a couple
+  of older plans (`AC-TST-002` "full project verification" in
+  `setup-run-payload-contract`/`setup-api-basic-auth`) that blanks a
+  non-regression AC ID for a whole-suite check — those plans predate this
+  gate and are not guaranteed Gate-1-clean, same as the pre-adoption
+  exception above; do not widen the allowed-prefix set to match them, since
+  that would let a genuinely mis-scoped `AC-TST-*`/`AC-FN-*` row hide behind
+  the same exception. Any prefix outside `AC-REG(RESSION)?-*` with a blank
+  `Plan ref` is a real traceability gap and fails Gate 1. AC IDs may also
+  carry a letter suffix (`AC-FN-008a`/`008b` — see
   `docs/plans/setup-profile-applier/ACs.md`); the coverage script
   recognizes both forms.
 
