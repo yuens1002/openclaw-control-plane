@@ -6,15 +6,15 @@
 // precheck passed on that exact commit. Read by
 // .claude/hooks/pre-pr-precheck-node.js to gate `gh pr create`.
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const stampPath = fileURLToPath(new URL("../.claude/precheck-stamp.json", import.meta.url));
 
-const sha = execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
-const dirty = execSync("git status --porcelain", { encoding: "utf8" }).trim().length > 0;
+const sha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+const dirty = execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim().length > 0;
 
 mkdirSync(dirname(stampPath), { recursive: true });
 writeFileSync(

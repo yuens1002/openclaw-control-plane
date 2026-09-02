@@ -26,6 +26,21 @@ function commandInvokesGhPr(command, subcommand) {
   return new RegExp(`^\\s*gh\\s+pr\\s+${subcommand}\\b`).test(stripped);
 }
 
+// `gh pr create` may run from a subdirectory (`cd packages/foo && gh ...`
+// is an allowlisted pattern). Walk up from cwd to find the repo root,
+// matching the convention in enforce-workflow-start.js / verify-before-
+// commit-node.js — don't assume process.cwd() is the root.
+function findProjectDir(startDir) {
+  let dir = startDir;
+  for (let i = 0; i < 10; i++) {
+    if (fs.existsSync(path.join(dir, ".claude"))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return startDir;
+}
+
 function main(input) {
   let command = "";
   try {
@@ -39,7 +54,7 @@ function main(input) {
     process.exit(0);
   }
 
-  const projectDir = process.cwd();
+  const projectDir = findProjectDir(process.cwd());
   const stampPath = path.join(projectDir, ".claude", "precheck-stamp.json");
 
   if (!fs.existsSync(stampPath)) {

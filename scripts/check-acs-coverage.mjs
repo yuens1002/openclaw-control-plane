@@ -22,7 +22,9 @@ function parseDeliverableIds(planText) {
   }
   const ids = new Set();
   for (const line of section[0].split("\n")) {
-    const cell = line.match(/^\|\s*(D\d+)\s*\|/);
+    // Letter-suffixed IDs are real in this repo's plans, e.g. D8b/D8c
+    // (docs/plans/live-instance-operations/plan.md).
+    const cell = line.match(/^\|\s*(D\d+[a-z]?)\s*\|/);
     if (cell) ids.add(cell[1]);
   }
   if (ids.size === 0) {
@@ -33,8 +35,10 @@ function parseDeliverableIds(planText) {
 
 function parseAcPlanRefs(acsText) {
   // Matches any "| AC-XXX-N | <plan ref> | ..." row across all AC tables.
+  // Letter-suffixed AC IDs are real in this repo, e.g. AC-FN-008a/008b
+  // (docs/plans/setup-profile-applier/ACs.md).
   const rows = [];
-  const rowPattern = /^\|\s*(AC-[A-Z]+-\d+)\s*\|\s*([^|]*)\|/gm;
+  const rowPattern = /^\|\s*(AC-[A-Z]+-\d+[a-z]?)\s*\|\s*([^|]*)\|/gm;
   let match;
   while ((match = rowPattern.exec(acsText)) !== null) {
     const acId = match[1];

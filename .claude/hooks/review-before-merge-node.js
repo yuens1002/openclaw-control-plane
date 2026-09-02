@@ -38,6 +38,33 @@ function gh(args) {
   return execFileSync("gh", args, { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
 }
 
+// A PR with >50 review threads would otherwise silently drop the tail past
+// page 1, letting an unresolved thread past. Page through all of them.
+function fetchAllReviewThreads(prNumber) {
+  const { owner, repo } = repoNwo();
+  const threads = [];
+  let after = null;
+  for (;;) {
+    const afterArg = after ? `, after: "${after}"` : "";
+    const query = `query {
+  repository(owner: "${owner}", name: "${repo}") {
+    pullRequest(number: ${prNumber}) {
+      reviewThreads(first: 50${afterArg}) {
+        nodes { isResolved }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}`;
+    const json = gh(["api", "graphql", "-f", `query=${query}`]);
+    const page = JSON.parse(json).data.repository.pullRequest.reviewThreads;
+    threads.push(...page.nodes);
+    if (!page.pageInfo.hasNextPage) break;
+    after = page.pageInfo.endCursor;
+  }
+  return threads;
+}
+
 function repoNwo() {
   const url = execFileSync("git", ["config", "--get", "remote.origin.url"], {
     encoding: "utf8",
@@ -91,16 +118,7 @@ function main(input) {
 
   let threads;
   try {
-    const { owner, repo } = repoNwo();
-    const query = `query {
-  repository(owner: "${owner}", name: "${repo}") {
-    pullRequest(number: ${pr.number}) {
-      reviewThreads(first: 50) { nodes { isResolved } }
-    }
-  }
-}`;
-    const json = gh(["api", "graphql", "-f", `query=${query}`]);
-    threads = JSON.parse(json).data.repository.pullRequest.reviewThreads.nodes;
+    threads = fetchAllReviewThreads(pr.number);
   } catch (err) {
     deny(`BLOCKED: could not check review thread resolution (${String(err.message || err)}).`);
     return;

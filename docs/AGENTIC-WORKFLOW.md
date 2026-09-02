@@ -1,9 +1,10 @@
 # Agentic Workflow — this repo's adapter
 
-This repo follows [`/agentic-workflow`](~/.claude/skills/agentic-workflow/agentic-workflow.md)
-(the generic, cross-project protocol). This file states only what's specific
-to `openclaw-control-plane` — read the generic doc first for phases, gates,
-and cadences.
+This repo follows `/agentic-workflow` — the generic, cross-project protocol
+invoked as a Claude Code skill (locally: `~/.claude/skills/agentic-workflow/`;
+not a repo-relative path, so it won't resolve as a link from GitHub). This
+file states only what's specific to `openclaw-control-plane` — read the
+generic skill first for phases, gates, and cadences.
 
 Every feature already used the artifact shape below (see the dozens of
 directories under `docs/plans/`); what this adoption adds is the mechanical
@@ -55,11 +56,14 @@ No dev server, no admin login. Instead:
 `scripts/check-acs-coverage.mjs <plan.md> <ACs.md>` (also runnable as
 `npm run check:acs-coverage -- <plan.md> <ACs.md>`). Hard-fails on:
 
-- A deliverable ID (`D1`, `D2`, …) in the plan's `## Deliverables` table with
-  no AC row citing it in `Plan ref`.
+- A deliverable ID (`D1`, `D2`, …, or letter-suffixed like `D8b`/`D8c` — see
+  `docs/plans/live-instance-operations/plan.md` for real examples) in the
+  plan's `## Deliverables` table with no AC row citing it in `Plan ref`.
 - An AC row's `Plan ref` that doesn't match any deliverable ID (a bare `—`
   is allowed — regression-style ACs, e.g. `AC-REG-*`, don't trace to a
-  deliverable).
+  deliverable). AC IDs may also carry a letter suffix (`AC-FN-008a`/`008b` —
+  see `docs/plans/setup-profile-applier/ACs.md`); the coverage script
+  recognizes both forms.
 
 Run it locally before Implement, and again in Phase 3/`/agentic-orca`
 Verify.
