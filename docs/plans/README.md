@@ -1,6 +1,9 @@
 # Plans
 
-Feature plans that use the agentic-workflow cadence live here.
+Feature plans that use the agentic-workflow cadence live here. See
+[`docs/AGENTIC-WORKFLOW.md`](../AGENTIC-WORKFLOW.md) for this repo's adapter
+of the generic `/agentic-workflow` protocol — roles, gates, and enforcement
+hooks.
 
 Use one directory per feature:
 
