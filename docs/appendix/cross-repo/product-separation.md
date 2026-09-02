@@ -34,7 +34,8 @@ two.
         │
         ▼
 2. Railway service sources reconnected (api, worker, mcp → decision-runtime)
-   (human-gated — see "Execution classes" below)
+   (autonomous per 2026-09-02 consensus — see "Execution classes" below —
+   but its success is verified, not assumed, before step 3 starts)
         │
         ▼
 3. control-plane repo: extracted paths removed, remaining packages verified
@@ -81,19 +82,19 @@ Tags every deliverable across both repos' plans by who can act on it and
 whether it can run inside an unsupervised Workflow pipeline, or must pause
 for a human:
 
-- **Human-gated shared state** — creating the `decision-runtime` GitHub repo,
+- **Shared-state actions (previously human-gated, now autonomous by explicit
+  consensus, 2026-09-02)** — creating the `decision-runtime` GitHub repo,
   reconnecting the three Railway service sources, migrating the nine
   hand-set `DECISION_RUNTIME_*` variables (1.6) including the signing key.
-  A Workflow agent *can* technically call the tools these need (`gh repo
-  create`, the `railway` MCP's `connect-service-source`, session-connected
-  MCP tools are reachable from any workflow agent) — the reason this class
-  still stops for a human isn't a tooling limit, it's that a Workflow runs
-  every agent() call to completion before anyone sees the result, so there's
-  no confirmation prompt available mid-pipeline. Each such step is instead an
-  agent that *prepares and prints* the exact command as its return value; the
-  workflow ends there. A human reviews and runs (or explicitly confirms) it,
-  then the next workflow starts from that point. Never chained through
-  automatically, regardless of what's technically reachable.
+  These no longer stop for a live confirmation at the moment of execution —
+  see `docs/plans/product-separation/plan.md`'s Dependencies section for the
+  exact consensus. What doesn't change: each one is still verified to have
+  actually succeeded (services confirmed live via Railway status/logs/health
+  check, not assumed from a config write) before the next dependent step
+  starts, and the credential migration still never puts the signing key's
+  value in an argument string, a log, or a commit — set via the `railway`
+  MCP's variable-set tool or piped through stdin, same convention as the
+  rest of this ecosystem's credential handling.
 - **Sequential mechanical** — the `filter-repo` history split, path fixups in
   the new repo (import paths, `package.json` workspace refs), lockfile
   regen, CI scaffold copy. Each step depends on the prior succeeding — one
@@ -119,27 +120,29 @@ before writing this: a throwaway probe agent successfully `cd`ed into a
 sibling local repo and read its git log with no sandbox or hook interference.
 
 What this means for the four-stage shape below: one Workflow script per
-stage, run in sequence across turns, each ending exactly where a human-gated
-action begins (Workflow scripts can't pause mid-run and resume themselves —
-they can only end, and a fresh invocation with `resumeFromRunId` continues
-from there once the human-gated step is done):
+stage, run in sequence across turns. Per the 2026-09-02 consensus, stages
+run straight through without a human confirmation between them — the human
+review point is the final state, not each stage boundary:
 
 1. **Extract** — `git filter-repo` on a throwaway local clone (touches
    nothing live), verified (paths correct, history actually preserved).
-   Ends by printing the exact repo-creation command, unexecuted.
-2. **Bootstrap** — after a human runs step 1's output: work directly in the
-   new repo's local clone — CI scaffold, path fixups, lockfile regen,
-   `verify:decision-runtime` wired into CI (S-5), tests green. Ends by
-   printing the three Railway service-reconnection commands, unexecuted —
-   and does not reach that point until the current incident (see
-   Dependencies) is confirmed resolved.
+   Then creates the `decision-runtime` GitHub repo and pushes the filtered
+   history.
+2. **Bootstrap** — work directly in the new repo's local clone — CI
+   scaffold, path fixups, lockfile regen, `verify:decision-runtime` wired
+   into CI (S-5), tests green. Then reconnects the three Railway service
+   sources and migrates the `DECISION_RUNTIME_*` variables, and verifies
+   (not assumes) all three services are live and serving before continuing.
 3. **Harden** — the independent-hardening `parallel()`/`pipeline()` stream,
-   in the new repo, once its services are live. This is the deliverable set
-   `/agentic-orca`'s own implement→verify template was built for.
+   in the new repo, once its services are confirmed live. This is the
+   deliverable set `/agentic-orca`'s own implement→verify template was built
+   for. Each PR opened here gets at most 2 Copilot review rounds (nitpicks
+   don't block past round 2; a genuine functional defect gets one more
+   direct fix pass, then merges).
 4. **Slim** — back in `openclaw-control-plane`: this repo's own Session 2
    (D2-D5) — delete the extracted paths, update config/CI/docs, confirm
    precheck green. Sequential mechanical, independent of stage 3 once
-   stage 2's services are confirmed live.
+   stage 2's services are confirmed live. Same 2-round Copilot cadence.
 
 Stages 3 and 4 have no ordering dependency on each other once stage 2 is
 done — they can run as two arms of one `parallel()` call or as two separate
@@ -151,10 +154,9 @@ That's a skill-file edit for a separate session, not part of this plan.
 
 ## Dependencies / blockers
 
-- Nothing here proceeds past step 1 (creating `decision-runtime`) until this
-  plan and `docs/plans/product-separation/plan.md` are approved.
-- Step 2 (Railway service reconnection) and any later Railway/GitHub-repo
-  action wait for explicit confirmation that the current agency-instance
-  build-error incident (being handled in a separate session) is resolved —
-  changing where the Decision Runtime's services deploy from while someone is
-  mid-incident on that same instance is how incidents compound.
+- This plan and `docs/plans/product-separation/plan.md` were approved
+  2026-09-02, together with the execution-autonomy and Copilot-cadence
+  consensus recorded in that file's Dependencies section — read it before
+  running any stage.
+- The agency-instance build-error incident that previously blocked stage 2
+  is confirmed resolved as of the same date.

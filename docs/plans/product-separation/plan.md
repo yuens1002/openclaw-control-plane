@@ -108,23 +108,32 @@ without being run for real against this repo's origin.
 
 ## Dependencies
 
-- **This plan's own approval** — nothing below Session 1 executes without it.
-- **Session 2 is blocked** on: (a) the `decision-runtime` repo existing with
-  its own passing CI (cross-repo overview, dependency-order step 1), (b) its
-  three Railway services reconnected and confirmed serving real traffic
-  (step 2) — not merely configured, actually verified live — and (c)
-  explicit confirmation that the current agency-instance build-error incident
-  (being handled in a separate session right now) is resolved. Restructuring
-  this repo's Decision Runtime code while that instance is mid-incident risks
-  compounding it.
+- **This plan's own approval** — given 2026-09-02. Execution proceeds
+  end-to-end per the consensus below without a review gate at each PR/session
+  — only the final end state (decision-runtime live and hardened;
+  control-plane slimmed, precheck green) is reviewed as one unit.
+- **The agency-instance build-error incident referenced in earlier drafts of
+  this plan is confirmed resolved** (2026-09-02) — Session 2 / cross-repo
+  overview stage 2 (Railway reconnection) is no longer blocked on it.
+- **Execution-class consensus (2026-09-02, supersedes the cross-repo
+  overview's original "human-gated shared state" framing):** the three
+  actions previously requiring a live human confirmation at the moment of
+  execution — repo creation, Railway service-source reconnection, and the
+  environment-variable/signing-key migration — proceed autonomously. This
+  does not relax the *engineering* requirement to verify each one actually
+  succeeded (services confirmed live via Railway status/logs/health check,
+  not assumed from a config write) before the next dependent step starts.
+- **Review cadence:** each PR gets at most 2 Copilot review rounds. Nitpick/
+  style findings after round 2 do not block a merge. A genuine functional
+  defect (would break the deliverable's intended behavior) surviving round 2
+  gets one more direct fix pass and a merge — not a 3rd Copilot round, not an
+  indefinite loop, and not merged broken.
 - No Railway or GitHub-repo-creation action happens as part of this plan's
-  Session 1. Session 1 is docs-only.
+  Session 1. Session 1 is docs-only regardless of the autonomy above — there
+  is nothing for those actions to do until `decision-runtime` exists.
 
 ## Out of Scope
 
-- Creating the `decision-runtime` repo itself, or any Railway/GitHub action —
-  those are human-gated steps in the cross-repo overview, not deliverables of
-  this repo's plan.
 - The independent-hardening stream (`ArtifactKindSchema` fix, MCP attachment
   type, `verify:decision-runtime` worker/MCP coverage, upgrade-path test) —
   all four live in the `decision-runtime` repo after extraction, per the
