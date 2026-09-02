@@ -87,12 +87,26 @@ function parseAcPlanRefs(acsText) {
     );
   }
 
+  // The row parser below assumes the AC id is always the table's first
+  // column (true of every real table in this repo) and reads Plan ref from
+  // the rest of the row at `planRefIndex - 1`. If Plan ref were itself the
+  // first column (index 0), that offset goes negative and every row would
+  // silently read as blank instead of failing loudly — reject that layout
+  // explicitly rather than mis-parse it.
+  if (planRefIndex === 0) {
+    fail(
+      "Gate 1: 'Plan ref' is the table's first column, but Gate 1 assumes the " +
+        "AC id (AC-XXX-N) is always column 1. Reorder the table so the AC id " +
+        "comes first."
+    );
+  }
+
   // Matches any "| AC-XXX-N | ...rest of row... |" row across all AC
   // tables, then splits the rest on "|" to read the cell at planRefIndex —
   // this assumes the AC id is always the table's first column (true of
   // every real table in this repo) but no longer assumes Plan ref is always
-  // the second column, so a table with columns reordered (or an extra
-  // column inserted before Plan ref) is still read correctly.
+  // the second column, so a table with Plan ref moved further right (or an
+  // extra column inserted before it) is still read correctly.
   // Letter-suffixed AC IDs are real in this repo, e.g. AC-FN-008a/008b
   // (docs/plans/setup-profile-applier/ACs.md).
   const rows = [];
