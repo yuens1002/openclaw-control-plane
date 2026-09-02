@@ -16,12 +16,6 @@ npm test
 npm run build
 ```
 
-Use Docker Postgres for local DB work:
-
-```bash
-docker compose up -d postgres
-```
-
 ## Pull Requests
 
 - Keep changes narrowly scoped.

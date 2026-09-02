@@ -9,10 +9,14 @@ already merged (with Copilot review, per Phase 6's mandatory step) before
 
 ## Why `npm version` is not used
 
-It rewrites `package-lock.json` in a way that re-triggers the per-release
-Railway redeploy removed by issue #86 (`decision-runtime-watch-patterns` /
-`tests/decision-runtime-watch-patterns.test.ts` guards against exactly
-this). Bump both files by hand instead.
+It rewrites `package-lock.json`, which historically re-triggered the
+per-release Railway redeploy removed by issue #86 for the (since-extracted)
+Decision Runtime services. Post-separation, this repo's only Railway service
+is the root OpenClaw wrapper, which declares no `watchPatterns` and already
+redeploys on every commit — so a version-bump commit is not a special case
+for it either way. `npm version` remains unused here on habit/consistency
+grounds (hand-editing both files stays the simpler, more auditable path);
+bump both files by hand.
 
 ## Protocol
 
@@ -26,12 +30,13 @@ this). Bump both files by hand instead.
 
 ## What this does NOT cover yet
 
-- **Post-separation, this changes.** `findings-and-decisions.md` D-2 makes
-  the Decision Runtime one product/one version, separate from this repo's
-  own version once the split happens. Rewrite this file when that lands —
-  don't assume it still applies unmodified.
+- **Post-separation** (this landed — the Decision Runtime now lives in its
+  own `decision-runtime` repository per `findings-and-decisions.md` D-1/D-2),
+  this repo's `version`/`CHANGELOG.md` cover only the vending/provisioning
+  tooling and the wrapper image. The Decision Runtime versions independently
+  in its own repository; this protocol has no bearing on it.
 - **PR #94** drafted a release-versioning scheme before the product
-  boundary was understood and is marked superseded by PR #95's description.
-  Resolve it before treating it as this repo's forward plan.
+  boundary was understood and is marked superseded. Resolve it before
+  treating it as this repo's forward plan.
 - The `pre-pr-via-release-node.js` fingerprint-gate hook is not adopted —
   there's no release PR to fingerprint against.

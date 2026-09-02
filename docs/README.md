@@ -45,15 +45,13 @@ Examples:
 
 - [Architecture](architecture.md): current package, ownership, and
   deployment-topology boundaries.
-- [Decision Runtime](decision-runtime.md): durable model, API, usage examples,
-  typed tools, and extension path.
-- [Runtime Authentication And Authorization](runtime-authentication.md): OIDC,
-  stable identity, policy, delegation, and key rotation.
-- [Private Decision Runtime Deployment](decision-runtime-deployment.md):
-  service topology, readiness, smoke, backup/restore, and rollback.
-- [OpenClaw Tools](openclaw-tools.md): typed adapter surface exposed to agents.
-- [MCP Service Host](mcp-service.md): reusable module contract, Decision Runtime
-  tools, OpenClaw configuration, deployment, and rollback.
+- [Setup Profile Applier](setup-profile-applier.md): how a generated client
+  profile (model providers, channels, MCP server attachments) drives a live
+  OpenClaw instance's `/setup` API.
+
+The Decision Runtime engine this repo's provisioned instances may attach to
+over MCP now lives in a separate repository; its architecture, authentication,
+and deployment docs live there, not here.
 
 ## Public-Repo Rule
 
