@@ -130,6 +130,27 @@ docs/plans/<feature-slug>/
 hoc practice (version bump + CHANGELOG entry), not a fingerprinted release
 pipeline. Add that hook if/when `/release` grows one.
 
+### Scope — these are guardrails, not a security boundary
+
+Both project hooks parse the Bash tool's `command` string with a hand-rolled,
+quote-aware tokenizer (`.claude/hooks/lib/gh-pr-command-detect.mjs`). That
+tokenizer is a best-effort guardrail against the agent forgetting the
+procedure, not a boundary against a deliberately adversarial command — see
+its module header for the specific parsing gaps (subshells, command
+substitution, wrapper commands, background `&`, backslash-newline
+continuation).
+
+More importantly, **both hooks are wired only to the `Bash` tool matcher**
+(`.claude/settings.json`). On this repo's primary development machine, the
+`PowerShell` tool and the GitHub MCP tools (`merge_pull_request`,
+`create_pull_request`) are both available and both bypass these hooks
+entirely — nothing here gates them. Broadening coverage to those surfaces is
+a real follow-up, not done in this adoption: PowerShell needs its own
+grammar-aware tokenizer (not a shared one — PowerShell's quoting and
+statement-separator rules differ from POSIX shells), and the MCP tools would
+need either equivalent gating logic run from a different hook point or a
+`permissions.deny` rule blocking them outright in favor of the CLI path.
+
 ## Release
 
 See [`.claude/commands/release.md`](../.claude/commands/release.md).

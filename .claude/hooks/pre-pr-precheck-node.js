@@ -4,6 +4,10 @@
 // Claude Code PreToolUse hook (Bash) — gates `gh pr create` on a fresh
 // `npm run precheck` stamp (.claude/precheck-stamp.json) matching HEAD.
 //
+// See lib/gh-pr-command-detect.mjs's header for this hook's detection scope
+// and known non-coverage — it is a guardrail against the agent forgetting
+// the procedure, not a security boundary against an adversarial command.
+//
 // Exit 0 = allow, exit 2 = block (reason on stderr).
 
 import fs from "node:fs";
@@ -40,13 +44,16 @@ function main(input) {
     process.exit(0);
   }
 
-  const tokens = findGhPrInvocation(command, "create");
-  if (!tokens) {
+  const invocation = findGhPrInvocation(command, "create");
+  if (!invocation) {
     process.exit(0);
   }
 
-  // `gh pr create --help`/`-h` never creates anything — don't gate it.
-  if (tokens.includes("--help") || tokens.includes("-h")) {
+  // `gh pr create --help`/`-h` never creates anything — don't gate it. This
+  // check trusts isHelp's flag-position-aware detection rather than scanning
+  // tokens directly, so `--body --help` (a real create with body text
+  // "--help") isn't mistaken for a no-op help call.
+  if (invocation.isHelp) {
     process.exit(0);
   }
 
@@ -64,6 +71,12 @@ function main(input) {
     stamp = JSON.parse(fs.readFileSync(stampPath, "utf8"));
   } catch {
     deny("BLOCKED: .claude/precheck-stamp.json is unreadable. Re-run `npm run precheck`.");
+    return;
+  }
+
+  if (typeof stamp !== "object" || stamp === null || typeof stamp.sha !== "string") {
+    deny("BLOCKED: .claude/precheck-stamp.json has an unexpected shape. Re-run `npm run precheck`.");
+    return;
   }
 
   let headSha = "";
@@ -95,4 +108,13 @@ function main(input) {
 
 let input = "";
 process.stdin.on("data", (chunk) => (input += chunk));
-process.stdin.on("end", () => main(input));
+process.stdin.on("end", () => {
+  try {
+    main(input);
+  } catch (err) {
+    // A gate that crashes fail-open (Claude Code treats a non-0/2 exit as a
+    // non-blocking error) is worse than useless — it looks like enforcement
+    // but silently lets everything through the moment its own code throws.
+    deny(`BLOCKED: pre-pr-precheck hook crashed (${String(err && err.message ? err.message : err)}). Fix the hook or investigate before opening a PR.`);
+  }
+});

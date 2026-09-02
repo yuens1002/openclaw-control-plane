@@ -16,12 +16,23 @@ function fail(message) {
 }
 
 function parseDeliverableIds(planText) {
-  const section = planText.match(/##\s*Deliverables[\s\S]*?(?=\n##\s|\n$)/i);
-  if (!section) {
+  // Match every "## Deliverables" section, not just the first — a plan with
+  // two such sections (e.g. a multi-session plan appending a second batch)
+  // would otherwise have its second section silently ignored. The `$`
+  // alternative (not `\n$`) also matches when the section is the file's
+  // last content and the file has no trailing newline.
+  const sections = planText.match(/##\s*Deliverables[\s\S]*?(?=\n##\s|$)/gi);
+  if (!sections) {
     fail("Gate 1: plan.md has no '## Deliverables' section.");
   }
+  if (sections.length > 1) {
+    fail(
+      `Gate 1: plan.md has ${sections.length} '## Deliverables' sections — expected exactly one. ` +
+        "Merge them into a single section so deliverable coverage can be checked unambiguously."
+    );
+  }
   const ids = new Set();
-  for (const line of section[0].split("\n")) {
+  for (const line of sections[0].split("\n")) {
     // Letter-suffixed IDs are real in this repo's plans, e.g. D8b/D8c
     // (docs/plans/live-instance-operations/plan.md).
     const cell = line.match(/^\|\s*(D\d+[a-z]?)\s*\|/);
@@ -33,6 +44,30 @@ function parseDeliverableIds(planText) {
   return ids;
 }
 
+// Locates the 0-indexed column position of the "Plan ref" header in a real
+// markdown table — a header row immediately followed by a `| --- | --- |`
+// separator row. A plain substring/regex scan for "Plan ref" anywhere in the
+// file (the prior approach) false-positives on the ACs-template legend table
+// that documents what "Plan ref" means (see docs/plans/*/ACs.md's "Column |
+// Filled by | When" table, which has its own literal "| Plan ref | ... |"
+// row) — that row is prose about the convention, not the AC table's own
+// header, so it must not satisfy this check.
+function findPlanRefColumnIndex(acsText) {
+  const lines = acsText.split("\n");
+  for (let i = 0; i < lines.length - 1; i++) {
+    const header = lines[i];
+    const separator = lines[i + 1];
+    if (!/^\|.*\|\s*$/.test(header)) continue;
+    if (!/^\|.*\|\s*$/.test(separator)) continue;
+    const separatorCells = separator.split("|").slice(1, -1);
+    if (separatorCells.length === 0 || !separatorCells.every((c) => /^\s*:?-+:?\s*$/.test(c))) continue;
+    const cells = header.split("|").slice(1, -1).map((c) => c.trim());
+    const idx = cells.findIndex((c) => /^plan ref$/i.test(c));
+    if (idx !== -1) return idx;
+  }
+  return -1;
+}
+
 function parseAcPlanRefs(acsText) {
   // Pre-adoption ACs tables (e.g. docs/plans/decision-runtime-deployment/
   // ACs.md) use a different column shape entirely — "ID | Acceptance
@@ -40,25 +75,33 @@ function parseAcPlanRefs(acsText) {
   // Without this check, the row regex below would silently treat that
   // free-text second column as a Plan ref value and report a confusing
   // "invalid Plan ref" failure instead of a clear format error.
-  if (!/\|\s*Plan ref\s*\|/i.test(acsText)) {
+  const planRefIndex = findPlanRefColumnIndex(acsText);
+  if (planRefIndex === -1) {
     fail(
-      "Gate 1: ACs.md has no 'Plan ref' column header. This looks like a " +
-        "pre-adoption ACs table (see docs/plans/decision-runtime-deployment/" +
-        "ACs.md for the older ID/Acceptance-criterion/Executable-pass-" +
+      "Gate 1: ACs.md has no 'Plan ref' table column header (a real markdown " +
+        "table header row immediately followed by a '| --- |' separator row). " +
+        "This looks like a pre-adoption ACs table (see docs/plans/decision-runtime-" +
+        "deployment/ACs.md for the older ID/Acceptance-criterion/Executable-pass-" +
         "condition shape) — Gate 1 only applies to tables using the current " +
         "convention (Plan ref + Role columns; see docs/AGENTIC-WORKFLOW.md)."
     );
   }
 
-  // Matches any "| AC-XXX-N | <plan ref> | ..." row across all AC tables.
+  // Matches any "| AC-XXX-N | ...rest of row... |" row across all AC
+  // tables, then splits the rest on "|" to read the cell at planRefIndex —
+  // this assumes the AC id is always the table's first column (true of
+  // every real table in this repo) but no longer assumes Plan ref is always
+  // the second column, so a table with columns reordered (or an extra
+  // column inserted before Plan ref) is still read correctly.
   // Letter-suffixed AC IDs are real in this repo, e.g. AC-FN-008a/008b
   // (docs/plans/setup-profile-applier/ACs.md).
   const rows = [];
-  const rowPattern = /^\|\s*(AC-[A-Z]+-\d+[a-z]?)\s*\|\s*([^|]*)\|/gm;
+  const rowPattern = /^\|\s*(AC-[A-Z]+-\d+[a-z]?)\s*\|(.*)\|\s*$/gm;
   let match;
   while ((match = rowPattern.exec(acsText)) !== null) {
     const acId = match[1];
-    const planRef = match[2].trim();
+    const restCells = match[2].split("|").map((c) => c.trim());
+    const planRef = (restCells[planRefIndex - 1] ?? "").trim();
     rows.push({ acId, planRef });
   }
   if (rows.length === 0) {

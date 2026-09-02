@@ -10,10 +10,14 @@
 // shell out via cmd.exe on Windows, which mangles multi-line/quoted
 // arguments like the GraphQL query below.
 //
+// See lib/gh-pr-command-detect.mjs's header for this hook's detection scope
+// and known non-coverage — it is a guardrail against the agent forgetting
+// the procedure, not a security boundary against an adversarial command.
+//
 // Exit 0 = allow, exit 2 = block (reason on stderr).
 
 import { execFileSync } from "node:child_process";
-import { findGhPrInvocation } from "./lib/gh-pr-command-detect.mjs";
+import { findGhPrInvocation, VALUE_FLAGS_BY_SUBCOMMAND } from "./lib/gh-pr-command-detect.mjs";
 
 function deny(reason) {
   process.stderr.write(reason);
@@ -69,27 +73,23 @@ function main(input) {
     process.exit(0);
   }
 
-  const tokens = findGhPrInvocation(command, "merge");
-  if (!tokens) {
+  const invocation = findGhPrInvocation(command, "merge");
+  if (!invocation) {
     process.exit(0);
   }
 
-  // `gh pr merge --help`/`-h` never merges anything — don't gate it.
-  if (tokens.includes("--help") || tokens.includes("-h")) {
+  // `gh pr merge --help`/`-h` never merges anything — don't gate it. This
+  // trusts isHelp's flag-position-aware detection rather than scanning
+  // tokens directly: `gh pr merge 123 --body --help` really merges PR 123
+  // with body text "--help" (gh's own flag parser consumes "--help" as
+  // --body's value) — a bare `tokens.includes("--help")` check would see
+  // that literal string in the array and wrongly wave the real merge through.
+  if (invocation.isHelp) {
     process.exit(0);
   }
 
-  // Value-taking flags per `gh pr merge --help` — their value token must
-  // not be mistaken for the merge target (a bare regex over the whole
-  // command previously could, e.g., capture `--subject`'s value).
-  const VALUE_FLAGS = new Set([
-    "-A", "--author-email",
-    "-b", "--body",
-    "-F", "--body-file",
-    "--match-head-commit",
-    "-t", "--subject",
-    "-R", "--repo",
-  ]);
+  const { tokens } = invocation;
+  const VALUE_FLAGS = VALUE_FLAGS_BY_SUBCOMMAND.merge;
   let target = "";
   for (let i = 0; i < tokens.length; i++) {
     const tok = tokens[i];
@@ -147,4 +147,13 @@ function main(input) {
 
 let input = "";
 process.stdin.on("data", (chunk) => (input += chunk));
-process.stdin.on("end", () => main(input));
+process.stdin.on("end", () => {
+  try {
+    main(input);
+  } catch (err) {
+    // A gate that crashes fail-open (Claude Code treats a non-0/2 exit as a
+    // non-blocking error) is worse than useless — it looks like enforcement
+    // but silently lets everything through the moment its own code throws.
+    deny(`BLOCKED: review-before-merge hook crashed (${String(err && err.message ? err.message : err)}). Fix the hook or investigate before merging.`);
+  }
+});

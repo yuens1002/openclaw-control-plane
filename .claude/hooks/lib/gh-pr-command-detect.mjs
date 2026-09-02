@@ -5,7 +5,22 @@
 // hooks carrying identical copies — keeping one copy means a future bypass
 // fix (or bug) can't land in one hook and be missed in the other.
 //
-// Exports splitShellStatements, tokenize, and findGhPrInvocation.
+// Exports splitShellStatements, tokenize, findGhPrInvocation, and
+// VALUE_FLAGS_BY_SUBCOMMAND.
+//
+// Scope — this is a best-effort guardrail against the agent forgetting the
+// procedure, not a security boundary against a deliberately adversarial
+// shell command. It recognizes the first word of each `&&`/`||`/`;`/`|`/
+// newline-separated statement (after any leading `VAR=value` assignments)
+// as `gh`/`gh.exe` (case-insensitive) + `pr` + a known subcommand or alias.
+// Known gaps, accepted rather than chased further (see docs/AGENTIC-
+// WORKFLOW.md "Enforcement hooks — scope"):
+//   - Subshells, command substitution (`$(...)`), `bash -c "..."`.
+//   - Wrapper commands: `exec gh ...`, `env gh ...`, `command gh ...`.
+//   - Background separator (`&`) and backslash-newline line continuation.
+//   - Only wired to Claude Code's Bash tool (see .claude/settings.json) —
+//     the PowerShell tool and the GitHub MCP tools (merge_pull_request,
+//     create_pull_request) bypass these hooks entirely.
 
 // Quote-aware statement splitter. Three failure modes were caught live
 // while iterating on this detector, and this is the one approach that
@@ -111,19 +126,91 @@ export function tokenize(statement) {
   return tokens;
 }
 
+// `gh pr create` and `gh pr merge` each accept a documented alias (`gh pr
+// new`, `gh pr merge` has none but the table stays shape-consistent for the
+// next subcommand this gets used for).
+const SUBCOMMAND_ALIASES = {
+  create: ["create", "new"],
+  merge: ["merge"],
+};
+
+// Value-taking flags per `gh pr <subcommand> --help`, keyed by subcommand.
+// A value-flag's value token must never be scanned for a bare `--help`/`-h`
+// or mistaken for the merge/create target — `gh pr merge 123 --body --help`
+// really merges PR 123 with body text "--help" (gh's own flag parser
+// consumes "--help" as --body's value); a scan that doesn't know --body
+// takes a value would see the literal string "--help" in the token list and
+// wrongly treat the whole invocation as a no-op help call.
+export const VALUE_FLAGS_BY_SUBCOMMAND = {
+  merge: new Set([
+    "-A", "--author-email",
+    "-b", "--body",
+    "-F", "--body-file",
+    "--match-head-commit",
+    "-t", "--subject",
+    "-R", "--repo",
+  ]),
+  create: new Set([
+    "-a", "--assignee",
+    "-B", "--base",
+    "-b", "--body",
+    "-F", "--body-file",
+    "-H", "--head",
+    "-l", "--label",
+    "-m", "--milestone",
+    "-p", "--project",
+    "--recover",
+    "-r", "--reviewer",
+    "-T", "--template",
+    "-t", "--title",
+    "-R", "--repo",
+  ]),
+};
+
 // Finds the `gh pr <subcommand>` invocation across all statements in the
 // command, allowing leading env var assignments (e.g. `FOO=bar gh pr merge
 // ...`, or `FOO="a b" gh pr merge ...`), which would otherwise bypass the
-// gate entirely. Returns the invocation's own argument tokens (with "gh",
-// "pr", <subcommand>, and any leading env assignments already stripped),
-// or null if no statement actually invokes it.
+// gate entirely. Matches `gh`/`gh.exe` case-insensitively and accepts the
+// subcommand's documented aliases (`gh pr new` for `create`).
+//
+// Returns `{ tokens, isHelp }` — `tokens` is the invocation's own argument
+// tokens (with "gh", "pr", <subcommand>, and any leading env assignments
+// already stripped); `isHelp` is true only when `--help`/`-h` appears at an
+// actual flag position, never when it's consumed as a preceding value-flag's
+// value. Returns null if no statement actually invokes the subcommand.
+//
+// Known non-coverage (see the module header above): subshells, command
+// substitution, `bash -c`, wrapper commands (`exec`/`env`/`command`/`time`),
+// background `&`, backslash-newline continuation. `-R/--repo`'s value is
+// recognized as the flag's argument here (so it doesn't get mistaken for the
+// target) but is not forwarded to the caller's own `gh pr view`/GraphQL
+// calls — this repo has no multi-repo workflow that passes `-R`, so that gap
+// is accepted rather than plumbed through.
 export function findGhPrInvocation(command, subcommand) {
+  const aliases = SUBCOMMAND_ALIASES[subcommand] ?? [subcommand];
+  const valueFlags = VALUE_FLAGS_BY_SUBCOMMAND[subcommand] ?? new Set();
   for (const stmt of splitShellStatements(command)) {
     const tokens = tokenize(stmt);
     let i = 0;
     while (i < tokens.length && /^[A-Za-z_]\w*=/.test(tokens[i])) i++;
-    if (tokens[i] === "gh" && tokens[i + 1] === "pr" && tokens[i + 2] === subcommand) {
-      return tokens.slice(i + 3);
+    const isGh = /^gh(\.exe)?$/i.test(tokens[i] ?? "");
+    const isPr = /^pr$/i.test(tokens[i + 1] ?? "");
+    const subTok = (tokens[i + 2] ?? "").toLowerCase();
+    if (isGh && isPr && aliases.includes(subTok)) {
+      const argTokens = tokens.slice(i + 3);
+      let isHelp = false;
+      for (let j = 0; j < argTokens.length; j++) {
+        const tok = argTokens[j];
+        if (tok === "--help" || tok === "-h") {
+          isHelp = true;
+          break;
+        }
+        if (tok.startsWith("-")) {
+          const [flag] = tok.split("=");
+          if (valueFlags.has(flag) && !tok.includes("=")) j++; // skip its value token
+        }
+      }
+      return { tokens: argTokens, isHelp };
     }
   }
   return null;
