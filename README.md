@@ -74,6 +74,11 @@ this repo. A provisioned OpenClaw instance reaches it, when attached, over MCP
 [docs/setup-profile-applier.md](docs/setup-profile-applier.md)) — never
 through a workspace dependency.
 
+`attachments.mcpServers[]` is a schema capability only today: the setup-profile
+applier parses and validates it, but no code path acts on it yet, so declaring
+an MCP server in a profile does not by itself attach one. Wiring a consumer is
+separate, still-unlanded work.
+
 ## Local Setup
 
 ```bash
