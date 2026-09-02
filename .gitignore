@@ -5,3 +5,4 @@ coverage/
 .env.local
 *.local.md
 *.tsbuildinfo
+.claude/precheck-stamp.json
