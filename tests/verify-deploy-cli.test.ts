@@ -4,7 +4,8 @@ import { terminalFailureStatuses, type DeploymentStatus } from "@openclaw-contro
 import {
   classifyDeploymentStatus,
   readRailwayDeployConfig,
-  selectDeploymentForCommit
+  selectDeploymentForCommit,
+  selectLatestDeployment
 } from "@openclaw-control-plane/openclaw-railway-installer/verify-deploy";
 
 describe("selectDeploymentForCommit", () => {
@@ -36,6 +37,20 @@ describe("selectDeploymentForCommit", () => {
       { status: "SUCCESS", meta: { commitHash: "aaa111" } }
     ];
     expect(selectDeploymentForCommit(deployments, "aaa111")).toBe(deployments[0]);
+  });
+});
+
+describe("selectLatestDeployment", () => {
+  it("returns the first entry in the list -- railway deployment list returns newest-first", () => {
+    const deployments = [
+      { status: "SUCCESS", meta: { commitHash: "newest" } },
+      { status: "SUCCESS", meta: { commitHash: "older" } }
+    ];
+    expect(selectLatestDeployment(deployments)).toBe(deployments[0]);
+  });
+
+  it("returns undefined for an empty deployments array", () => {
+    expect(selectLatestDeployment([])).toBeUndefined();
   });
 });
 

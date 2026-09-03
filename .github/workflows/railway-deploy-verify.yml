@@ -1,37 +1,53 @@
 name: Railway Deploy Verify
 
-# Confirms the Railway deployment triggered by this push actually reached
-# SUCCESS -- closes the detection gap from issue #104, where every deploy
+# Confirms the most recent Railway deployment for this service is actually
+# healthy -- closes the detection gap from issue #104, where every deploy
 # failed for 26+ hours across 7 unrelated commits while this repo's own CI
 # (unit tests, typecheck) stayed green the entire time, since it never
 # checked whether the real Railway build/deploy succeeded.
 #
+# DELIBERATELY schedule-triggered, not push-triggered. This repo's Railway
+# service has "Wait for CI" enabled (source.checkSuites: true), which holds
+# new deployments in WAITING until every push-triggered GitHub check suite on
+# that commit finishes, and marks the deployment SKIPPED if any of them
+# fails. A push-triggered version of this check would itself BE one of those
+# check suites, creating a deadlock: it would wait for the deployment to
+# leave WAITING, which Railway will never do until this workflow finishes.
+# See packages/openclaw-railway-installer/src/verify-deploy-cli.ts's header
+# for the full reasoning. Use `workflow_dispatch` (with an optional
+# `target_sha` input) to check on demand.
+#
 # Deliberately narrower than the deleted Railway Proof Verify workflow
 # (findings-and-decisions.md S-6, which tested nothing useful): this only
-# asks "did THIS commit's deployment reach SUCCESS," not a broader live
-# end-state proof.
+# asks "is the most recent deployment healthy," not a broader live end-state
+# proof.
 #
 # Skips gracefully (does not fail) until RAILWAY_PROJECT_ID,
 # RAILWAY_ENVIRONMENT_ID, and RAILWAY_SERVICE_ID are configured as repo
-# secrets -- see packages/openclaw-railway-installer/src/verify-deploy.ts.
+# secrets.
 
 on:
-  push:
-    branches:
-      - main
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: "Check a specific commit's deployment instead of the most recent one"
+        required: false
+        type: string
 
 permissions:
   contents: read
 
+concurrency:
+  group: railway-deploy-verify
+  cancel-in-progress: false
+
 jobs:
   verify-deploy:
-    name: Verify Railway deployment succeeded
+    name: Verify Railway deployment is healthy
     runs-on: ubuntu-latest
-    env:
-      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-      RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
-      RAILWAY_ENVIRONMENT_ID: ${{ secrets.RAILWAY_ENVIRONMENT_ID }}
-      RAILWAY_SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}
+    timeout-minutes: 5
 
     steps:
       - name: Checkout
@@ -46,8 +62,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Pinned to the version verified at wiring time -- an unpinned global
+      # install on a recurring schedule would silently pick up a future
+      # @railway/cli release's behavior change on the very next run.
       - name: Install Railway CLI
-        run: npm install -g @railway/cli
+        run: npm install -g @railway/cli@5.49.0
 
       - name: Verify Railway deployment
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+          RAILWAY_ENVIRONMENT_ID: ${{ secrets.RAILWAY_ENVIRONMENT_ID }}
+          RAILWAY_SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}
+          RAILWAY_DEPLOY_TARGET_SHA: ${{ inputs.target_sha }}
         run: npm run railway-deploy:verify

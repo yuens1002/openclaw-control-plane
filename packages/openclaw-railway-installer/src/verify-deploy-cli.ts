@@ -5,11 +5,33 @@
 // RAILWAY_SERVICE_ID are all set (verify-proof-cli.ts's same convention for
 // its own scoping vars).
 //
-// Confirms the Railway deployment triggered by a given commit (default:
-// current HEAD) actually reached SUCCESS. Closes the detection gap from
-// issue #104: GitHub Actions CI (unit tests, typecheck) knows nothing about
-// whether the real Railway build/deploy succeeded, so a deploy could (and
-// did, for 26+ hours) keep failing with CI staying green the whole time.
+// Confirms the most recent Railway deployment for this service is actually
+// healthy. Closes the detection gap from issue #104: GitHub Actions CI (unit
+// tests, typecheck) knows nothing about whether the real Railway build/
+// deploy succeeded, so a deploy could (and did, for 26+ hours) keep failing
+// with CI staying green the whole time.
+//
+// DELIBERATELY schedule-triggered, not push-triggered (see the workflow
+// file) -- this repo's Railway service has "Wait for CI" enabled
+// (source.checkSuites: true), which holds new deployments in WAITING until
+// every push-triggered GitHub check suite on that commit finishes, and marks
+// the deployment SKIPPED if any of them fails. A push-triggered version of
+// this exact check would BE one of those check suites: it would poll for the
+// deployment to leave WAITING, which Railway will never do until this
+// workflow itself finishes -- a deadlock that stops every future commit from
+// deploying at all. A schedule-triggered workflow is outside what Wait for
+// CI waits for (Railway's own docs scope that feature to push-triggered
+// workflows), so this only ever OBSERVES deployment state after the fact,
+// never gates it.
+//
+// This also means: no poll-to-completion loop. A scheduled run takes exactly
+// one snapshot of the most recent deployment (see selectLatestDeployment)
+// and classifies it -- SUCCESS is fine, still-building/pending is fine (the
+// next scheduled run will see it if it finishes), and a genuine terminal
+// failure is reported immediately. There is no fixed "wait N minutes" budget
+// to get wrong against a build whose real duration varies (a cached deploy
+// finishes in ~1 minute; a cold build after an OPENCLAW_GIT_REF bump can
+// take 10+ minutes).
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -17,13 +39,11 @@ import {
   classifyDeploymentStatus,
   readRailwayDeployConfig,
   selectDeploymentForCommit,
+  selectLatestDeployment,
   type RailwayDeployment
 } from "./verify-deploy.js";
 
 const execFileAsync = promisify(execFile);
-
-const POLL_INTERVAL_MS = 15_000;
-const MAX_POLL_ATTEMPTS = 40; // ~10 minutes
 
 async function main() {
   const config = readRailwayDeployConfig(process.env);
@@ -35,42 +55,45 @@ async function main() {
     return;
   }
 
-  const targetSha = process.env.RAILWAY_DEPLOY_TARGET_SHA || (await gitHead());
-
-  for (let attempt = 1; attempt <= MAX_POLL_ATTEMPTS; attempt++) {
-    const deployments = await listDeployments(config);
-    const match = selectDeploymentForCommit(deployments, targetSha);
-
-    if (!match) {
-      console.log(`[${attempt}/${MAX_POLL_ATTEMPTS}] no deployment found yet for commit ${targetSha}, waiting...`);
-    } else {
-      const outcome = classifyDeploymentStatus(match.status);
-      if (outcome === "success") {
-        console.log(`Railway deployment for commit ${targetSha} reached SUCCESS.`);
-        return;
-      }
-      if (outcome === "failure") {
-        console.error(`BLOCKED: Railway deployment for commit ${targetSha} ended in status ${match.status}.`);
-        process.exitCode = 1;
-        return;
-      }
-      console.log(`[${attempt}/${MAX_POLL_ATTEMPTS}] deployment for commit ${targetSha} is still ${match.status}, waiting...`);
-    }
-
-    if (attempt < MAX_POLL_ATTEMPTS) {
-      await sleep(POLL_INTERVAL_MS);
-    }
+  let deployments: RailwayDeployment[];
+  try {
+    deployments = await listDeployments(config);
+  } catch (error) {
+    // A transient failure to even ask Railway about deployments (network
+    // blip, a momentary API error) is not itself evidence of a bad deploy --
+    // fail the job so it's visible, but don't misreport it as a deployment
+    // failure. The next scheduled run tries again.
+    console.error(`BLOCKED: could not query Railway for deployment status (${describeError(error)}).`);
+    process.exitCode = 1;
+    return;
   }
 
-  console.error(
-    `BLOCKED: no Railway deployment for commit ${targetSha} reached a terminal state within ` +
-      `${(MAX_POLL_ATTEMPTS * POLL_INTERVAL_MS) / 60_000} minutes.`
-  );
-  process.exitCode = 1;
+  const targetSha = process.env.RAILWAY_DEPLOY_TARGET_SHA;
+  const deployment = targetSha ? selectDeploymentForCommit(deployments, targetSha) : selectLatestDeployment(deployments);
+
+  if (!deployment) {
+    const scope = targetSha ? `for commit ${targetSha}` : "at all";
+    console.log(`No Railway deployment found ${scope} -- nothing to verify yet.`);
+    return;
+  }
+
+  const outcome = classifyDeploymentStatus(deployment.status);
+  const commitDescription = deployment.meta?.commitHash ? ` (commit ${deployment.meta.commitHash})` : "";
+
+  if (outcome === "success") {
+    console.log(`Railway deployment${commitDescription} is SUCCESS.`);
+    return;
+  }
+  if (outcome === "failure") {
+    console.error(`BLOCKED: Railway deployment${commitDescription} is in status ${deployment.status}.`);
+    process.exitCode = 1;
+    return;
+  }
+  console.log(`Railway deployment${commitDescription} is still ${deployment.status} -- not a failure, checking again next run.`);
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function listDeployments(config: {
@@ -109,12 +132,7 @@ async function railway(args: string[]): Promise<string> {
   return stdout;
 }
 
-async function gitHead(): Promise<string> {
-  const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"]);
-  return stdout.trim();
-}
-
 main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : String(error));
+  console.error(describeError(error));
   process.exitCode = 1;
 });
