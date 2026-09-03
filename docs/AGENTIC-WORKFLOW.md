@@ -22,6 +22,17 @@ ref column at all. Gate 1 detects this and fails with a clear message rather
 than mis-parsing; it does not retroactively apply to those older
 directories.
 
+**`.claude/` is local, untracked tooling, not part of this repo's tracked
+tree** (see issue #102 — it's process tooling specific to how this repo's
+maintainer works with Claude Code, not something a public contributor needs
+or receives on clone). Every `.claude/hooks/`, `.claude/settings.json`,
+`.claude/verification-status.json`, and `.claude/commands/release.md`
+reference below describes files that exist only on the maintainer's own
+machine. The generic `/agentic-workflow` skill and this doc's phases/gates
+still apply to anyone working in this repo; the mechanical enforcement
+(hooks, the precheck stamp file) is the maintainer's own local setup, not
+something to replicate to follow this doc.
+
 ## This repo has no browser UI
 
 `openclaw-control-plane` is a backend/infra monorepo: a Railway installer
@@ -153,7 +164,9 @@ need either equivalent gating logic run from a different hook point or a
 
 ## Release
 
-See [`.claude/commands/release.md`](../.claude/commands/release.md).
+See `.claude/commands/release.md` (local-only, not a repo-relative link —
+see the note on `.claude/` above) for the maintainer's own release protocol,
+or `docs/README.md`'s Document Types section for the general convention.
 
 > **Note:** PR #94 ("draft Decision Runtime release versioning plan") predates
 > the product-separation decision record and is called out there as
