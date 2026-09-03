@@ -84,7 +84,14 @@ export interface RailwayDeployConfig {
  * existing convention for its own four scoping vars.
  */
 export function readRailwayDeployConfig(env: NodeJS.ProcessEnv): RailwayDeployConfig | undefined {
-  const { RAILWAY_PROJECT_ID, RAILWAY_ENVIRONMENT_ID, RAILWAY_SERVICE_ID } = env;
-  if (!RAILWAY_PROJECT_ID || !RAILWAY_ENVIRONMENT_ID || !RAILWAY_SERVICE_ID) return undefined;
-  return { projectId: RAILWAY_PROJECT_ID, environmentId: RAILWAY_ENVIRONMENT_ID, serviceId: RAILWAY_SERVICE_ID };
+  // .trim() before the emptiness check -- a whitespace-only value ("   ")
+  // is truthy in JS, so without this a plausible real misconfiguration
+  // (an accidentally space-padded secret) would pass through as
+  // "configured" with a garbage value, only failing later against the
+  // actual Railway CLI call with a less obvious error.
+  const projectId = env.RAILWAY_PROJECT_ID?.trim();
+  const environmentId = env.RAILWAY_ENVIRONMENT_ID?.trim();
+  const serviceId = env.RAILWAY_SERVICE_ID?.trim();
+  if (!projectId || !environmentId || !serviceId) return undefined;
+  return { projectId, environmentId, serviceId };
 }

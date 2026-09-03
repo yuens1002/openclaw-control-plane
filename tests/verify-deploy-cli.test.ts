@@ -104,6 +104,18 @@ describe("readRailwayDeployConfig", () => {
     expect(readRailwayDeployConfig({ ...full, RAILWAY_PROJECT_ID: "" })).toBeUndefined();
   });
 
+  it("treats a whitespace-only value the same as missing -- an accidentally space-padded secret must not pass through as configured", () => {
+    expect(readRailwayDeployConfig({ ...full, RAILWAY_PROJECT_ID: "   " })).toBeUndefined();
+  });
+
+  it("trims surrounding whitespace from otherwise-valid values", () => {
+    expect(readRailwayDeployConfig({ RAILWAY_PROJECT_ID: " proj ", RAILWAY_ENVIRONMENT_ID: "env", RAILWAY_SERVICE_ID: "svc" })).toEqual({
+      projectId: "proj",
+      environmentId: "env",
+      serviceId: "svc"
+    });
+  });
+
   it("returns undefined when all scoping vars are missing", () => {
     expect(readRailwayDeployConfig({})).toBeUndefined();
   });
