@@ -11,4 +11,4 @@ coverage/
 # with Claude Code, not project code or documentation a public contributor
 # needs. Untracked going forward; historical versions remain in git log
 # (see issue #102 for the decision not to also purge history).
-.claude/
+/.claude/
