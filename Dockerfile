@@ -226,7 +226,7 @@ RUN test "$(grep -cF 'scope === "state"' src/server.js)" -eq 1
 RUN node --check src/server.js
 RUN node --check src/wrapper-state-export.mjs
 
-FROM node:22-bookworm AS openclaw-build
+FROM node:22-bookworm AS openclaw-source
 
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -251,13 +251,31 @@ WORKDIR /openclaw
 ARG OPENCLAW_GIT_REF=v2026.7.1-2
 RUN git clone --depth 1 --branch "${OPENCLAW_GIT_REF}" https://github.com/openclaw/openclaw.git .
 
-RUN set -eux; \
-  find ./extensions -name 'package.json' -type f | while read -r f; do \
-    sed -i -E 's/"openclaw"[[:space:]]*:[[:space:]]*">=[^"]+"/"openclaw": "*"/g' "$f"; \
-    sed -i -E 's/"openclaw"[[:space:]]*:[[:space:]]*"workspace:[^"]+"/"openclaw": "*"/g' "$f"; \
-  done
+# Extracted to scripts/relax-openclaw-extension-versions.mjs (issue #104) so
+# both this real build and the deliberate lockfile-regeneration path below
+# run identical relaxation logic -- one source of truth, not two copies that
+# can quietly drift apart.
+COPY scripts/relax-openclaw-extension-versions.mjs /tmp/relax-openclaw-extension-versions.mjs
+RUN node /tmp/relax-openclaw-extension-versions.mjs .
 
+# Deliberate, NOT part of the real build below -- built only via
+# `docker build --target openclaw-lockfile-refresh` (see
+# scripts/generate-openclaw-lockfile.sh), run manually whenever
+# OPENCLAW_GIT_REF bumps. This is the one deliberate point where dependency
+# resolution touches the live npm registry; every ordinary build below uses
+# the committed, frozen result instead. Before this split, EVERY build ran
+# `pnpm install --no-frozen-lockfile` here, re-resolving this ~162-workspace
+# monorepo's full dependency graph against the live registry every time --
+# any transitive package tripping a registry-side supply-chain policy (e.g.
+# pnpm's minimumReleaseAge) failed the build regardless of what changed in
+# this repo. Confirmed: every deploy failed for 26+ hours across 7 unrelated
+# commits before the blocking package aged past that policy on its own.
+FROM openclaw-source AS openclaw-lockfile-refresh
 RUN pnpm install --no-frozen-lockfile
+
+FROM openclaw-source AS openclaw-build
+COPY deploy/openclaw-railway/openclaw.pnpm-lock.yaml ./pnpm-lock.yaml
+RUN pnpm install --frozen-lockfile
 RUN pnpm build
 ENV OPENCLAW_PREFER_PNPM=1
 RUN pnpm ui:install && pnpm ui:build
