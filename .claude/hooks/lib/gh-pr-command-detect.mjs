@@ -5,8 +5,18 @@
 // hooks carrying identical copies — keeping one copy means a future bypass
 // fix (or bug) can't land in one hook and be missed in the other.
 //
-// Exports splitShellStatements, tokenize, findGhPrInvocation, and
-// VALUE_FLAGS_BY_SUBCOMMAND.
+// Exports splitShellStatements, tokenize, findGhPrInvocation,
+// resolveInvocationCwd, and VALUE_FLAGS_BY_SUBCOMMAND.
+//
+// resolveInvocationCwd follows claude-skills' templates/hooks/
+// block-direct-main-commit-node.js pattern (control-plane issue #99): a
+// gated command's own `cd` prefix, not the hook process's ambient cwd,
+// determines which repo is actually being targeted. Without this, `cd
+// ../decision-runtime && gh pr create ...` gated against control-plane's
+// own precheck stamp / Copilot review state while decision-runtime was the
+// real target — observed twice during the product-separation effort.
+
+import path from "node:path";
 //
 // Scope — this is a best-effort guardrail against the agent forgetting the
 // procedure, not a security boundary against a deliberately adversarial
@@ -186,6 +196,61 @@ export const VALUE_FLAGS_BY_SUBCOMMAND = {
 // target) but is not forwarded to the caller's own `gh pr view`/GraphQL
 // calls — this repo has no multi-repo workflow that passes `-R`, so that gap
 // is accepted rather than plumbed through.
+// Same `cd` recognition and Windows POSIX-path conversion as
+// block-direct-main-commit-node.js, kept anchored to a statement's own
+// start (not "cd anywhere in the string") for the same reason: a real `cd`
+// is always the first token of its own statement once splitShellStatements
+// has isolated it.
+const CD_RE = /^\s*cd\s+(?:"([^"]*)"|'([^']*)'|(\S+))/i;
+
+function toNativePath(p) {
+  const home = process.env.HOME || process.env.USERPROFILE;
+  if (home && (p === "~" || p.startsWith("~/"))) {
+    p = p === "~" ? home : `${home.replace(/\\/g, "/")}/${p.slice(2)}`;
+  }
+  if (process.platform !== "win32") return p;
+  const driveMatch = p.match(/^\/([a-zA-Z])\/(.*)$/);
+  if (driveMatch) return `${driveMatch[1]}:/${driveMatch[2]}`;
+  return p;
+}
+
+function resolveDir(baseCwd, rawPath) {
+  return path.resolve(baseCwd, toNativePath(rawPath));
+}
+
+// Walks statements in command order, tracking cwd through `cd` statements,
+// and returns whatever cwd is in effect at the statement that actually
+// invokes `gh pr <subcommand>` — so a `cd <target-repo> && gh pr create` (or
+// `cd a && cd b && gh pr merge`) resolves against <target-repo>, not
+// `baseCwd` (the hook process's own ambient cwd, i.e. the session's project
+// directory regardless of what the gated command itself does).
+//
+// If no statement actually invokes the subcommand, returns baseCwd
+// unchanged — callers already gate on findGhPrInvocation returning
+// non-null before using this, so that case is unreachable in practice.
+export function resolveInvocationCwd(command, subcommand, baseCwd) {
+  const aliases = SUBCOMMAND_ALIASES[subcommand] ?? [subcommand];
+  let cwd = baseCwd;
+  for (const stmt of splitShellStatements(command)) {
+    const cdMatch = CD_RE.exec(stmt);
+    if (cdMatch) {
+      const rawPath = cdMatch[1] ?? cdMatch[2] ?? cdMatch[3];
+      cwd = resolveDir(cwd, rawPath);
+      continue;
+    }
+    const tokens = tokenize(stmt);
+    let i = 0;
+    while (i < tokens.length && /^[A-Za-z_]\w*=/.test(tokens[i])) i++;
+    const isGh = /^gh(\.exe)?$/i.test(tokens[i] ?? "");
+    const isPr = /^pr$/i.test(tokens[i + 1] ?? "");
+    const subTok = (tokens[i + 2] ?? "").toLowerCase();
+    if (isGh && isPr && aliases.includes(subTok)) {
+      return cwd;
+    }
+  }
+  return cwd;
+}
+
 export function findGhPrInvocation(command, subcommand) {
   const aliases = SUBCOMMAND_ALIASES[subcommand] ?? [subcommand];
   const valueFlags = VALUE_FLAGS_BY_SUBCOMMAND[subcommand] ?? new Set();

@@ -13,7 +13,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { findGhPrInvocation } from "./lib/gh-pr-command-detect.mjs";
+import { findGhPrInvocation, resolveInvocationCwd } from "./lib/gh-pr-command-detect.mjs";
 
 function deny(reason) {
   process.stderr.write(reason);
@@ -21,9 +21,13 @@ function deny(reason) {
 }
 
 // `gh pr create` may run from a subdirectory (`cd packages/foo && gh ...`
-// is an allowlisted pattern). Walk up from cwd to find the repo root,
+// is an allowlisted pattern) — or from a different repo entirely (`cd
+// ../decision-runtime && gh pr create ...`). Walk up from the command's own
+// resolved target cwd (see resolveInvocationCwd) to find the repo root,
 // matching the convention in enforce-workflow-start.js / verify-before-
-// commit-node.js — don't assume process.cwd() is the root.
+// commit-node.js — never assume process.cwd() (this hook process's own
+// ambient cwd) is the target, since a cd earlier in the same command may
+// have moved it elsewhere (control-plane issue #99).
 function findProjectDir(startDir) {
   let dir = startDir;
   for (let i = 0; i < 10; i++) {
@@ -57,7 +61,8 @@ function main(input) {
     process.exit(0);
   }
 
-  const projectDir = findProjectDir(process.cwd());
+  const targetCwd = resolveInvocationCwd(command, "create", process.cwd());
+  const projectDir = findProjectDir(targetCwd);
   const stampPath = path.join(projectDir, ".claude", "precheck-stamp.json");
 
   if (!fs.existsSync(stampPath)) {

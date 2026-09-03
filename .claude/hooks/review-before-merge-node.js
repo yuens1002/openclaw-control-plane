@@ -17,21 +17,29 @@
 // Exit 0 = allow, exit 2 = block (reason on stderr).
 
 import { execFileSync } from "node:child_process";
-import { findGhPrInvocation, VALUE_FLAGS_BY_SUBCOMMAND } from "./lib/gh-pr-command-detect.mjs";
+import {
+  findGhPrInvocation,
+  resolveInvocationCwd,
+  VALUE_FLAGS_BY_SUBCOMMAND,
+} from "./lib/gh-pr-command-detect.mjs";
 
 function deny(reason) {
   process.stderr.write(reason);
   process.exit(2);
 }
 
-function gh(args) {
-  return execFileSync("gh", args, { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
+// cwd is threaded through every gh/git call below rather than defaulting to
+// this hook process's own ambient cwd — a `cd <target-repo> && gh pr merge`
+// must gate against <target-repo>'s PR/review state, not control-plane's
+// (control-plane issue #99).
+function gh(args, cwd) {
+  return execFileSync("gh", args, { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], cwd });
 }
 
 // A PR with >50 review threads would otherwise silently drop the tail past
 // page 1, letting an unresolved thread past. Page through all of them.
-function fetchAllReviewThreads(prNumber) {
-  const { owner, repo } = repoNwo();
+function fetchAllReviewThreads(prNumber, cwd) {
+  const { owner, repo } = repoNwo(cwd);
   const threads = [];
   let after = null;
   for (;;) {
@@ -46,7 +54,7 @@ function fetchAllReviewThreads(prNumber) {
     }
   }
 }`;
-    const json = gh(["api", "graphql", "-f", `query=${query}`]);
+    const json = gh(["api", "graphql", "-f", `query=${query}`], cwd);
     const page = JSON.parse(json).data.repository.pullRequest.reviewThreads;
     threads.push(...page.nodes);
     if (!page.pageInfo.hasNextPage) break;
@@ -55,9 +63,10 @@ function fetchAllReviewThreads(prNumber) {
   return threads;
 }
 
-function repoNwo() {
+function repoNwo(cwd) {
   const url = execFileSync("git", ["config", "--get", "remote.origin.url"], {
     encoding: "utf8",
+    cwd,
   }).trim();
   const match = url.match(/[/:]([^/]+)\/([^/]+?)(?:\.git)?$/);
   if (!match) throw new Error(`Could not parse owner/repo from remote URL: ${url}`);
@@ -88,6 +97,8 @@ function main(input) {
     process.exit(0);
   }
 
+  const targetCwd = resolveInvocationCwd(command, "merge", process.cwd());
+
   const { tokens } = invocation;
   const VALUE_FLAGS = VALUE_FLAGS_BY_SUBCOMMAND.merge;
   let target = "";
@@ -107,7 +118,7 @@ function main(input) {
     const viewArgs = ["pr", "view"];
     if (target) viewArgs.push(target);
     viewArgs.push("--json", "number,headRefOid,reviews");
-    pr = JSON.parse(gh(viewArgs));
+    pr = JSON.parse(gh(viewArgs, targetCwd));
   } catch (err) {
     deny(`BLOCKED: could not look up the PR to check review status (${String(err.message || err)}).`);
     return;
@@ -128,7 +139,7 @@ function main(input) {
 
   let threads;
   try {
-    threads = fetchAllReviewThreads(pr.number);
+    threads = fetchAllReviewThreads(pr.number, targetCwd);
   } catch (err) {
     deny(`BLOCKED: could not check review thread resolution (${String(err.message || err)}).`);
     return;
