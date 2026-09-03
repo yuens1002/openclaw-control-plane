@@ -49,7 +49,7 @@ export type DeploymentStatus =
   | "SUCCESS"
   | "WAITING";
 
-const terminalFailureStatuses = new Set<DeploymentStatus>([
+export const terminalFailureStatuses = new Set<DeploymentStatus>([
   "CRASHED",
   "FAILED",
   "NEEDS_APPROVAL",
