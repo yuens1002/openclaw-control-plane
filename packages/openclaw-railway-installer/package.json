@@ -15,6 +15,7 @@
     "./railway-variables": "./src/railway-variables.ts",
     "./setup-auth": "./src/setup-auth.ts",
     "./template-lock": "./src/template-lock.ts",
+    "./verify-deploy": "./src/verify-deploy.ts",
     "./verify-proof": "./src/verify-proof.ts"
   },
   "dependencies": {

@@ -67,6 +67,7 @@ No dev server, no admin login. Instead:
 | Playwright (UI/E2E) | N/A — no UI |
 | Railway proof verify | `npm run railway-proof:verify` — manual command only; the scheduled/dispatchable `Railway Proof Verify` CI workflow was deleted (see product-separation findings-and-decisions.md S-6 — it watched nothing and provided no coverage). Requires `RAILWAY_*` secrets when run against a live proof deployment. |
 | Railway template lock check | `npm run railway-template:check` |
+| Railway deploy status check | `npm run railway-deploy:verify` — confirms the most recent Railway deployment reached `SUCCESS`; runs on a 15-minute schedule + `workflow_dispatch` in CI (`.github/workflows/railway-deploy-verify.yml`), deliberately not push-triggered (see that script's header for why). Requires `RAILWAY_*` secrets; skips gracefully when unconfigured. |
 | Dependency audit | `npm audit --omit=dev` |
 
 ## Gate 1 — coverage validator
