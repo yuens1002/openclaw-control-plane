@@ -25,6 +25,7 @@ CONTAINER_NAME="openclaw-control-plane-lockfile-refresh-tmp"
 
 cleanup() {
   docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+  docker rmi -f "$IMAGE_TAG" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
