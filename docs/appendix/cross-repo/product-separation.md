@@ -1,7 +1,11 @@
 # Product Separation — Cross-Repo Overview
 
-Status: **plan draft, awaiting approval**. Not yet an approved contract — the
-six sequencing decisions below are recommendations, not commitments.
+Status: **executed**. This plan's six sequencing decisions were approved and
+fully carried out (control-plane PR #97; decision-runtime PRs #1/#2). Kept as
+a point-in-time record of the separation as planned and sequenced, per this
+repo's own [plan-document convention](../../README.md#document-types) — the
+living description of the resulting architecture lives in each repo's own
+architecture doc, not here.
 
 Architecture reference only. Per-repo implementation detail lives in each
 repo's own feature plan; this document maps repos, streams, and dependency

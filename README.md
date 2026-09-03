@@ -101,8 +101,10 @@ npm run build
 
 The test suite covers the Railway installer and the setup-profile applier —
 provisioning, template-lock checks, onboarding, and Railway variable guard
-behavior. Live Railway smoke tests remain opt-in so normal CI does not create
-cloud resources.
+behavior — plus `openclaw-railway-wrapper-patches.test.ts` (23 tests) for the
+wrapper's build-time patches (scoped state export, restart-gateway helper).
+Live Railway smoke tests remain opt-in so normal CI does not create cloud
+resources.
 
 Workspace packages are marked `private: true` intentionally. The GitHub repo can
 be public while npm publishing remains out of scope.
