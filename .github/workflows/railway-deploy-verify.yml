@@ -1,0 +1,53 @@
+name: Railway Deploy Verify
+
+# Confirms the Railway deployment triggered by this push actually reached
+# SUCCESS -- closes the detection gap from issue #104, where every deploy
+# failed for 26+ hours across 7 unrelated commits while this repo's own CI
+# (unit tests, typecheck) stayed green the entire time, since it never
+# checked whether the real Railway build/deploy succeeded.
+#
+# Deliberately narrower than the deleted Railway Proof Verify workflow
+# (findings-and-decisions.md S-6, which tested nothing useful): this only
+# asks "did THIS commit's deployment reach SUCCESS," not a broader live
+# end-state proof.
+#
+# Skips gracefully (does not fail) until RAILWAY_PROJECT_ID,
+# RAILWAY_ENVIRONMENT_ID, and RAILWAY_SERVICE_ID are configured as repo
+# secrets -- see packages/openclaw-railway-installer/src/verify-deploy.ts.
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify-deploy:
+    name: Verify Railway deployment succeeded
+    runs-on: ubuntu-latest
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+      RAILWAY_ENVIRONMENT_ID: ${{ secrets.RAILWAY_ENVIRONMENT_ID }}
+      RAILWAY_SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Verify Railway deployment
+        run: npm run railway-deploy:verify
