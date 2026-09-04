@@ -226,6 +226,53 @@ RUN test "$(grep -cF 'scope === "state"' src/server.js)" -eq 1
 RUN node --check src/server.js
 RUN node --check src/wrapper-state-export.mjs
 
+# Neither the wrapper's own routes nor upstream OpenClaw can verify a GitHub
+# App webhook delivery. Upstream's generic `/hooks` gateway and bundled
+# `webhooks` plugin both authenticate with a static shared secret compared
+# against an `Authorization`/`x-openclaw-webhook-secret` header; a GitHub App
+# delivery never sends the secret itself -- it HMAC-SHA256-signs the raw
+# request body and sends the digest in `X-Hub-Signature-256`. Fix: one new
+# wrapper-owned route, `POST /hooks/github-webhook-verify`, that verifies that
+# signature and responds 200/401 accordingly -- no dispatch, no agent
+# involvement, no gateway process involvement. It is registered *before* the
+# catch-all `app.use(requireDashboardAuth, ...)` that proxies everything else
+# to the OpenClaw gateway, so a request to it is handled here and never
+# reaches the gateway at all. `/hooks*` is already exempt from the wrapper's
+# dashboard Basic Auth (see the sed patch above, "allow OpenClaw webhook
+# endpoints to bypass dashboard auth") -- this route relies on that existing
+# exemption rather than adding a new one.
+#
+# Build-time wrapper patch, not an upstream change or an OpenClaw plugin, for
+# the same reason as every patch above: a plugin would mean publishing/
+# installing an npm package and routing through the app/gateway process,
+# unnecessary for this narrow a scope, and every future OPENCLAW_TEMPLATE_REF
+# bump should inherit the fix automatically rather than needing to be redone.
+#
+# The route and its env var (`GITHUB_WEBHOOK_SECRET`) are deliberately named
+# generically -- not tied to any one deployed instance -- because this patch
+# lands in the *shared* wrapper image every provisioned instance builds from.
+# Every instance gets the route; each opts in independently later, out of
+# band from this repo, by setting its own `GITHUB_WEBHOOK_SECRET` and
+# registering its own GitHub App webhook URL. When `GITHUB_WEBHOOK_SECRET` is
+# unset (the default for an instance that hasn't opted in), the handler
+# responds `404` before reading the body or comparing any signature -- it
+# never falls back to accepting an unsigned request. The logic is
+# scripts/wrapper-github-webhook-verify.mjs, copied into src/ so the runtime
+# stage's `COPY --from=template-source /template/src` carries it;
+# scripts/patch-wrapper-github-webhook.mjs only injects the import line and
+# the route registration, each with an exactly-one-occurrence anchor guard
+# plus an already-applied guard, same contract as
+# scripts/patch-wrapper-scoped-export.mjs above.
+# https://github.com/yuens1002/openclaw-control-plane/issues/108
+COPY scripts/wrapper-github-webhook-verify.mjs src/wrapper-github-webhook-verify.mjs
+COPY scripts/patch-wrapper-github-webhook.mjs ./patch-wrapper-github-webhook.mjs
+RUN node patch-wrapper-github-webhook.mjs src/server.js
+RUN grep -qF 'app.post("/hooks/github-webhook-verify"' src/server.js
+RUN grep -qF 'import { handleGithubWebhookVerify } from "./wrapper-github-webhook-verify.mjs";' src/server.js
+RUN test "$(grep -cF 'app.post("/hooks/github-webhook-verify"' src/server.js)" -eq 1
+RUN node --check src/server.js
+RUN node --check src/wrapper-github-webhook-verify.mjs
+
 FROM node:22-bookworm AS openclaw-source
 
 RUN apt-get update \

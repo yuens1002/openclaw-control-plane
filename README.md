@@ -176,6 +176,30 @@ The same Dockerfile stage also replaces the wrapper's inline
 upstream in
 [docs/plans/wrapper-scoped-export-and-import-restart/upstream-issues.md](docs/plans/wrapper-scoped-export-and-import-restart/upstream-issues.md).
 
+### GitHub webhook signature verification (`POST /hooks/github-webhook-verify`)
+
+Neither upstream OpenClaw's generic `/hooks` gateway nor its bundled
+`webhooks` plugin can verify a GitHub App webhook delivery: both authenticate
+with a static shared secret compared against a request header, while GitHub
+signs the raw body with HMAC-SHA256 and sends the digest in
+`X-Hub-Signature-256`. This repo's `Dockerfile` adds a build-time patch
+(`scripts/patch-wrapper-github-webhook.mjs`, logic in
+`scripts/wrapper-github-webhook-verify.mjs`) that registers one new
+wrapper-owned route, `POST /hooks/github-webhook-verify`, ahead of the
+wrapper's catch-all proxy, so a request to it is verified and answered here
+and never reaches the OpenClaw gateway.
+
+The route and its `GITHUB_WEBHOOK_SECRET` env var are deliberately named
+generically, not tied to any one deployed instance: this patch lands in the
+shared wrapper image every provisioned instance builds from, and each
+instance opts in independently, out of band from this repo, by setting its
+own secret and registering its own App webhook URL. Until an instance sets
+`GITHUB_WEBHOOK_SECRET`, the route responds `404` (before reading the body or
+comparing any signature), so the change is inert by default. A valid
+signature responds `200`; a missing or invalid one responds `401`; a
+non-`POST` request responds `405`. See
+[issue #108](https://github.com/yuens1002/openclaw-control-plane/issues/108).
+
 Run the source/static proof check locally with:
 
 ```bash
