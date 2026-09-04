@@ -6,10 +6,83 @@
 
 ## Verdict
 
-Ready to merge. 18/18 ACs PASS as of HEAD (post-fix commit chain ending at
-the polish fixes below). One real, load-bearing bug was found and fixed
-during Verify — see below; everything else passed on independent evidence
-across two full verify passes.
+Ready to merge. 18/18 ACs PASS. Two real bugs were found and fixed: one
+during Verify (AC-FN-2, the route was functionally dead), one during
+`/ocr-review` Phase 4.4 (a connection-reset instead of a clean 400 on
+oversize/slow bodies). Everything else passed on independent evidence
+across two full verify passes plus the ocr-review pass. 307 tests, precheck
+clean.
+
+## `/ocr-review` (Phase 4.4)
+
+Three parallel bundles (Dockerfile; the two new `.mjs` scripts; the two test
+files, which OCR's default ruleset excludes by path and which were
+dispatched as an extra adversarial bundle per this skill's own gotcha about
+test-file coverage). 16 findings: 1 high, 4 medium, 11 low. All
+high/medium fixed and re-verified; low findings recorded below, not applied.
+
+**High — fixed.** No test modeled a request stream that had already ended
+before `readRawBody` attached its listeners — exactly the shape of the
+AC-FN-2 bug, just never exercised directly. Added a test that drains a fake
+stream first and asserts `readRawBody` rejects immediately (not via the 10s
+timeout), paired with a new fast-fail guard (`req.readableEnded`) in the
+module itself — defense in depth against a future re-anchoring regression.
+
+**Medium — fixed, empirically re-verified.** `readRawBody` called
+`req.destroy()` on a limit/timeout rejection *before* the handler could send
+its 400 response. On a real socket this tears the connection down first, so
+the client sees `ECONNRESET`, not a clean `400` — confirmed against a real
+`http.createServer()` both before the fix (connection reset) and after
+(clean `400`, `Connection: close`, verified via `node
+scratchpad/repro-oversize-fix.mjs`-equivalent). Fixed by no longer
+destroying on limit/timeout — the handler now responds first and closes the
+now-idle connection only after the response is flushed
+(`res.once("finish", ...)`).
+
+**Medium — fixed (3 test-coverage gaps).** (1) The `GITHUB_WEBHOOK_SECRET`
+env-var fallback — the actual production code path, since the injected
+route calls the handler with no options — was only tested negatively; added
+a positive-path test. (2) The fake request always emitted exactly one data
+chunk, so multi-chunk accumulation, `timeoutMs`, and the stream-error path
+were unexercised; added coverage for all three using a real `Readable`
+directly rather than the shared fixture. (3) `AC-TST-4`'s apply-once test
+asserted only the route registration, not the import line, unlike its
+scoped-export sibling; added the missing assertion.
+
+**Low — recorded, not applied (operator can request any of these):**
+
+- Two Dockerfile comments overstate their claims: one implies this route
+  depends on the pre-existing `/hooks*` Basic-Auth exemption when
+  `requireDashboardAuth` never actually executes for it; the other says
+  `express.json()` "unconditionally" drains the stream when body-parser
+  actually skips non-JSON content types (true for real GitHub deliveries,
+  which are always `application/json`, but could mislead a differently
+  shaped repro).
+- `patch-wrapper-github-webhook.mjs`'s own file header still frames
+  placement as "before the catch-all" without naming `express.json` as the
+  load-bearing anchor — the module header got this fix in `880ed5a`, the
+  patch script header didn't.
+- The handler's JSDoc still presents "non-POST → 405" as route behavior,
+  though `app.post(...)` already filters by method, so a GET never reaches
+  it in production (the code comment is accurate; only the module-level
+  JSDoc overclaims).
+- `DEFAULT_MAX_BYTES` (1 MiB) has no env override, unlike the sibling
+  `wrapper-state-export.mjs`'s `OPENCLAW_STATE_EXPORT_MAX_BYTES`.
+- The tar-import "already applied" guard in both `patch-wrapper-*.mjs`
+  scripts depends on adjacency to a shared anchor line — no live double-apply
+  is currently possible (each script's second, unique guard still catches
+  it), but a third script sharing that anchor could blind an earlier
+  script's own guard.
+- A pre-existing, unrelated gap outside this diff: `EXPOSE 8080` has no
+  matching `ENV PORT`, so a platform that fails to inject `PORT` would leave
+  the container listening on `:3000` while advertising `:8080` — invisible
+  from inside the container or the deploy log. Raised because this diff adds
+  a new public-facing route whose delivery failures would surface only as
+  GitHub-side timeouts if this ever bit.
+- A couple of narrower test gaps: the "prints usage" and "duplicated anchor"
+  tests weren't extended to the third (github-webhook) patch script; a
+  stale "D1 is authored in parallel" comment survives in the test file's
+  header from the original implement-stage prompt scaffolding.
 
 ## Deliverables ↔ code
 
