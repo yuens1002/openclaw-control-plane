@@ -57,16 +57,29 @@ jobs:
         uses: actions/setup-node@v7.0.0
         with:
           node-version: 22
+          # This workflow no longer runs `npm ci`, but still runs
+          # `npm install -g` every 15 minutes -- caching restores npm's
+          # shared tarball cache (~/.npm), so repeated runs reuse the
+          # already-downloaded tsx/@railway/cli packages instead of
+          # re-fetching them from the registry each time, reducing exposure
+          # to the transient network slowness that caused this job's
+          # timeouts in the first place.
           cache: npm
 
-      - name: Install dependencies
-        run: npm ci
-
-      # Pinned to the version verified at wiring time -- an unpinned global
-      # install on a recurring schedule would silently pick up a future
-      # @railway/cli release's behavior change on the very next run.
-      - name: Install Railway CLI
-        run: npm install -g @railway/cli@5.49.0
+      # Deliberately NOT `npm ci` -- verify-deploy.ts/verify-deploy-cli.ts's
+      # entire import chain (packages/openclaw-railway-installer/src/index.ts
+      # and its own sibling imports) uses only node: builtins, no third-party
+      # package. A full monorepo `npm ci` here installs everything this
+      # script doesn't need, and on a 15-minute recurring schedule was
+      # measured taking over 5 minutes on its own -- occasionally exceeding
+      # this job's timeout before the actual verify step ever ran. Installing
+      # just the two CLIs this job actually uses is enough.
+      #
+      # Both pinned to the version verified at wiring time -- an unpinned
+      # global install on a recurring schedule would silently pick up a
+      # future release's behavior change on the very next run.
+      - name: Install tsx and Railway CLI
+        run: npm install -g --no-audit --no-fund tsx@4.23.12 @railway/cli@5.49.0
 
       - name: Verify Railway deployment
         env:
@@ -75,4 +88,4 @@ jobs:
           RAILWAY_ENVIRONMENT_ID: ${{ secrets.RAILWAY_ENVIRONMENT_ID }}
           RAILWAY_SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}
           RAILWAY_DEPLOY_TARGET_SHA: ${{ inputs.target_sha }}
-        run: npm run railway-deploy:verify
+        run: tsx packages/openclaw-railway-installer/src/verify-deploy-cli.ts
