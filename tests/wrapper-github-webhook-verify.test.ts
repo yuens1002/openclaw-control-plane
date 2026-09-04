@@ -351,4 +351,13 @@ describe("handleGithubWebhookVerify", () => {
       expect(line).not.toContain(marker);
     }
   });
+
+  it("responds 401 for a valid POST with no signature header at all", async () => {
+    const rawBody = Buffer.from(JSON.stringify({ repository: { full_name: "someone/somewhere" } }));
+    const req = createFakeReq({ method: "POST", headers: {}, body: rawBody });
+    const res = createFakeRes();
+    await webhook.handleGithubWebhookVerify(req, res, { secret: TEST_SECRET });
+
+    expect(res.statusCode).toBe(401);
+  });
 });

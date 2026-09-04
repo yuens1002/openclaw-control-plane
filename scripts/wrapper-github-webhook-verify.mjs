@@ -5,10 +5,17 @@
 // (Dockerfile `template-source` stage, `COPY scripts/wrapper-github-webhook-verify.mjs
 // src/wrapper-github-webhook-verify.mjs`) and imported by the route registration
 // that scripts/patch-wrapper-github-webhook.mjs injects immediately before the
-// wrapper's catch-all `app.use(requireDashboardAuth, ...)` proxy to the OpenClaw
-// gateway -- so a verified (or rejected) request never reaches the gateway at
-// all. It is also imported directly by this repo's vitest suite, so it must
-// stay dependency-free: only `node:*` built-ins.
+// wrapper's global `app.use(express.json({ limit: "1mb" }));` body parser --
+// not merely before the later catch-all `app.use(requireDashboardAuth, ...)`
+// proxy to the OpenClaw gateway, though it is also earlier than that. The
+// body parser matters: registered after it, this route's own raw-body read
+// never sees its 'data'/'end' events fire, because the parser already
+// drained the stream -- every request would hang to its own timeout. See
+// docs/plans/github-webhook-verify/plan.md's Approach section for the
+// empirical repro. Registered correctly, a verified (or rejected) request
+// never reaches the gateway at all. It is also imported directly by this
+// repo's vitest suite, so it must stay dependency-free: only `node:*`
+// built-ins.
 //
 // Why a dedicated route instead of upstream OpenClaw's `/hooks` gateway or
 // bundled `webhooks` plugin: both of those authenticate with a static shared
@@ -51,7 +58,7 @@ export function computeGithubSignature(secret, rawBody) {
  * @returns {boolean}
  */
 export function verifyGithubSignature(secret, rawBody, headerValue) {
-  if (!secret || !headerValue) return false;
+  if (!secret || typeof headerValue !== "string" || !headerValue) return false;
   const expected = computeGithubSignature(secret, rawBody);
   const expectedBuf = Buffer.from(expected, "utf8");
   const actualBuf = Buffer.from(headerValue, "utf8");
