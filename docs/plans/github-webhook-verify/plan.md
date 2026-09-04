@@ -40,9 +40,15 @@ the route handler as pure, directly-testable functions, patched into the
 vendored wrapper's `src/server.js` by one new anchored patch script
 (`scripts/patch-wrapper-github-webhook.mjs`), registered in `Dockerfile`
 alongside the existing `wrapper-state-export.mjs` step. The route is
-registered *before* `app.use(requireDashboardAuth, ...)` (the catch-all
-proxy to the OpenClaw gateway), so a request to `/hooks/github-webhook-verify`
-never reaches the gateway at all — pure wrapper-owned logic.
+registered *before* `app.use(express.json({ limit: "1mb" }));` — the
+wrapper's global body-parser, not merely before the later catch-all
+`app.use(requireDashboardAuth, ...)` proxy to the OpenClaw gateway (the route
+is also earlier than that, but anchoring there alone is not sufficient: the
+body parser runs first and drains the request stream, so a route registered
+after it never sees its own raw-body listeners fire — confirmed empirically
+against the real pinned wrapper during Verify, see `review.md`). Registered
+before the body parser, a request to `/hooks/github-webhook-verify` reads its
+own raw body and never reaches the gateway at all — pure wrapper-owned logic.
 
 **Naming is deliberately generic, not tied to any one deployed instance.**
 This patch lands in the *shared* wrapper image every provisioned instance
@@ -85,8 +91,8 @@ export async function handleGithubWebhookVerify(req, res, options?: { secret?: s
 | ID | Deliverable | Kind | Owning role | Session |
 |----|-------------|------|-------------|---------|
 | D1 | `scripts/wrapper-github-webhook-verify.mjs` — the module contract above | module | `/devops` | 1 |
-| D2 | `scripts/patch-wrapper-github-webhook.mjs` + `Dockerfile` (`COPY` both scripts, `RUN` the patch + `node --check` + `grep -qF` guards, comment block explaining the route/env var and the generic multi-instance-safe naming) — registers `POST /hooks/github-webhook-verify` immediately before `app.use(requireDashboardAuth, async (req, res) => {` in the vendored `src/server.js` | endpoint (build-time patch) | `/devops` | 1 |
-| D3 | `tests/openclaw-railway-wrapper-patches.test.ts` (extend: add the `app.use(requireDashboardAuth, ...)` anchor line to `SYNTHETIC_SERVER_JS` if not already present, add a `patch-wrapper-github-webhook` describe block mirroring the existing apply-once/refuse-twice/composes-with-siblings/missing-anchor pattern) + new `tests/wrapper-github-webhook-verify.test.ts` (direct unit tests of D1's exported functions, including adversarial inputs the module contract implies: mutated-body signature, wrong-secret signature, empty body, unset secret, oversized body, non-POST) | test | `/test-engineer` | 1 |
+| D2 | `scripts/patch-wrapper-github-webhook.mjs` + `Dockerfile` (`COPY` both scripts, `RUN` the patch + `node --check` + `grep -qF` guards, comment block explaining the route/env var and the generic multi-instance-safe naming) — registers `POST /hooks/github-webhook-verify` immediately before `app.use(express.json({ limit: "1mb" }));` in the vendored `src/server.js` (before the body parser, not merely before the later `requireDashboardAuth` catch-all — see Approach) | endpoint (build-time patch) | `/devops` | 1 |
+| D3 | `tests/openclaw-railway-wrapper-patches.test.ts` (extend: add the `app.use(express.json({ limit: "1mb" }));` anchor line to `SYNTHETIC_SERVER_JS` if not already present, add a `patch-wrapper-github-webhook` describe block mirroring the existing apply-once/refuse-twice/composes-with-siblings/missing-anchor pattern) + new `tests/wrapper-github-webhook-verify.test.ts` (direct unit tests of D1's exported functions, including adversarial inputs the module contract implies: mutated-body signature, wrong-secret signature, empty body, unset secret, oversized body, non-POST) | test | `/test-engineer` | 1 |
 | D4 | `docs/plans/github-webhook-verify/plan.md` — this plan | doc | `/project-manager` | 1 |
 | D5 | `docs/plans/github-webhook-verify/ACs.md` | doc | `/project-manager` | 1 |
 | D6 | `docs/plans/github-webhook-verify/review.md` — `/review` report | doc | `/project-manager` | 1 |

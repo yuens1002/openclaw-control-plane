@@ -214,9 +214,19 @@ const IMPORT_STOP_BLOCK_ORIGINAL = `    // Stop gateway before restore so we don
 
 const EXPORT_HANDLER_OPENING_LINE = `app.get("/setup/export", requireSetupAuth, async (_req, res) => {`;
 
-// Anchor for D2's github-webhook patch: the catch-all proxy registration,
-// last-registered, that forwards everything else to the OpenClaw gateway.
+// The catch-all proxy registration, last-registered, that forwards
+// everything else to the OpenClaw gateway.
 const DASHBOARD_PROXY_ANCHOR = `app.use(requireDashboardAuth, async (req, res) => {`;
+
+// Anchor for D2's github-webhook patch: the global JSON body-parser
+// registration, early in the file -- NOT the catch-all above. Registering
+// the route after this line but before the catch-all still dispatches
+// before the catch-all in Express's registration-order sense, but the body
+// parser drains the request stream first, so a route registered after it
+// never sees its own 'data'/'end' listeners fire. See the Dockerfile
+// comment above the RUN step that applies this patch for the empirical
+// repro against the real pinned wrapper.
+const JSON_BODY_PARSER_ANCHOR = `app.use(express.json({ limit: "1mb" }));`;
 
 // The unscoped export body that must remain byte-identical after the delegate
 // is prefixed (AC-FN-008: the delegate is a prefix, not a rewrite).
@@ -248,6 +258,7 @@ function requireDashboardAuth(_req, _res, next) {
   next();
 }
 const app = { get() {}, post() {}, use() {} };
+${JSON_BODY_PARSER_ANCHOR}
 
 ${RESTART_GATEWAY_ORIGINAL}
 
@@ -712,7 +723,8 @@ describe("wrapper patch scripts on a synthetic server.js fixture", () => {
       "// Import a backup created by /setup/export.",
       `app.post("/setup/import", requireSetupAuth, async (req, res) => {`,
       "async function restartGateway() {",
-      DASHBOARD_PROXY_ANCHOR
+      DASHBOARD_PROXY_ANCHOR,
+      JSON_BODY_PARSER_ANCHOR
     ]) {
       expect(countOccurrences(SYNTHETIC_SERVER_JS, anchor), anchor).toBe(1);
     }
@@ -838,6 +850,7 @@ describe("wrapper patch scripts on a synthetic server.js fixture", () => {
     expect(countRegexOccurrences(patched, GITHUB_WEBHOOK_ROUTE_PATTERN)).toBe(1);
     // The route must be registered before the catch-all proxy, so a request
     // to it never falls through to app.use(requireDashboardAuth, ...).
+    expect(indexOfRegex(patched, GITHUB_WEBHOOK_ROUTE_PATTERN)).toBeLessThan(patched.indexOf(JSON_BODY_PARSER_ANCHOR));
     expect(indexOfRegex(patched, GITHUB_WEBHOOK_ROUTE_PATTERN)).toBeLessThan(patched.indexOf(DASHBOARD_PROXY_ANCHOR));
 
     const second = runPatchScript(githubWebhookPatchPath, fixturePath);
@@ -859,6 +872,7 @@ describe("wrapper patch scripts on a synthetic server.js fixture", () => {
     expect(countOccurrences(patched, "stopGatewayAndWait")).toBe(3);
     expect(countOccurrences(patched, `if (scope === "state") {`)).toBe(1);
     expect(countRegexOccurrences(patched, GITHUB_WEBHOOK_ROUTE_PATTERN)).toBe(1);
+    expect(indexOfRegex(patched, GITHUB_WEBHOOK_ROUTE_PATTERN)).toBeLessThan(patched.indexOf(JSON_BODY_PARSER_ANCHOR));
     expect(indexOfRegex(patched, GITHUB_WEBHOOK_ROUTE_PATTERN)).toBeLessThan(patched.indexOf(DASHBOARD_PROXY_ANCHOR));
   });
 
@@ -878,17 +892,18 @@ describe("wrapper patch scripts on a synthetic server.js fixture", () => {
     expect(readFileSync(duplicatedAnchor, "utf8")).toBe(`${SYNTHETIC_SERVER_JS}\n${EXPORT_HANDLER_OPENING_LINE}\n});\n`);
 
     // AC-TST-6: patch-wrapper-github-webhook against a fixture with its own
-    // anchor (the catch-all proxy registration) removed.
-    const missingDashboardAnchor = join(workDir, "missing-dashboard-anchor.js");
+    // anchor (the global JSON body-parser registration, not the catch-all)
+    // removed.
+    const missingBodyParserAnchor = join(workDir, "missing-body-parser-anchor.js");
     writeFileSync(
-      missingDashboardAnchor,
-      SYNTHETIC_SERVER_JS.replace(`${DASHBOARD_PROXY_ANCHOR}\n  return res.json({ ok: true });\n});`, "// catch-all proxy removed\n")
+      missingBodyParserAnchor,
+      SYNTHETIC_SERVER_JS.replace(JSON_BODY_PARSER_ANCHOR, "// body parser removed")
     );
-    const missingDashboard = runPatchScript(githubWebhookPatchPath, missingDashboardAnchor);
-    expect(missingDashboard.status).not.toBe(0);
-    expect(missingDashboard.stderr).toMatch(/found 0/);
-    expect(readFileSync(missingDashboardAnchor, "utf8")).toBe(
-      SYNTHETIC_SERVER_JS.replace(`${DASHBOARD_PROXY_ANCHOR}\n  return res.json({ ok: true });\n});`, "// catch-all proxy removed\n")
+    const missingBodyParser = runPatchScript(githubWebhookPatchPath, missingBodyParserAnchor);
+    expect(missingBodyParser.status).not.toBe(0);
+    expect(missingBodyParser.stderr).toMatch(/found 0/);
+    expect(readFileSync(missingBodyParserAnchor, "utf8")).toBe(
+      SYNTHETIC_SERVER_JS.replace(JSON_BODY_PARSER_ANCHOR, "// body parser removed")
     );
   });
 
