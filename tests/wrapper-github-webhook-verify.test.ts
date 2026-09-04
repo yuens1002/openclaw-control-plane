@@ -115,6 +115,8 @@ interface FakeRes {
   json(obj: unknown): FakeRes;
   end(body?: unknown): FakeRes;
   writeHead(code: number, headers?: Record<string, string>): FakeRes;
+  /** Minimal EventEmitter-shaped surface: real ServerResponse emits "finish" once its data has been flushed to the socket. Only the one event the module actually listens for is modeled. */
+  once(event: "finish", listener: () => void): FakeRes;
 }
 
 /**
@@ -123,6 +125,18 @@ interface FakeRes {
  * module contract does not say which one D1 hands back.
  */
 function createFakeRes(): FakeRes {
+  const finishListeners: Array<() => void> = [];
+  const emitFinish = () => {
+    // Real ServerResponse's "finish" fires once the whole response has been
+    // written to the underlying socket, not synchronously inside end() --
+    // queueMicrotask keeps the fake honest about that ordering (the caller's
+    // own res.once("finish", ...) registration always runs before this
+    // fires, matching production, where the socket flush is inherently
+    // asynchronous).
+    queueMicrotask(() => {
+      for (const listener of finishListeners.splice(0)) listener();
+    });
+  };
   const res: FakeRes = {
     statusCode: 200,
     headers: {},
@@ -147,22 +161,29 @@ function createFakeRes(): FakeRes {
     send(body) {
       res.body = body;
       res.ended = true;
+      emitFinish();
       return res;
     },
     json(obj) {
       res.body = obj;
       res.ended = true;
       res.headers["content-type"] = res.headers["content-type"] ?? "application/json";
+      emitFinish();
       return res;
     },
     end(body) {
       if (body !== undefined) res.body = body;
       res.ended = true;
+      emitFinish();
       return res;
     },
     writeHead(code, headers) {
       res.statusCode = code;
       if (headers) Object.assign(res.headers, headers);
+      return res;
+    },
+    once(event, listener) {
+      if (event === "finish") finishListeners.push(listener);
       return res;
     }
   };
@@ -255,6 +276,50 @@ describe("readRawBody", () => {
     const req = createFakeReq({ method: "POST", headers: {}, body: payload });
     await expect(webhook.readRawBody(req, { maxBytes: 16 })).rejects.toThrow();
   });
+
+  it("resolves with the exact concatenated bytes across multiple data chunks", async () => {
+    const parts = [Buffer.from("chunk-one-"), Buffer.from("chunk-two-"), Buffer.from("chunk-three")];
+    const req = Readable.from(parts);
+    const result = await webhook.readRawBody(req as unknown as FakeIncomingMessage);
+    expect(result.equals(Buffer.concat(parts))).toBe(true);
+  });
+
+  it("rejects when the read exceeds timeoutMs on a stream that never ends", async () => {
+    // A stream that pushes nothing and never calls push(null): readRawBody
+    // must reject via its own timer, not hang the test suite.
+    const req = new Readable({ read() {} });
+    await expect(
+      webhook.readRawBody(req as unknown as FakeIncomingMessage, { timeoutMs: 30 })
+    ).rejects.toThrow(/timed out/);
+  });
+
+  it("rejects when the stream emits an error", async () => {
+    const req = new Readable({
+      read() {
+        this.destroy(new Error("simulated socket error"));
+      }
+    });
+    await expect(webhook.readRawBody(req as unknown as FakeIncomingMessage)).rejects.toThrow();
+  });
+
+  // The exact production failure mode this suite otherwise couldn't see: a
+  // body parser registered earlier in the request pipeline (e.g. the
+  // wrapper's global express.json()) already consumed the stream before
+  // readRawBody's own listeners attach. Without the readableEnded fast-fail
+  // guard in the module, this would hang to the full default timeout
+  // (10s) on every such request instead of failing immediately.
+  it("rejects immediately (not via timeout) when the stream has already ended", async () => {
+    const req = createFakeReq({ method: "POST", headers: {}, body: Buffer.from("already consumed") });
+    // Drain the stream fully, exactly as express.json() would before this
+    // module ever gets a chance to read it.
+    req.resume();
+    await new Promise<void>((resolve) => req.once("end", () => resolve()));
+    expect(req.readableEnded).toBe(true);
+
+    const start = Date.now();
+    await expect(webhook.readRawBody(req)).rejects.toThrow(/already-ended/);
+    expect(Date.now() - start).toBeLessThan(50); // fails fast, not via the 10s default timeout
+  });
 });
 
 // --- handleGithubWebhookVerify -----------------------------------------------
@@ -272,6 +337,30 @@ describe("handleGithubWebhookVerify", () => {
       await webhook.handleGithubWebhookVerify(req, res, {});
       expect(res.statusCode).toBe(404);
       expect(String(res.body).trim()).toBe("Not Found");
+    } finally {
+      if (originalSecret === undefined) delete process.env.GITHUB_WEBHOOK_SECRET;
+      else process.env.GITHUB_WEBHOOK_SECRET = originalSecret;
+    }
+  });
+
+  // The route the patch script actually injects calls
+  // handleGithubWebhookVerify(req, res) with no options at all -- the
+  // GITHUB_WEBHOOK_SECRET env var is the only secret source in production.
+  // Every other test in this file passes secret explicitly via options,
+  // which never exercises that real code path; a misspelled or
+  // differently-cased env var name in the deployed image would pass every
+  // one of those tests while being completely broken in production.
+  it("verifies successfully via the GITHUB_WEBHOOK_SECRET env var with no options passed", async () => {
+    const originalSecret = process.env.GITHUB_WEBHOOK_SECRET;
+    process.env.GITHUB_WEBHOOK_SECRET = TEST_SECRET;
+    try {
+      const payload = JSON.stringify({ repository: { full_name: "yuens1002/openclaw-control-plane" } });
+      const rawBody = Buffer.from(payload);
+      const signature = webhook.computeGithubSignature(TEST_SECRET, rawBody);
+      const req = createFakeReq({ method: "POST", headers: { "x-hub-signature-256": signature }, body: rawBody });
+      const res = createFakeRes();
+      await webhook.handleGithubWebhookVerify(req, res); // no options object at all
+      expect(res.statusCode).toBe(200);
     } finally {
       if (originalSecret === undefined) delete process.env.GITHUB_WEBHOOK_SECRET;
       else process.env.GITHUB_WEBHOOK_SECRET = originalSecret;
@@ -323,6 +412,8 @@ describe("handleGithubWebhookVerify", () => {
     const lastEntry = parseLoggedLine(lastLine);
     expect(lastEntry.result).toBe("accepted");
     expect(lastEntry.repo).toBe("yuens1002/openclaw-control-plane");
+    expect(lastEntry.event).toBe("pull_request");
+    expect(lastEntry.deliveryId).toBe("test-delivery-id");
   });
 
   // AC-TST-3
@@ -330,9 +421,10 @@ describe("handleGithubWebhookVerify", () => {
     const marker = "UNIQUE-MARKER-6f3a9c2e";
     const payload = { note: marker, repository: { full_name: "someone/somewhere" } };
     const rawBody = Buffer.from(JSON.stringify(payload));
+    const rejectedSignature = `sha256=${"0".repeat(64)}`; // syntactically valid shape, wrong digest
     const req = createFakeReq({
       method: "POST",
-      headers: { "x-hub-signature-256": `sha256=${"0".repeat(64)}` }, // syntactically valid shape, wrong digest
+      headers: { "x-hub-signature-256": rejectedSignature },
       body: rawBody
     });
     const res = createFakeRes();
@@ -349,6 +441,7 @@ describe("handleGithubWebhookVerify", () => {
     expect(parseLoggedLine(lastLine).result).toBe("rejected");
     for (const line of logged) {
       expect(line).not.toContain(marker);
+      expect(line).not.toContain(rejectedSignature);
     }
   });
 

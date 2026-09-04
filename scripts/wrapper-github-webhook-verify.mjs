@@ -88,6 +88,22 @@ export function readRawBody(req, opts = {}) {
   const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   return new Promise((resolve, reject) => {
+    // Fast-fail if the stream has already ended before we got here -- e.g. a
+    // body parser registered earlier in the request pipeline already
+    // consumed it. Without this check, 'data'/'end' listeners attached below
+    // would never fire and this would hang to the full timeout on every such
+    // request instead of failing immediately with a clear cause. This is
+    // exactly the failure mode closed at the route-registration level by
+    // anchoring ahead of the wrapper's body parser (see plan.md) -- this
+    // guard is defense in depth for that class of regression, not a
+    // replacement for correct anchoring.
+    if (req.readableEnded) {
+      const err = new Error("readRawBody called on an already-ended request stream");
+      err.code = "READ_RAW_BODY_ALREADY_ENDED";
+      reject(err);
+      return;
+    }
+
     const chunks = [];
     let total = 0;
     let settled = false;
@@ -106,17 +122,28 @@ export function readRawBody(req, opts = {}) {
       else resolve(buf);
     };
 
+    // On a limit/timeout rejection we deliberately do NOT call req.destroy()
+    // here: destroying a real socket before the caller has had a chance to
+    // send a response tears the connection down first, so the client sees
+    // ECONNRESET instead of the intended 400 -- verified empirically against
+    // a real http.createServer(). cleanup() above already stops consuming
+    // (removes the data/end/error listeners), which is enough to let the
+    // stream sit idle; the caller (handleGithubWebhookVerify) is responsible
+    // for closing the underlying connection only after its response has
+    // actually been sent.
     const timer = setTimeout(() => {
-      req.destroy?.();
-      settle(new Error(`readRawBody timed out after ${timeoutMs}ms`));
+      const err = new Error(`readRawBody timed out after ${timeoutMs}ms`);
+      err.code = "READ_RAW_BODY_TIMEOUT";
+      settle(err);
     }, timeoutMs);
     timer.unref?.();
 
     const onData = (chunk) => {
       total += chunk.length;
       if (total > maxBytes) {
-        req.destroy?.();
-        settle(new Error(`request body exceeds ${maxBytes}-byte limit`));
+        const err = new Error(`request body exceeds ${maxBytes}-byte limit`);
+        err.code = "READ_RAW_BODY_TOO_LARGE";
+        settle(err);
         return;
       }
       chunks.push(chunk);
@@ -176,7 +203,14 @@ export async function handleGithubWebhookVerify(req, res, options = {}) {
   try {
     rawBody = await readRawBody(req);
   } catch {
+    // readRawBody deliberately did not destroy the request stream on a
+    // limit/timeout rejection (see its own comment) -- respond first, and
+    // only close the now-idle connection once the response has actually
+    // been flushed, so the client receives the 400 status instead of a bare
+    // connection reset.
     res.statusCode = 400;
+    res.setHeader("Connection", "close");
+    res.once("finish", () => req.destroy?.());
     res.end();
     return;
   }

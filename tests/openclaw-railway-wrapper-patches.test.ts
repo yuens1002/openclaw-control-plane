@@ -848,6 +848,12 @@ describe("wrapper patch scripts on a synthetic server.js fixture", () => {
 
     const patched = readFileSync(fixturePath, "utf8");
     expect(countRegexOccurrences(patched, GITHUB_WEBHOOK_ROUTE_PATTERN)).toBe(1);
+    // Mirrors the scoped-export test's own import-line assertion: the patch
+    // script's first replacement (the import) failing silently while the
+    // second (the route) succeeds would otherwise go undetected here.
+    expect(
+      countOccurrences(patched, `import { handleGithubWebhookVerify } from "./wrapper-github-webhook-verify.mjs";`)
+    ).toBe(1);
     // The route must be registered before the catch-all proxy, so a request
     // to it never falls through to app.use(requireDashboardAuth, ...).
     expect(indexOfRegex(patched, GITHUB_WEBHOOK_ROUTE_PATTERN)).toBeLessThan(patched.indexOf(JSON_BODY_PARSER_ANCHOR));
