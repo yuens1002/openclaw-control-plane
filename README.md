@@ -1,5 +1,7 @@
 # OpenClaw Control Plane
 
+[![Railway Deploy Verify](https://github.com/yuens1002/openclaw-control-plane/actions/workflows/railway-deploy-verify.yml/badge.svg)](https://github.com/yuens1002/openclaw-control-plane/actions/workflows/railway-deploy-verify.yml)
+
 OpenClaw Control Plane is a reusable TypeScript monorepo for durable business
 workflows managed by OpenClaw through stable tools.
 
