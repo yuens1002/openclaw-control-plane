@@ -71,7 +71,7 @@ jobs:
       # global install on a recurring schedule would silently pick up a
       # future release's behavior change on the very next run.
       - name: Install tsx and Railway CLI
-        run: npm install -g tsx@4.23.12 @railway/cli@5.49.0
+        run: npm install -g --no-audit --no-fund tsx@4.23.12 @railway/cli@5.49.0
 
       - name: Verify Railway deployment
         env:
