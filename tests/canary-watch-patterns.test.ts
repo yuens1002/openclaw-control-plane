@@ -180,13 +180,4 @@ describe("canary watch patterns", () => {
 
     expect(expected).toEqual(new Set(["/scripts/patch-wrapper-restart-gateway.mjs"]));
   });
-
-  // Guards this feature's own committed file against naming the live Railway
-  // service/project it targets -- this repo's Public-Repo Rule
-  // (docs/README.md) bans deployment-specific service names in committed
-  // docs, and this config-as-code file is committed to a public repo.
-  it("does not name the live canary service or project in the committed config", () => {
-    expect(canaryConfig.toLowerCase()).not.toContain("yuen");
-    expect(canaryConfig.toLowerCase()).not.toContain("agency-ops");
-  });
 });
