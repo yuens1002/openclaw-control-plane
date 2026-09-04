@@ -235,12 +235,22 @@ RUN node --check src/wrapper-state-export.mjs
 # wrapper-owned route, `POST /hooks/github-webhook-verify`, that verifies that
 # signature and responds 200/401 accordingly -- no dispatch, no agent
 # involvement, no gateway process involvement. It is registered *before* the
-# catch-all `app.use(requireDashboardAuth, ...)` that proxies everything else
-# to the OpenClaw gateway, so a request to it is handled here and never
-# reaches the gateway at all. `/hooks*` is already exempt from the wrapper's
-# dashboard Basic Auth (see the sed patch above, "allow OpenClaw webhook
-# endpoints to bypass dashboard auth") -- this route relies on that existing
-# exemption rather than adding a new one.
+# wrapper's global `app.use(express.json({ limit: "1mb" }));` body parser --
+# not merely before the later catch-all `app.use(requireDashboardAuth, ...)`
+# that proxies everything else to the OpenClaw gateway, though it is also
+# earlier than that. Anchoring on the catch-all alone was tried first and
+# looked correct (Express dispatches in registration order, so the route
+# still runs before the proxy) but was empirically dead in the built image:
+# express.json() is registered even earlier and unconditionally drains the
+# request stream via its own 'data'/'end' listeners, so a route registered
+# after it never sees those events fire and readRawBody hangs to its own
+# timeout on every real request. Anchoring before express.json() instead
+# means this route reads the raw body itself before anything else can touch
+# the stream, and it is still registered ahead of the catch-all proxy, so a
+# request to it never reaches the gateway either way. `/hooks*` is already
+# exempt from the wrapper's dashboard Basic Auth (see the sed patch above,
+# "allow OpenClaw webhook endpoints to bypass dashboard auth") -- this route
+# relies on that existing exemption rather than adding a new one.
 #
 # Build-time wrapper patch, not an upstream change or an OpenClaw plugin, for
 # the same reason as every patch above: a plugin would mean publishing/

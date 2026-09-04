@@ -185,9 +185,14 @@ signs the raw body with HMAC-SHA256 and sends the digest in
 `X-Hub-Signature-256`. This repo's `Dockerfile` adds a build-time patch
 (`scripts/patch-wrapper-github-webhook.mjs`, logic in
 `scripts/wrapper-github-webhook-verify.mjs`) that registers one new
-wrapper-owned route, `POST /hooks/github-webhook-verify`, ahead of the
-wrapper's catch-all proxy, so a request to it is verified and answered here
-and never reaches the OpenClaw gateway.
+wrapper-owned route, `POST /hooks/github-webhook-verify`, ahead of both the
+wrapper's global JSON body parser and its catch-all proxy, so a request to it
+is verified and answered here -- with its own raw-body read, before anything
+else can consume the request stream -- and never reaches the OpenClaw
+gateway. (Registering it after the body parser looks equivalent but isn't:
+the parser drains the stream first, so the route's own body listeners never
+fire and every request hangs to a timeout -- the anchor is deliberately the
+body-parser line, not the later catch-all.)
 
 The route and its `GITHUB_WEBHOOK_SECRET` env var are deliberately named
 generically, not tied to any one deployed instance: this patch lands in the
@@ -196,8 +201,12 @@ instance opts in independently, out of band from this repo, by setting its
 own secret and registering its own App webhook URL. Until an instance sets
 `GITHUB_WEBHOOK_SECRET`, the route responds `404` (before reading the body or
 comparing any signature), so the change is inert by default. A valid
-signature responds `200`; a missing or invalid one responds `401`; a
-non-`POST` request responds `405`. See
+signature responds `200`; a missing or invalid one responds `401`. (The
+handler also defends against a non-`POST` request with its own `405`, but
+since it's registered via `app.post(...)`, Express's router already filters
+to `POST` before the handler ever runs -- the `405` guard is unreachable
+through this route today and exists only in case the handler is ever reused
+behind a method-agnostic registration.) See
 [issue #108](https://github.com/yuens1002/openclaw-control-plane/issues/108).
 
 Run the source/static proof check locally with:
