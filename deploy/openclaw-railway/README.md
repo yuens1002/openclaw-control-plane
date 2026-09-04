@@ -108,6 +108,29 @@ no active upstream URL pointing at `vignesh07`. The `vignesh07` repo should
 appear only as the pinned wrapper dependency in this repo's Dockerfile and lock
 file.
 
+## The Canary
+
+The agency's own live instance — the one deployment in continuous, heavy
+use, not a one-off client — is a deliberate, named exception to the
+"Agency-Controlled Client Provisioning" reasoning below. That section
+argues against coupling a *client's* redeploy timing to control-plane's own
+unrelated day-to-day commits; the canary is not a client. It's the ecosystem's
+own reference deployment, and its operators want build-relevant changes to
+reach it automatically during active development.
+
+The canary's Railway service is git-connected to this repo's tracked
+branch, with its config-as-code path set to
+`deploy/openclaw-railway/canary.railway.toml` instead of root
+`railway.toml`. That file scopes `watchPatterns` to exactly the wrapper
+Dockerfile's own `COPY` sources (see `docs/architecture.md`'s "Deployment
+Topology" and `tests/canary-watch-patterns.test.ts`'s drift guard), so a
+commit only redeploys the canary when it actually changes the built image —
+docs, plans, and CHANGELOG churn do not. This is different from the
+public-proof deployment (root `railway.toml`, no `watchPatterns`, deploys
+on every commit) and from every pinned client instance below (CLI,
+version-pinned, not git-connected at all) — three deployment models for
+three different purposes, not three copies of the same one.
+
 ## Agency-Controlled Client Provisioning (per-client version pinning)
 
 `install-template.ps1` (above) and the public-proof `main`-tracked pattern

@@ -7,6 +7,15 @@ and uses semantic versioning.
 
 ## [Unreleased]
 
+- build(railway): scope the canary's OpenClaw wrapper deploy trigger
+  - Adds `deploy/openclaw-railway/canary.railway.toml`, giving the canary's
+    Railway service a git-connected deploy scoped to exactly the wrapper
+    Dockerfile's own build inputs (`watchPatterns`, drift-guarded by
+    `tests/canary-watch-patterns.test.ts`), instead of the CLI/pinned model
+    it shared with one-off client instances. Docs/plans/CHANGELOG churn no
+    longer triggers a rebuild; a change to a watched path does automatically.
+    The public-proof deployment and pinned client instances are unaffected.
+
 ## [0.7.0] - 2026-09-04
 
 - 2026-09-04 - feat: add signature-verified GitHub webhook route to the wrapper (#108)

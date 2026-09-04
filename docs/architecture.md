@@ -56,11 +56,27 @@ remain out of scope for the public baseline.
 
 ## Deployment Topology
 
-The repository builds and deploys one Railway service from its Git
-history: the wrapper image, sourced from the root `railway.toml` and
-`Dockerfile`. It declares no `watchPatterns` and deploys on every commit to
-the tracked branch — deliberate, since the wrapper image is the one service
-this repository directly owns and ships.
+The repository builds the wrapper image from the root `railway.toml` and
+`Dockerfile`, and can source **two** independently git-connected Railway
+deployments of it from the same tracked branch, each reading a different
+config-as-code file:
+
+- **Public-proof deployment**: sourced from root `railway.toml`, which
+  declares no `watchPatterns` and deploys on every commit to the tracked
+  branch — deliberate, since this is the reference deployment proving the
+  wrapper image builds and runs cleanly, and staleness there would defeat
+  its purpose.
+- **The canary**: the one instance in continuous, heavy real-world use.
+  Sourced from `deploy/openclaw-railway/canary.railway.toml`, which
+  declares `watchPatterns` scoped to exactly the Dockerfile's own `COPY`
+  sources (see that file and `tests/canary-watch-patterns.test.ts`'s
+  drift guard) — a commit that doesn't touch a build-relevant path (docs,
+  plans, CHANGELOG, unrelated packages) does not trigger a rebuild.
+
+A one-off pinned client instance (see
+[deploy/openclaw-railway/README.md](../deploy/openclaw-railway/README.md#agency-controlled-client-provisioning))
+is deployed by a different mechanism entirely — CLI, version-pinned,
+deliberately not git-connected — and is unaffected by either config above.
 
 Everything else a provisioned instance depends on — any MCP server
 attachment included — is provisioned and versioned independently, in its
@@ -72,8 +88,14 @@ attached server itself.
 
 ```text
 repo (one default branch)
- └─ railway.toml   → OpenClaw wrapper service
-                      (no watchPatterns; deploys on every commit)
+ ├─ railway.toml                                  → public-proof deployment
+ │                                                   (no watchPatterns; deploys on every commit)
+ └─ deploy/openclaw-railway/canary.railway.toml   → the canary
+                                                      (watchPatterns scoped to the
+                                                       Dockerfile's own COPY sources)
+
+per pinned client instance (CLI, version-pinned, not git-connected):
+ └─ see deploy/openclaw-railway/README.md's Agency-Controlled Client Provisioning
 
 external, per attached instance (if any):
  └─ whatever repository an attached MCP server comes from
