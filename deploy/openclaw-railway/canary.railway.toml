@@ -1,0 +1,32 @@
+# Select this file explicitly for the canary's OpenClaw wrapper service.
+# The public-proof service retains root railway.toml (no watchPatterns --
+# deploys on every commit, deliberately). See docs/architecture.md's
+# "Deployment Topology" and this directory's README "the canary" section.
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+# Scoped 1:1 to root Dockerfile's non-`--from=` COPY sources -- everything
+# else (docs, plans, CHANGELOG, other packages) has zero effect on the built
+# image and must not trigger a rebuild. Root package.json/package-lock.json
+# are never copied into this image at all (unlike a Node-workspace build),
+# so unlike other scoped-watch configs in this ecosystem there is nothing to
+# exclude here -- they were never a candidate. tests/canary-watch-patterns.test.ts
+# derives the expected set mechanically from the Dockerfile's own COPY lines
+# and fails if this list drifts from it -- a future new COPY source must be
+# added here in the same change.
+watchPatterns = [
+  "/scripts/patch-wrapper-restart-gateway.mjs",
+  "/scripts/wrapper-state-export.mjs",
+  "/scripts/patch-wrapper-scoped-export.mjs",
+  "/scripts/relax-openclaw-extension-versions.mjs",
+  "/deploy/openclaw-railway/openclaw.pnpm-lock.yaml",
+  "/Dockerfile",
+  "/deploy/openclaw-railway/canary.railway.toml",
+  "/.dockerignore"
+]
+
+[deploy]
+healthcheckPath = "/setup/healthz"
+healthcheckTimeout = 300
+restartPolicyType = "on_failure"
+requiredMountPath = "/data"
