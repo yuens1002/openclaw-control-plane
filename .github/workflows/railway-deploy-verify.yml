@@ -57,6 +57,14 @@ jobs:
         uses: actions/setup-node@v7.0.0
         with:
           node-version: 22
+          # This workflow no longer runs `npm ci`, but still runs
+          # `npm install -g` every 15 minutes -- caching restores npm's
+          # shared tarball cache (~/.npm), so repeated runs reuse the
+          # already-downloaded tsx/@railway/cli packages instead of
+          # re-fetching them from the registry each time, reducing exposure
+          # to the transient network slowness that caused this job's
+          # timeouts in the first place.
+          cache: npm
 
       # Deliberately NOT `npm ci` -- verify-deploy.ts/verify-deploy-cli.ts's
       # entire import chain (packages/openclaw-railway-installer/src/index.ts
