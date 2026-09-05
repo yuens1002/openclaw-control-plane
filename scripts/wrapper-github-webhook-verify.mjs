@@ -93,8 +93,14 @@ export function resolveGithubWebhookSecrets(env = process.env) {
     let parsed;
     try {
       parsed = JSON.parse(raw);
-    } catch (err) {
-      throwWebhookSecretsConfigError(`must be valid JSON: ${err instanceof Error ? err.message : String(err)}`);
+    } catch {
+      // Do NOT interpolate the JSON.parse error's own message: V8 echoes the
+      // unparseable source (in full, for short inputs) into SyntaxError.message,
+      // so doing that here would write a misconfigured raw secret straight into
+      // this error's message -- and from there into the console.error call site
+      // in handleGithubWebhookVerify. The length is a harmless diagnostic; the
+      // content is not.
+      throwWebhookSecretsConfigError(`must be valid JSON (received ${raw.length} character${raw.length === 1 ? "" : "s"}, not parseable)`);
     }
     if (!Array.isArray(parsed)) {
       throwWebhookSecretsConfigError("must be a JSON array");
@@ -359,8 +365,12 @@ export function resolveDispatchAllowlist(env = process.env) {
   let parsed;
   try {
     parsed = JSON.parse(raw);
-  } catch (err) {
-    throwDispatchAllowlistConfigError(`must be valid JSON: ${err instanceof Error ? err.message : String(err)}`);
+  } catch {
+    // Same reasoning as resolveGithubWebhookSecrets's parse failure: do not
+    // interpolate JSON.parse's own error message, which echoes the
+    // unparseable source. This value is not a secret, but it is still
+    // deployment config that shouldn't land verbatim in logs on a typo.
+    throwDispatchAllowlistConfigError(`must be valid JSON (received ${raw.length} character${raw.length === 1 ? "" : "s"}, not parseable)`);
   }
   if (!Array.isArray(parsed)) {
     throwDispatchAllowlistConfigError("must be a JSON array");

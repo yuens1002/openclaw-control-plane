@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 // Issue #108 (github-webhook-verify) deliverable D3, extended by issue #116
 // (multi-secret verify) and #117 (dispatch to /hooks/agent) deliverable D4.
@@ -1363,6 +1363,64 @@ describe("handleGithubWebhookVerify -- dispatch wiring", () => {
     } finally {
       if (originalSecrets === undefined) delete process.env.GITHUB_WEBHOOK_SECRETS;
       else process.env.GITHUB_WEBHOOK_SECRETS = originalSecrets;
+    }
+  });
+
+  // Regression: an earlier revision interpolated JSON.parse's own error
+  // message into the thrown config error. V8's SyntaxError echoes short
+  // unparseable inputs back in full, so a misconfigured GITHUB_WEBHOOK_SECRETS
+  // (an operator setting the raw secret string instead of `["<secret>"]`)
+  // wrote the secret itself into this console.error line. Assert the actual
+  // logged text, not just the status code the earlier test only checked.
+  it("never logs the raw GITHUB_WEBHOOK_SECRETS value, even one short enough for V8 to echo in full on a parse failure", async () => {
+    const originalSecrets = process.env.GITHUB_WEBHOOK_SECRETS;
+    const leakCandidate = "s3cr3t-webhook-value";
+    process.env.GITHUB_WEBHOOK_SECRETS = leakCandidate; // a raw secret, not JSON -- the exact misconfiguration this feature exists to reject
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const req = createUntouchableReq("POST");
+      const res = createFakeRes();
+      await webhook.handleGithubWebhookVerify(req, res, {});
+      expect(res.statusCode).toBe(500);
+      expect(errorSpy).toHaveBeenCalled();
+      const loggedText = errorSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(loggedText).not.toContain(leakCandidate);
+    } finally {
+      errorSpy.mockRestore();
+      if (originalSecrets === undefined) delete process.env.GITHUB_WEBHOOK_SECRETS;
+      else process.env.GITHUB_WEBHOOK_SECRETS = originalSecrets;
+    }
+  });
+
+  it("never logs the raw GITHUB_DISPATCH_ALLOWLIST value on a parse failure", async () => {
+    const originalAllowlist = process.env.GITHUB_DISPATCH_ALLOWLIST;
+    const originalSecret = process.env.GITHUB_WEBHOOK_SECRET;
+    const leakCandidate = "not-json-and-short";
+    process.env.GITHUB_DISPATCH_ALLOWLIST = leakCandidate;
+    process.env.GITHUB_WEBHOOK_SECRET = TEST_SECRET;
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const payload = { repository: { full_name: "parity-owner/parity-repo" }, action: "opened" };
+      const rawBody = Buffer.from(JSON.stringify(payload));
+      const signature = webhook.computeGithubSignature(TEST_SECRET, rawBody);
+      const req = createFakeReq({
+        method: "POST",
+        headers: { "x-hub-signature-256": signature, "x-github-event": "pull_request" },
+        body: rawBody,
+      });
+      const res = createFakeRes();
+      await webhook.handleGithubWebhookVerify(req, res, {});
+      // A malformed allowlist fails closed on the DISPATCH decision only --
+      // the delivery itself still verified, so the HTTP response is 200.
+      expect(res.statusCode).toBe(200);
+      const loggedText = errorSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(loggedText).not.toContain(leakCandidate);
+    } finally {
+      errorSpy.mockRestore();
+      if (originalAllowlist === undefined) delete process.env.GITHUB_DISPATCH_ALLOWLIST;
+      else process.env.GITHUB_DISPATCH_ALLOWLIST = originalAllowlist;
+      if (originalSecret === undefined) delete process.env.GITHUB_WEBHOOK_SECRET;
+      else process.env.GITHUB_WEBHOOK_SECRET = originalSecret;
     }
   });
 });
