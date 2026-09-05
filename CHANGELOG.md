@@ -7,6 +7,8 @@ and uses semantic versioning.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-09-05
+
 - build(railway): scope the canary's OpenClaw wrapper deploy trigger
   - Adds `deploy/openclaw-railway/canary.railway.toml` as a committed,
     drift-guarded reference spec (`tests/canary-watch-patterns.test.ts`) for
@@ -20,13 +22,17 @@ and uses semantic versioning.
   - The canary's Railway service is now git-connected with these settings
     live (confirmed via config read-back and a successful deployment) and
     "Wait for CI" enabled. An empirical push-test confirmed the scoping
-    works as intended: a docs-only commit produced no new canary
-    deployment (recorded as explicitly skipped) while the public-proof
-    service deployed normally for the same commit.
+    works both directions: two independent docs-only commits each produced
+    no new canary deployment (recorded as explicitly skipped) while the
+    public-proof service deployed normally for the same commits, and a
+    commit touching one watched build input correctly triggered exactly
+    one canary deployment, gated on "Wait for CI," which reached success.
   - `docs/live-instance-operations.md` gains a new procedure (§5.7) for
     reconnecting a service's git source and native build/deploy settings,
     generalized from this rollout — ordering the native-settings write
     before the source connect, and the gotchas hit doing it live.
+  - Patch bump: an internal deploy-trigger/operational change for one
+    instance, not a new user-facing capability.
 
 ## [0.7.0] - 2026-09-04
 
