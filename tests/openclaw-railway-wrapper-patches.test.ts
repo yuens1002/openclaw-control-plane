@@ -54,6 +54,7 @@ const scriptsDir = fileURLToPath(new URL("../scripts/", import.meta.url));
 const stateExportModulePath = join(scriptsDir, "wrapper-state-export.mjs");
 const scopedExportPatchPath = join(scriptsDir, "patch-wrapper-scoped-export.mjs");
 const restartGatewayPatchPath = join(scriptsDir, "patch-wrapper-restart-gateway.mjs");
+const githubWebhookPatchPath = join(scriptsDir, "patch-wrapper-github-webhook.mjs");
 
 type DirentLike = { isFile(): boolean; isDirectory(): boolean; isSymbolicLink(): boolean };
 
@@ -108,6 +109,26 @@ const socketDirent: DirentLike = { isFile: () => false, isDirectory: () => false
 
 const SLEEP_750 = "await sleep(750);";
 const countOccurrences = (haystack: string, needle: string): number => haystack.split(needle).length - 1;
+
+// A regex, not a literal-substring needle: the sibling scripts' injected
+// blocks open with an explanatory comment that itself mentions the feature
+// (see patch-wrapper-scoped-export.mjs's newBlock, which starts with
+// "// Control-plane patch ... scoped export. `?scope=state`..."), so a plain
+// countOccurrences(patched, "/hooks/github-webhook-verify") would over-count
+// the moment D2's own comment mentions the route path -- exactly the
+// convention D2 is expected to follow. Match only the actual registration
+// (AC-FN-2: "an app.post(...) registration"), quote-style tolerant.
+const GITHUB_WEBHOOK_ROUTE_PATTERN = /app\.post\(\s*["']\/hooks\/github-webhook-verify["']/;
+
+function countRegexOccurrences(haystack: string, pattern: RegExp): number {
+  const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+  return (haystack.match(new RegExp(pattern.source, flags)) ?? []).length;
+}
+
+function indexOfRegex(haystack: string, pattern: RegExp): number {
+  const match = haystack.match(pattern);
+  return match?.index ?? -1;
+}
 
 function segmentsOf(archivePath: string): string[] {
   return archivePath.split("/").filter((segment) => segment !== "");
@@ -193,6 +214,20 @@ const IMPORT_STOP_BLOCK_ORIGINAL = `    // Stop gateway before restore so we don
 
 const EXPORT_HANDLER_OPENING_LINE = `app.get("/setup/export", requireSetupAuth, async (_req, res) => {`;
 
+// The catch-all proxy registration, last-registered, that forwards
+// everything else to the OpenClaw gateway.
+const DASHBOARD_PROXY_ANCHOR = `app.use(requireDashboardAuth, async (req, res) => {`;
+
+// Anchor for D2's github-webhook patch: the global JSON body-parser
+// registration, early in the file -- NOT the catch-all above. Registering
+// the route after this line but before the catch-all still dispatches
+// before the catch-all in Express's registration-order sense, but the body
+// parser drains the request stream first, so a route registered after it
+// never sees its own 'data'/'end' listeners fire. See the Dockerfile
+// comment above the RUN step that applies this patch for the empirical
+// repro against the real pinned wrapper.
+const JSON_BODY_PARSER_ANCHOR = `app.use(express.json({ limit: "1mb" }));`;
+
 // The unscoped export body that must remain byte-identical after the delegate
 // is prefixed (AC-FN-008: the delegate is a prefix, not a rewrite).
 const EXPORT_HANDLER_BODY_ORIGINAL = `  try {
@@ -219,7 +254,11 @@ async function ensureGatewayRunning() {
 function requireSetupAuth(_req, _res, next) {
   next();
 }
-const app = { get() {}, post() {} };
+function requireDashboardAuth(_req, _res, next) {
+  next();
+}
+const app = { get() {}, post() {}, use() {} };
+${JSON_BODY_PARSER_ANCHOR}
 
 ${RESTART_GATEWAY_ORIGINAL}
 
@@ -268,6 +307,10 @@ ${IMPORT_STOP_BLOCK_ORIGINAL}
   } catch (err) {
     return res.status(500).type("text/plain").send(String(err));
   }
+});
+
+${DASHBOARD_PROXY_ANCHOR}
+  return res.json({ ok: true });
 });
 
 export { app, runSetupCommand, runOnboard, tar, fs, os };
@@ -679,7 +722,9 @@ describe("wrapper patch scripts on a synthetic server.js fixture", () => {
       "function isUnderDir(p, root) {",
       "// Import a backup created by /setup/export.",
       `app.post("/setup/import", requireSetupAuth, async (req, res) => {`,
-      "async function restartGateway() {"
+      "async function restartGateway() {",
+      DASHBOARD_PROXY_ANCHOR,
+      JSON_BODY_PARSER_ANCHOR
     ]) {
       expect(countOccurrences(SYNTHETIC_SERVER_JS, anchor), anchor).toBe(1);
     }
@@ -793,15 +838,48 @@ describe("wrapper patch scripts on a synthetic server.js fixture", () => {
     expect(readFileSync(fixturePath, "utf8")).toBe(patched);
   });
 
-  it("both scripts compose in the Dockerfile's order and the result still passes node --check", () => {
+  // AC-TST-4
+  it("patch-wrapper-github-webhook applies once (exit 0, node --check ok) and refuses a second run", () => {
+    const fixturePath = freshFixture("github-webhook");
+
+    const first = runPatchScript(githubWebhookPatchPath, fixturePath);
+    expect(first.status, first.stderr).toBe(0);
+    expect(nodeCheck(fixturePath)).toBe(0);
+
+    const patched = readFileSync(fixturePath, "utf8");
+    expect(countRegexOccurrences(patched, GITHUB_WEBHOOK_ROUTE_PATTERN)).toBe(1);
+    // Mirrors the scoped-export test's own import-line assertion: the patch
+    // script's first replacement (the import) failing silently while the
+    // second (the route) succeeds would otherwise go undetected here.
+    expect(
+      countOccurrences(patched, `import { handleGithubWebhookVerify } from "./wrapper-github-webhook-verify.mjs";`)
+    ).toBe(1);
+    // The route must be registered before the catch-all proxy, so a request
+    // to it never falls through to app.use(requireDashboardAuth, ...).
+    expect(indexOfRegex(patched, GITHUB_WEBHOOK_ROUTE_PATTERN)).toBeLessThan(patched.indexOf(JSON_BODY_PARSER_ANCHOR));
+    expect(indexOfRegex(patched, GITHUB_WEBHOOK_ROUTE_PATTERN)).toBeLessThan(patched.indexOf(DASHBOARD_PROXY_ANCHOR));
+
+    const second = runPatchScript(githubWebhookPatchPath, fixturePath);
+    expect(second.status).not.toBe(0);
+    expect(second.stderr).toMatch(/found \d+ occurrence/);
+    // A refused run must not touch the file.
+    expect(readFileSync(fixturePath, "utf8")).toBe(patched);
+  });
+
+  // AC-TST-5
+  it("all three patch scripts compose in the Dockerfile's order and the result still passes node --check", () => {
     const fixturePath = freshFixture("composed");
     expect(runPatchScript(restartGatewayPatchPath, fixturePath).status).toBe(0);
     expect(runPatchScript(scopedExportPatchPath, fixturePath).status).toBe(0);
+    expect(runPatchScript(githubWebhookPatchPath, fixturePath).status).toBe(0);
     expect(nodeCheck(fixturePath)).toBe(0);
     const patched = readFileSync(fixturePath, "utf8");
     expect(countOccurrences(patched, SLEEP_750)).toBe(2);
     expect(countOccurrences(patched, "stopGatewayAndWait")).toBe(3);
     expect(countOccurrences(patched, `if (scope === "state") {`)).toBe(1);
+    expect(countRegexOccurrences(patched, GITHUB_WEBHOOK_ROUTE_PATTERN)).toBe(1);
+    expect(indexOfRegex(patched, GITHUB_WEBHOOK_ROUTE_PATTERN)).toBeLessThan(patched.indexOf(JSON_BODY_PARSER_ANCHOR));
+    expect(indexOfRegex(patched, GITHUB_WEBHOOK_ROUTE_PATTERN)).toBeLessThan(patched.indexOf(DASHBOARD_PROXY_ANCHOR));
   });
 
   it("exits non-zero with the occurrence count when an anchor is missing or duplicated", () => {
@@ -818,10 +896,37 @@ describe("wrapper patch scripts on a synthetic server.js fixture", () => {
     expect(duplicated.stderr).toMatch(/expected exactly 1 occurrence of the \/setup\/export handler[^\n]*found 2/);
     // Guards run before any write: the input is untouched on refusal.
     expect(readFileSync(duplicatedAnchor, "utf8")).toBe(`${SYNTHETIC_SERVER_JS}\n${EXPORT_HANDLER_OPENING_LINE}\n});\n`);
+
+    // AC-TST-6: patch-wrapper-github-webhook against a fixture with its own
+    // anchor (the global JSON body-parser registration, not the catch-all)
+    // removed.
+    const missingBodyParserAnchor = join(workDir, "missing-body-parser-anchor.js");
+    writeFileSync(
+      missingBodyParserAnchor,
+      SYNTHETIC_SERVER_JS.replace(JSON_BODY_PARSER_ANCHOR, "// body parser removed")
+    );
+    const missingBodyParser = runPatchScript(githubWebhookPatchPath, missingBodyParserAnchor);
+    expect(missingBodyParser.status).not.toBe(0);
+    expect(missingBodyParser.stderr).toMatch(/found 0/);
+    expect(readFileSync(missingBodyParserAnchor, "utf8")).toBe(
+      SYNTHETIC_SERVER_JS.replace(JSON_BODY_PARSER_ANCHOR, "// body parser removed")
+    );
+
+    // Duplicated-anchor case for the same script (the sibling scripts above
+    // each cover their own duplicated-anchor case; this one was previously
+    // missing for patch-wrapper-github-webhook).
+    const duplicatedBodyParserAnchor = join(workDir, "duplicated-body-parser-anchor.js");
+    writeFileSync(duplicatedBodyParserAnchor, `${SYNTHETIC_SERVER_JS}\n${JSON_BODY_PARSER_ANCHOR}\n`);
+    const duplicatedBodyParser = runPatchScript(githubWebhookPatchPath, duplicatedBodyParserAnchor);
+    expect(duplicatedBodyParser.status).not.toBe(0);
+    expect(duplicatedBodyParser.stderr).toMatch(
+      /expected exactly 1 occurrence of the global JSON body-parser registration[^\n]*found 2/
+    );
+    expect(readFileSync(duplicatedBodyParserAnchor, "utf8")).toBe(`${SYNTHETIC_SERVER_JS}\n${JSON_BODY_PARSER_ANCHOR}\n`);
   });
 
-  it("without a target path both scripts print usage and exit non-zero", () => {
-    for (const scriptPath of [restartGatewayPatchPath, scopedExportPatchPath]) {
+  it("without a target path all three scripts print usage and exit non-zero", () => {
+    for (const scriptPath of [restartGatewayPatchPath, scopedExportPatchPath, githubWebhookPatchPath]) {
       const result = spawnSync(process.execPath, [scriptPath], { encoding: "utf8" });
       expect(result.status).not.toBe(0);
       expect(result.stderr).toMatch(/^usage: node patch-wrapper-/);

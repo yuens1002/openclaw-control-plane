@@ -176,6 +176,43 @@ The same Dockerfile stage also replaces the wrapper's inline
 upstream in
 [docs/plans/wrapper-scoped-export-and-import-restart/upstream-issues.md](docs/plans/wrapper-scoped-export-and-import-restart/upstream-issues.md).
 
+### GitHub webhook signature verification (`POST /hooks/github-webhook-verify`)
+
+Neither upstream OpenClaw's generic `/hooks` gateway nor its bundled
+`webhooks` plugin can verify a GitHub App webhook delivery: both authenticate
+with a static shared secret compared against a request header, while GitHub
+signs the raw body with HMAC-SHA256 and sends the digest in
+`X-Hub-Signature-256`. This repo's `Dockerfile` adds a build-time patch
+(`scripts/patch-wrapper-github-webhook.mjs`, logic in
+`scripts/wrapper-github-webhook-verify.mjs`) that registers one new
+wrapper-owned route, `POST /hooks/github-webhook-verify`, ahead of both the
+wrapper's global JSON body parser and its catch-all proxy, so a request to it
+is verified and answered here -- with its own raw-body read, before anything
+else can consume the request stream -- and never reaches the OpenClaw
+gateway. (Registering it after the body parser looks equivalent but isn't:
+the parser drains the stream first, so the route's own body listeners never
+fire and every request hangs to a timeout -- the anchor is deliberately the
+body-parser line, not the later catch-all.)
+
+The route and its `GITHUB_WEBHOOK_SECRET` env var are deliberately named
+generically, not tied to any one deployed instance: this patch lands in the
+shared wrapper image every provisioned instance builds from, and each
+instance opts in independently, out of band from this repo, by setting its
+own secret and registering its own App webhook URL. Until an instance sets
+`GITHUB_WEBHOOK_SECRET`, the route responds `404` (before reading the body or
+comparing any signature), so the change is inert by default. A valid
+signature responds `200`; a missing or invalid one responds `401`. The
+request body cap defaults to 1 MiB and can be overridden with
+`GITHUB_WEBHOOK_MAX_BODY_BYTES` (a positive integer number of bytes; a
+malformed value is a deploy-config error and responds `500`, not `400` --
+same override pattern as `OPENCLAW_STATE_EXPORT_MAX_BYTES` above). (The
+handler also defends against a non-`POST` request with its own `405`, but
+since it's registered via `app.post(...)`, Express's router already filters
+to `POST` before the handler ever runs -- the `405` guard is unreachable
+through this route today and exists only in case the handler is ever reused
+behind a method-agnostic registration.) See
+[issue #108](https://github.com/yuens1002/openclaw-control-plane/issues/108).
+
 Run the source/static proof check locally with:
 
 ```bash

@@ -226,6 +226,70 @@ RUN test "$(grep -cF 'scope === "state"' src/server.js)" -eq 1
 RUN node --check src/server.js
 RUN node --check src/wrapper-state-export.mjs
 
+# Neither the wrapper's own routes nor upstream OpenClaw can verify a GitHub
+# App webhook delivery. Upstream's generic `/hooks` gateway and bundled
+# `webhooks` plugin both authenticate with a static shared secret compared
+# against an `Authorization`/`x-openclaw-webhook-secret` header; a GitHub App
+# delivery never sends the secret itself -- it HMAC-SHA256-signs the raw
+# request body and sends the digest in `X-Hub-Signature-256`. Fix: one new
+# wrapper-owned route, `POST /hooks/github-webhook-verify`, that verifies that
+# signature and responds 200/401 accordingly -- no dispatch, no agent
+# involvement, no gateway process involvement. It is registered *before* the
+# wrapper's global `app.use(express.json({ limit: "1mb" }));` body parser --
+# not merely before the later catch-all `app.use(requireDashboardAuth, ...)`
+# that proxies everything else to the OpenClaw gateway, though it is also
+# earlier than that. Anchoring on the catch-all alone was tried first and
+# looked correct (Express dispatches in registration order, so the route
+# still runs before the proxy) but was empirically dead in the built image:
+# express.json() is registered even earlier and drains the request stream
+# via its own 'data'/'end' listeners for any request whose Content-Type
+# matches application/json -- which every GitHub delivery does by default --
+# so a route registered after it never sees those events fire and
+# readRawBody hangs to its own timeout on every real request. (A repro using
+# a different Content-Type would not have shown this: body-parser skips the
+# stream entirely when the type doesn't match, so the failure is specific to
+# JSON deliveries, not universal.) Anchoring before express.json() instead
+# means this route reads the raw body itself before anything else can touch
+# the stream, and it is still registered ahead of the catch-all proxy, so a
+# request to it never reaches the gateway either way. This route never
+# reaches `requireDashboardAuth` at all -- it responds and returns before
+# the catch-all that applies that gate is ever reached, registration-order.
+# `/hooks*`'s existing Basic-Auth exemption (see the sed patch above, "allow
+# OpenClaw webhook endpoints to bypass dashboard auth") is a secondary
+# safety net only, should a future template bump ever hoist
+# `requireDashboardAuth` into a global gate ahead of this route.
+#
+# Build-time wrapper patch, not an upstream change or an OpenClaw plugin, for
+# the same reason as every patch above: a plugin would mean publishing/
+# installing an npm package and routing through the app/gateway process,
+# unnecessary for this narrow a scope, and every future OPENCLAW_TEMPLATE_REF
+# bump should inherit the fix automatically rather than needing to be redone.
+#
+# The route and its env var (`GITHUB_WEBHOOK_SECRET`) are deliberately named
+# generically -- not tied to any one deployed instance -- because this patch
+# lands in the *shared* wrapper image every provisioned instance builds from.
+# Every instance gets the route; each opts in independently later, out of
+# band from this repo, by setting its own `GITHUB_WEBHOOK_SECRET` and
+# registering its own GitHub App webhook URL. When `GITHUB_WEBHOOK_SECRET` is
+# unset (the default for an instance that hasn't opted in), the handler
+# responds `404` before reading the body or comparing any signature -- it
+# never falls back to accepting an unsigned request. The logic is
+# scripts/wrapper-github-webhook-verify.mjs, copied into src/ so the runtime
+# stage's `COPY --from=template-source /template/src` carries it;
+# scripts/patch-wrapper-github-webhook.mjs only injects the import line and
+# the route registration, each with an exactly-one-occurrence anchor guard
+# plus an already-applied guard, same contract as
+# scripts/patch-wrapper-scoped-export.mjs above.
+# https://github.com/yuens1002/openclaw-control-plane/issues/108
+COPY scripts/wrapper-github-webhook-verify.mjs src/wrapper-github-webhook-verify.mjs
+COPY scripts/patch-wrapper-github-webhook.mjs ./patch-wrapper-github-webhook.mjs
+RUN node patch-wrapper-github-webhook.mjs src/server.js
+RUN grep -qF 'app.post("/hooks/github-webhook-verify"' src/server.js
+RUN grep -qF 'import { handleGithubWebhookVerify } from "./wrapper-github-webhook-verify.mjs";' src/server.js
+RUN test "$(grep -cF 'app.post("/hooks/github-webhook-verify"' src/server.js)" -eq 1
+RUN node --check src/server.js
+RUN node --check src/wrapper-github-webhook-verify.mjs
+
 FROM node:22-bookworm AS openclaw-source
 
 RUN apt-get update \
@@ -310,7 +374,16 @@ RUN printf '%s\n' '#!/usr/bin/env bash' 'exec node /openclaw/dist/entry.js "$@"'
 
 COPY --from=template-source /template/src ./src
 
-# The wrapper listens on Railway's injected $PORT.
+# The wrapper listens on Railway's injected $PORT (src/server.js reads
+# process.env.PORT ?? process.env.OPENCLAW_PUBLIC_PORT ?? "3000"). Pin PORT
+# to the exposed value explicitly: a platform that ever fails to inject its
+# own PORT would otherwise leave the container listening on :3000 while
+# advertising :8080 -- healthy-looking and completely unreachable, invisible
+# from inside the container or the deploy log. A runtime-injected PORT still
+# overrides this image-level default, so live behavior on Railway (which
+# does inject PORT today) is unchanged; this only closes the silent-failure
+# gap for a deploy target that doesn't.
+ENV PORT=8080
 EXPOSE 8080
 
 ENTRYPOINT ["tini", "--"]
