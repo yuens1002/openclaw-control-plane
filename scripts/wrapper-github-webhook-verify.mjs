@@ -416,6 +416,126 @@ export function matchesDispatchAllowlist(entries, event, action, repoFullName, a
   return true;
 }
 
+// --- Forwarding to OpenClaw's /hooks/agent (#117) ---------------------------
+//
+// WHERE /hooks/agent LIVES, EMPIRICALLY CONFIRMED (not assumed): downloaded
+// the pinned wrapper template's own src/server.js (same OPENCLAW_TEMPLATE_REF
+// this repo's Dockerfile pins) and read its proxy setup directly, the same
+// method used to find #108's body-parser ordering issue. That file computes:
+//
+//   const INTERNAL_GATEWAY_PORT = Number.parseInt(process.env.INTERNAL_GATEWAY_PORT ?? "18789", 10);
+//   const INTERNAL_GATEWAY_HOST = process.env.INTERNAL_GATEWAY_HOST ?? "127.0.0.1";
+//   const GATEWAY_TARGET = `http://${INTERNAL_GATEWAY_HOST}:${INTERNAL_GATEWAY_PORT}`;
+//
+// and proxies the wrapper's own unauthenticated dashboard traffic to exactly
+// that target (`httpProxy.createProxyServer({ target: GATEWAY_TARGET, ... })`),
+// injecting `Authorization: Bearer ${OPENCLAW_GATEWAY_TOKEN}` when a request
+// arrives with none. So: the OpenClaw gateway process this wrapper is anchored
+// ahead of (see this file's top-of-file comment) always listens on plain HTTP
+// at `INTERNAL_GATEWAY_HOST:INTERNAL_GATEWAY_PORT` inside the same container --
+// reachable from this wrapper process via a real HTTP call, never an in-process
+// function call. Reusing those exact env var names (rather than inventing new
+// ones) means this module's default target tracks the wrapper's own gateway
+// target automatically if either is ever overridden.
+//
+// `/hooks/agent`'s bearer token is a SEPARATE value from `OPENCLAW_GATEWAY_TOKEN`
+// above: the Current State note in
+// docs/plans/github-webhook-agent-dispatch/plan.md is explicit that
+// `/hooks/agent` is gated by its own `hooks.token` config (`hooks.enabled` /
+// `hooks.token` / `hooks.path` in `openclaw.json`), not the wrapper's
+// dashboard-proxy gateway token -- so a dedicated env var is used for it
+// rather than reusing OPENCLAW_GATEWAY_TOKEN.
+
+const DEFAULT_INTERNAL_GATEWAY_HOST = "127.0.0.1";
+const DEFAULT_INTERNAL_GATEWAY_PORT = "18789";
+const AGENT_HOOK_PATH = "/hooks/agent";
+
+/** Same names/defaults the pinned wrapper's own server.js uses for its gateway proxy target (see comment block above) -- reused, not reinvented. */
+const INTERNAL_GATEWAY_HOST_ENV = "INTERNAL_GATEWAY_HOST";
+const INTERNAL_GATEWAY_PORT_ENV = "INTERNAL_GATEWAY_PORT";
+
+/** This module's own env vars for the /hooks/agent call specifically. */
+export const OPENCLAW_AGENT_HOOK_URL_ENV = "OPENCLAW_AGENT_HOOK_URL";
+export const OPENCLAW_AGENT_HOOK_TOKEN_ENV = "OPENCLAW_AGENT_HOOK_TOKEN";
+
+/**
+ * Resolves the full URL to POST a dispatch to. `OPENCLAW_AGENT_HOOK_URL`
+ * (a complete URL) takes precedence when set to a non-blank value --
+ * useful if `hooks.path` is ever reconfigured away from the default, or the
+ * gateway is reached through some other route in a given deployment.
+ * Otherwise builds `http://<INTERNAL_GATEWAY_HOST>:<INTERNAL_GATEWAY_PORT>/hooks/agent`
+ * from the same env vars (and same defaults, 127.0.0.1:18789) the pinned
+ * wrapper's own server.js uses for its gateway proxy target -- see the
+ * comment block above this section for how that was confirmed.
+ *
+ * @param {Record<string, string | undefined>} [env]
+ * @returns {string}
+ */
+export function resolveAgentHookUrl(env = process.env) {
+  const explicit = env[OPENCLAW_AGENT_HOOK_URL_ENV];
+  if (typeof explicit === "string" && explicit.trim() !== "") return explicit;
+  const host = env[INTERNAL_GATEWAY_HOST_ENV] || DEFAULT_INTERNAL_GATEWAY_HOST;
+  const port = env[INTERNAL_GATEWAY_PORT_ENV] || DEFAULT_INTERNAL_GATEWAY_PORT;
+  return `http://${host}:${port}${AGENT_HOOK_PATH}`;
+}
+
+/**
+ * POSTs `{ sessionKey, trigger: { event, repo, resource, actor, deliveryId } }`
+ * -- explicitly NOT the raw comment/PR body, only these labeled,
+ * non-executable metadata fields pulled off `payload` -- to
+ * `options.hookUrl` (default `resolveAgentHookUrl()`) with
+ * `options.hookToken` (default `process.env[OPENCLAW_AGENT_HOOK_TOKEN_ENV]`)
+ * as a bearer token header, matching the `Authorization: Bearer <token>`
+ * convention the pinned wrapper's own gateway proxy already uses (see
+ * comment block above).
+ *
+ * Never throws on the downstream call failing: a network error, a rejected
+ * promise, or a non-2xx response is caught/checked here and logged via
+ * `console.error` (not the caller's injectable `log`, matching this
+ * module's own config-error precedent), returning `{ forwarded: false }` --
+ * so a hook-endpoint outage degrades to "verified but not dispatched,"
+ * never a 5xx back to GitHub for something GitHub didn't cause.
+ *
+ * @param {string} sessionKey
+ * @param {string} event
+ * @param {any} payload
+ * @param {{ hookUrl?: string, hookToken?: string, fetchImpl?: typeof fetch }} [options]
+ * @returns {Promise<{ forwarded: boolean }>}
+ */
+export async function forwardToAgentHook(sessionKey, event, payload, options = {}) {
+  const hookUrl = options.hookUrl ?? resolveAgentHookUrl();
+  const hookToken = options.hookToken ?? process.env[OPENCLAW_AGENT_HOOK_TOKEN_ENV];
+  const fetchImpl = options.fetchImpl ?? fetch;
+
+  const trigger = {
+    event,
+    repo: payload?.repository?.full_name,
+    resource: resourceNumberFor(event, payload),
+    actor: payload?.sender?.login,
+    deliveryId: payload?.deliveryId,
+  };
+
+  try {
+    const headers = { "content-type": "application/json" };
+    if (typeof hookToken === "string" && hookToken !== "") {
+      headers.authorization = `Bearer ${hookToken}`;
+    }
+    const response = await fetchImpl(hookUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ sessionKey, trigger }),
+    });
+    if (!response || !response.ok) {
+      console.error(`[github-webhook-verify] agent hook forward failed: HTTP ${response?.status ?? "no response"}`);
+      return { forwarded: false };
+    }
+    return { forwarded: true };
+  } catch (err) {
+    console.error(`[github-webhook-verify] agent hook forward errored: ${err instanceof Error ? err.message : String(err)}`);
+    return { forwarded: false };
+  }
+}
+
 /**
  * Computes the GitHub webhook signature for a raw request body under a given
  * secret: `"sha256=" + hex(HMAC-SHA256(secret, rawBody))`, matching the value
@@ -563,15 +683,28 @@ export function readRawBody(req, opts = {}) {
  *   only `{route, result:"rejected"}` -- never the payload, never the
  *   signature, never the body.
  * - Signature verifies -> 200, body "ok"; logs
- *   `{route, result:"accepted", event, deliveryId, repo}` where `event` and
- *   `deliveryId` come from the `X-Github-Event`/`X-Github-Delivery` headers
- *   and `repo` is the verified body's `repository.full_name` when it parses
- *   as JSON (undefined otherwise -- a parse failure here only affects what
- *   gets logged, not the already-decided 200 response).
+ *   `{route, result:"accepted", event, deliveryId, repo, dispatch}` where
+ *   `event` and `deliveryId` come from the `X-Github-Event`/
+ *   `X-Github-Delivery` headers, `repo` is the verified body's
+ *   `repository.full_name` when it parses as JSON (undefined otherwise -- a
+ *   parse failure here only affects what gets logged, not the
+ *   already-decided 200 response), and `dispatch` is the bounded dispatch
+ *   decision (see `planDispatch` below) computed BEFORE this log line and
+ *   the response are sent -- it can never change the response, and every
+ *   failure mode in the decision (malformed allowlist config, an
+ *   unenrolled/untrusted/duplicate delivery) is caught and folded into that
+ *   one bounded value, never thrown back out of this function. Only the
+ *   ACTUAL `forwardToAgentHook` network call (when `dispatch === "forwarded"`)
+ *   happens after the response above -- see this function's body.
  *
  * @param {import("node:http").IncomingMessage} req
  * @param {import("node:http").ServerResponse} res
- * @param {{ secret?: string, log?: (line: string) => void }} [options]
+ * @param {{
+ *   secret?: string,
+ *   log?: (line: string) => void,
+ *   dedupStore?: { has(key: string): boolean, add(key: string): unknown },
+ *   forward?: { hookUrl?: string, hookToken?: string, fetchImpl?: typeof fetch },
+ * }} [options]
  * @returns {Promise<void>}
  */
 export async function handleGithubWebhookVerify(req, res, options = {}) {
@@ -637,25 +770,51 @@ export async function handleGithubWebhookVerify(req, res, options = {}) {
     return;
   }
 
+  let parsedPayload;
   let repo;
   try {
-    const parsed = JSON.parse(rawBody.toString("utf8"));
-    repo = parsed && typeof parsed === "object" ? parsed.repository?.full_name : undefined;
+    parsedPayload = JSON.parse(rawBody.toString("utf8"));
+    repo = parsedPayload && typeof parsedPayload === "object" ? parsedPayload.repository?.full_name : undefined;
   } catch {
+    parsedPayload = undefined;
     repo = undefined;
   }
+
+  const event = req.headers["x-github-event"];
+  const deliveryId = req.headers["x-github-delivery"];
+
+  // The dispatch DECISION (dedup check, allowlist consult) is entirely
+  // synchronous -- no network call, no await -- so it's made BEFORE the
+  // response is logged/sent, letting the outcome ride along in the SAME log
+  // line as the existing {route, result, event, deliveryId, repo} shape
+  // (AC-SEC-2: "the existing shape plus a bounded dispatch-outcome field",
+  // not a second, separate log line). Only the ACTUAL `forwardToAgentHook`
+  // network call happens after the response below.
+  const dedupStore = options.dedupStore ?? defaultForwardedDeliveries;
+  const decision = planDispatch({ event, payload: parsedPayload, dedupStore });
 
   log(
     JSON.stringify({
       route: ROUTE,
       result: "accepted",
-      event: req.headers["x-github-event"],
-      deliveryId: req.headers["x-github-delivery"],
+      event,
+      deliveryId,
       repo,
+      dispatch: decision.dispatch,
     }),
   );
   res.statusCode = 200;
   res.end("ok");
+
+  if (decision.dispatch === "forwarded") {
+    // "forwarded" here records that an eligible, matching, non-duplicate
+    // delivery WAS handed to forwardToAgentHook -- forwardToAgentHook logs
+    // its own separate failure line (via console.error, see its own
+    // docstring) if the downstream call itself didn't succeed, keeping this
+    // function's own bounded outcome vocabulary fixed at exactly five
+    // values regardless of the network result (AC-SEC-2).
+    await forwardToAgentHook(decision.sessionKey, event, { ...parsedPayload, deliveryId }, options.forward);
+  }
 }
 
 /**
@@ -674,4 +833,83 @@ function resolveSecretsForRequest(options) {
     return [options.secret];
   }
   return resolveGithubWebhookSecrets();
+}
+
+/**
+ * The in-memory "already forwarded" set `handleGithubWebhookVerify` uses by
+ * default when `options.dedupStore` isn't supplied. A small `Set` is
+ * sufficient for this process's own lifetime -- this route's whole design
+ * (see docs/plans/github-webhook-agent-dispatch/plan.md) is a single
+ * wrapper process with no external datastore, and losing this set on a
+ * restart only means a delivery already forwarded before the restart could
+ * be forwarded again after one, which is a re-delivery, not a correctness
+ * bug (the downstream agent turn is responsible for its own idempotency
+ * once dispatched -- out of scope here, see the plan's Out of Scope
+ * section). Exposed via `options.dedupStore` specifically so tests (or an
+ * alternate wiring) can supply their own instead of sharing this module-level
+ * one across unrelated calls.
+ */
+const defaultForwardedDeliveries = new Set();
+
+/**
+ * Makes the post-verification dispatch DECISION -- entirely synchronous, no
+ * network call -- so its outcome can ride along in the same log line as the
+ * existing accepted-delivery log (AC-SEC-2). Computes the dedup key and
+ * session key, treats an unsupported event type or a payload missing a
+ * required field as "not-enrolled," checks `dedupStore` for a repeat
+ * delivery ("duplicate"), resolves and consults the dispatch allowlist
+ * (treating a thrown resolve as "config-error," never letting it escape to
+ * the caller), and on a match, marks the dedup key as forwarded and returns
+ * `{ dispatch: "forwarded", sessionKey }` for the caller to actually POST
+ * with `forwardToAgentHook`. The dedup key is marked HERE (synchronously,
+ * before any network call is even started) to close the race window
+ * between two near-simultaneous deliveries carrying the same dedup key --
+ * matches this file's existing "fail fast / close the obvious race"
+ * conventions elsewhere (see readRawBody's settle()).
+ *
+ * @param {{ event: string | undefined, payload: any, dedupStore: { has(key: string): boolean, add(key: string): unknown } }} args
+ * @returns {{ dispatch: "not-enrolled" | "duplicate" | "config-error" | "no-match" | "forwarded", sessionKey?: string }}
+ */
+function planDispatch({ event, payload, dedupStore }) {
+  if (typeof event !== "string") {
+    return { dispatch: "not-enrolled" };
+  }
+
+  const dedupKey = computeDedupKey(event, payload);
+  const sessionKey = computeSessionKey(event, payload);
+  if (dedupKey === undefined || sessionKey === undefined) {
+    // Unsupported event type (e.g. push/ping) or a malformed payload missing
+    // the fields this event type requires -- either way, there is nothing
+    // to safely key a session or a dedup check on, so this delivery is
+    // simply not eligible for dispatch.
+    return { dispatch: "not-enrolled" };
+  }
+
+  if (dedupStore.has(dedupKey)) {
+    return { dispatch: "duplicate" };
+  }
+
+  let allowlist;
+  try {
+    allowlist = resolveDispatchAllowlist();
+  } catch (err) {
+    console.error(`[github-webhook-verify] config error: ${err instanceof Error ? err.message : String(err)}`);
+    return { dispatch: "config-error" };
+  }
+
+  const repoFullName = payload?.repository?.full_name;
+  const action = payload?.action;
+  const actorLogin = payload?.sender?.login;
+  // commentBody is read here ONLY to hand to matchesDispatchAllowlist's
+  // pattern check immediately below -- it is never logged, never assigned
+  // into the forwarded trigger, and never passed to forwardToAgentHook
+  // (AC-SEC-3).
+  const commentBody = event === "issue_comment" ? payload?.comment?.body : undefined;
+
+  if (!matchesDispatchAllowlist(allowlist, event, action, repoFullName, actorLogin, commentBody)) {
+    return { dispatch: "no-match" };
+  }
+
+  dedupStore.add(dedupKey);
+  return { dispatch: "forwarded", sessionKey };
 }
