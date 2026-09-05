@@ -9,9 +9,10 @@
 Ready to merge. 18/18 ACs PASS. Two real bugs were found and fixed: one
 during Verify (AC-FN-2, the route was functionally dead), one during
 `/ocr-review` Phase 4.4 (a connection-reset instead of a clean 400 on
-oversize/slow bodies). Everything else passed on independent evidence
-across two full verify passes plus the ocr-review pass. 307 tests, precheck
-clean.
+oversize/slow bodies). All 11 low-severity `/ocr-review` findings were also
+applied at the operator's request. Everything else passed on independent
+evidence across two full verify passes plus the ocr-review pass. 310 tests,
+precheck clean.
 
 ## `/ocr-review` (Phase 4.4)
 
@@ -49,40 +50,40 @@ directly rather than the shared fixture. (3) `AC-TST-4`'s apply-once test
 asserted only the route registration, not the import line, unlike its
 scoped-export sibling; added the missing assertion.
 
-**Low — recorded, not applied (operator can request any of these):**
+**Low — all 11 subsequently applied, at the operator's request:**
 
-- Two Dockerfile comments overstate their claims: one implies this route
-  depends on the pre-existing `/hooks*` Basic-Auth exemption when
-  `requireDashboardAuth` never actually executes for it; the other says
-  `express.json()` "unconditionally" drains the stream when body-parser
-  actually skips non-JSON content types (true for real GitHub deliveries,
-  which are always `application/json`, but could mislead a differently
-  shaped repro).
-- `patch-wrapper-github-webhook.mjs`'s own file header still frames
-  placement as "before the catch-all" without naming `express.json` as the
-  load-bearing anchor — the module header got this fix in `880ed5a`, the
-  patch script header didn't.
-- The handler's JSDoc still presents "non-POST → 405" as route behavior,
-  though `app.post(...)` already filters by method, so a GET never reaches
-  it in production (the code comment is accurate; only the module-level
-  JSDoc overclaims).
-- `DEFAULT_MAX_BYTES` (1 MiB) has no env override, unlike the sibling
-  `wrapper-state-export.mjs`'s `OPENCLAW_STATE_EXPORT_MAX_BYTES`.
-- The tar-import "already applied" guard in both `patch-wrapper-*.mjs`
-  scripts depends on adjacency to a shared anchor line — no live double-apply
-  is currently possible (each script's second, unique guard still catches
-  it), but a third script sharing that anchor could blind an earlier
-  script's own guard.
-- A pre-existing, unrelated gap outside this diff: `EXPOSE 8080` has no
-  matching `ENV PORT`, so a platform that fails to inject `PORT` would leave
-  the container listening on `:3000` while advertising `:8080` — invisible
-  from inside the container or the deploy log. Raised because this diff adds
-  a new public-facing route whose delivery failures would surface only as
-  GitHub-side timeouts if this ever bit.
-- A couple of narrower test gaps: the "prints usage" and "duplicated anchor"
-  tests weren't extended to the third (github-webhook) patch script; a
-  stale "D1 is authored in parallel" comment survives in the test file's
-  header from the original implement-stage prompt scaffolding.
+- Corrected both overstated Dockerfile comments: this route never actually
+  reaches `requireDashboardAuth` (it responds and returns before the
+  catch-all that applies that gate); `express.json()` drains the stream
+  only for JSON content types, not unconditionally (true for every real
+  GitHub delivery, which is always `application/json`, but worth stating
+  precisely so a differently-shaped future repro isn't misled).
+- `patch-wrapper-github-webhook.mjs`'s own file header now names
+  `express.json` as the load-bearing anchor, matching the fix already made
+  to the module header in `880ed5a`.
+- The handler's JSDoc no longer presents "non-POST → 405" as reachable
+  route behavior — documented as defensive-only, since `app.post(...)`
+  registration already filters to POST before the handler runs.
+- Added `GITHUB_WEBHOOK_MAX_BODY_BYTES` as an env override for the 1 MiB
+  body cap, mirroring `wrapper-state-export.mjs`'s
+  `OPENCLAW_STATE_EXPORT_MAX_BYTES` pattern exactly (throws on a malformed
+  override rather than silently falling back), with its own test coverage.
+- The tar-import "already applied" guard now keys off a unique,
+  adjacency-independent marker line instead of the full multi-line block,
+  so a sibling patch script inserting at the same anchor can't blind it.
+- Fixed the pre-existing, unrelated `EXPOSE 8080` / missing `ENV PORT` gap
+  (a platform that fails to inject `PORT` would otherwise leave the
+  container listening on `:3000` while advertising `:8080`) — in scope
+  here because this diff adds a new public-facing route whose delivery
+  failures would otherwise surface only as opaque GitHub-side timeouts.
+- Extended the patch-script tests: a duplicated-anchor case for
+  `patch-wrapper-github-webhook` (previously only covered for its
+  siblings), and the no-target-path usage test now covers all three
+  scripts.
+- Removed the stale "D1 is authored in parallel" comment from the test
+  file's header.
+
+All fixes re-verified: 310 tests, precheck clean, Gate 1 still 0 orphans.
 
 ## Deliverables ↔ code
 
