@@ -1,7 +1,17 @@
-# Select this file explicitly for the canary's OpenClaw wrapper service.
-# The public-proof service retains root railway.toml (no watchPatterns --
-# deploys on every commit, deliberately). See docs/architecture.md's
-# "Deployment Topology" and this directory's README "the canary" section.
+# Reference spec for the canary's OpenClaw wrapper service -- NOT read by
+# Railway. Railway's Config as Code (a `railway.toml`/`railway.json` file
+# wired via a service's Config File setting) is deprecated: existing
+# adopters keep working until 2026-12-01, but new services cannot opt in
+# (https://docs.railway.com/config-as-code), and the canary has never used
+# a config file. So this file is committed purely as the drift-guarded
+# source of truth for what the live service's settings should be --
+# tests/canary-watch-patterns.test.ts checks it against the Dockerfile's own
+# COPY sources, and the values below are applied to the live service
+# directly as native per-service settings (dockerfilePath, watchPatterns,
+# healthcheckPath, etc. -- all plain service-config fields, independent of
+# Config as Code) rather than via a config-file connection. See
+# docs/architecture.md's "Deployment Topology" and this directory's README
+# "The Canary" section.
 [build]
 builder = "dockerfile"
 dockerfilePath = "Dockerfile"
@@ -13,7 +23,10 @@ dockerfilePath = "Dockerfile"
 # exclude here -- they were never a candidate. tests/canary-watch-patterns.test.ts
 # derives the expected set mechanically from the Dockerfile's own COPY lines
 # and fails if this list drifts from it -- a future new COPY source must be
-# added here in the same change.
+# added here in the same change. This file itself is deliberately NOT in the
+# list: it has zero effect on the built image (it isn't a COPY source, and
+# Railway doesn't read it), so a change to it alone must not trigger a
+# rebuild -- unlike when it was drafted as an actual config-as-code file.
 watchPatterns = [
   "/scripts/patch-wrapper-restart-gateway.mjs",
   "/scripts/wrapper-state-export.mjs",
@@ -21,7 +34,6 @@ watchPatterns = [
   "/scripts/relax-openclaw-extension-versions.mjs",
   "/deploy/openclaw-railway/openclaw.pnpm-lock.yaml",
   "/Dockerfile",
-  "/deploy/openclaw-railway/canary.railway.toml",
   "/.dockerignore"
 ]
 

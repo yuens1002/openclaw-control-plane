@@ -119,15 +119,25 @@ own reference deployment, and its operators want build-relevant changes to
 reach it automatically during active development.
 
 The canary's Railway service is git-connected to this repo's tracked
-branch, with its config-as-code path set to
-`deploy/openclaw-railway/canary.railway.toml` instead of root
-`railway.toml`. That file scopes `watchPatterns` to exactly the wrapper
-Dockerfile's own `COPY` sources (see `docs/architecture.md`'s "Deployment
-Topology" and `tests/canary-watch-patterns.test.ts`'s drift guard), so a
-commit only redeploys the canary when it actually changes the built image —
-docs, plans, and CHANGELOG churn do not. This is different from the
-public-proof deployment (root `railway.toml`, no `watchPatterns`, deploys
-on every commit) and from every pinned client instance below (CLI,
+branch. Unlike the public-proof deployment, it does not use a Railway
+config-as-code file: Railway's Config as Code mechanism (`railway.toml` /
+`railway.json` wired via a service's Config File setting) is deprecated,
+and new services — the canary has never used one — can no longer opt in
+(see [Railway's Config as Code docs](https://docs.railway.com/config-as-code)).
+Instead, its build/deploy settings (Dockerfile path, healthcheck, restart
+policy, and — the piece that matters here — `watchPatterns`) are applied
+directly to the live service as native per-service settings, which Railway
+still supports independently of Config as Code.
+`deploy/openclaw-railway/canary.railway.toml` is committed purely as the
+readable, drift-guarded reference spec for what those live settings should
+be — Railway never reads this file. Its `watchPatterns` are scoped to
+exactly the wrapper Dockerfile's own `COPY` sources (see
+`docs/architecture.md`'s "Deployment Topology" and
+`tests/canary-watch-patterns.test.ts`'s drift guard), so a commit only
+redeploys the canary when it actually changes the built image — docs,
+plans, and CHANGELOG churn do not. This is different from the public-proof
+deployment (root `railway.toml`, Config as Code, no `watchPatterns`,
+deploys on every commit) and from every pinned client instance below (CLI,
 version-pinned, not git-connected at all) — three deployment models for
 three different purposes, not three copies of the same one.
 
