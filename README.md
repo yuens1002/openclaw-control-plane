@@ -213,6 +213,85 @@ through this route today and exists only in case the handler is ever reused
 behind a method-agnostic registration.) See
 [issue #108](https://github.com/yuens1002/openclaw-control-plane/issues/108).
 
+#### Multiple webhook secrets (`GITHUB_WEBHOOK_SECRETS`)
+
+A deployment may have more than one GitHub App delivering to this route (each
+App signs with its own webhook secret). `GITHUB_WEBHOOK_SECRETS` -- a JSON
+array of one or more non-empty secret strings, e.g. `["secret-one",
+"secret-two"]` -- lets the route accept a signature that verifies against ANY
+one of them. It takes precedence over the single legacy `GITHUB_WEBHOOK_SECRET`
+whenever it's set to a non-blank value; when it's unset, the route falls back
+to `GITHUB_WEBHOOK_SECRET` exactly as before (unchanged behavior for every
+existing single-secret deployment). A `GITHUB_WEBHOOK_SECRETS` value that is
+set but fails to parse as JSON, doesn't parse to an array, or contains
+anything other than non-empty strings is a deploy-config error and responds
+`500` -- it never silently falls back to the legacy var or treats the raw
+string as one literal secret. See
+[issue #116](https://github.com/yuens1002/openclaw-control-plane/issues/116).
+
+#### Dispatch to the agent hook (`GITHUB_DISPATCH_ALLOWLIST`)
+
+A verified delivery can additionally be forwarded to OpenClaw's own native
+`POST /hooks/agent` endpoint, running an agent turn under a caller-scoped
+session key -- closing the dispatch gap #108 deliberately left out of scope.
+This is off by default and opt-in per repository:
+
+- **`GITHUB_DISPATCH_ALLOWLIST`** -- a JSON array; each entry names one
+  repository (by its `owner/repo` full name), the `{event, actions[]}`
+  combinations it permits, and, only where `issue_comment` is permitted, a
+  `trustedMention` condition (`{actors: [...], pattern: "..."}`) gating which
+  commenter/mention combination is trusted to trigger dispatch. Example shape
+  (placeholder values -- a real deployment's actual repo/actor/pattern values
+  are configured privately by its operator, never hardcoded here):
+
+  ```json
+  [
+    {
+      "repo": "some-owner/some-repo",
+      "events": [
+        { "event": "pull_request", "actions": ["opened", "synchronize"] },
+        {
+          "event": "issue_comment",
+          "actions": ["created"],
+          "trustedMention": { "actors": ["some-trusted-actor"], "pattern": "@some-bot\\b" }
+        }
+      ]
+    }
+  ]
+  ```
+
+  Unset or blank resolves to "nothing enrolled" (no forwarding at all). A set
+  value that fails to parse as JSON or violates the documented shape (a
+  missing `events` array, or an `issue_comment` entry with no
+  `trustedMention`) is a deploy-config error -- logged and treated as "do not
+  forward this delivery," never a `500` back to GitHub for a signature it
+  already verified correctly.
+- A delivery is forwarded only once per distinct PR head / issue comment (an
+  in-memory dedup key scoped to this process), under a session key that stays
+  stable for every delivery on the same PR/issue regardless of head or
+  comment id -- so the dispatched agent keeps one continuous session per
+  PR/issue rather than a fresh one on every delivery.
+- The forwarded request body is exactly `{ sessionKey, trigger: { event,
+  repo, resource, actor, deliveryId } }` -- labeled metadata only. The raw
+  comment/PR body text is never included.
+- The target URL defaults to `http://<INTERNAL_GATEWAY_HOST>:<INTERNAL_GATEWAY_PORT>/hooks/agent`,
+  reusing the same env vars (and same defaults) the pinned wrapper's own
+  internal gateway-proxy target already uses, so this module's default tracks
+  it automatically if either is ever overridden. `OPENCLAW_AGENT_HOOK_URL`
+  overrides the full URL directly (useful if `hooks.path` is reconfigured
+  away from its default on a given instance). `OPENCLAW_AGENT_HOOK_TOKEN` is
+  the bearer token for `/hooks/agent`'s own `hooks.token` gate -- a value
+  distinct from `OPENCLAW_GATEWAY_TOKEN` (which authenticates the wrapper's
+  dashboard proxy, not this endpoint).
+- A failed or errored downstream call degrades to "verified but not
+  dispatched" (logged, returns non-forwarded) -- it never changes the `200`
+  response already sent to GitHub for a delivery whose signature verified.
+
+Registering any GitHub App's webhook, provisioning its secret(s), and
+defining a deployment's actual allowlist values is deployment-owner
+procedure, tracked privately -- out of scope for this repo. See
+[issue #117](https://github.com/yuens1002/openclaw-control-plane/issues/117).
+
 Run the source/static proof check locally with:
 
 ```bash
