@@ -43,9 +43,14 @@ export function resolveGithubWebhookMaxBytes(env = process.env) {
   if (raw === undefined || raw.trim() === "") return DEFAULT_MAX_BYTES;
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(
+    const err = new Error(
       `${GITHUB_WEBHOOK_MAX_BODY_BYTES_ENV} must be a positive integer number of bytes, got ${JSON.stringify(raw)}`,
     );
+    // Tagged so the handler can tell a deploy misconfiguration apart from a
+    // client's oversize/slow body -- the former is a server-side config
+    // error (500), never the client's fault (400).
+    err.code = "GITHUB_WEBHOOK_MAX_BYTES_CONFIG_ERROR";
+    throw err;
   }
   return parsed;
 }
@@ -225,7 +230,17 @@ export async function handleGithubWebhookVerify(req, res, options = {}) {
   let rawBody;
   try {
     rawBody = await readRawBody(req);
-  } catch {
+  } catch (err) {
+    if (err?.code === "GITHUB_WEBHOOK_MAX_BYTES_CONFIG_ERROR") {
+      // A malformed GITHUB_WEBHOOK_MAX_BODY_BYTES is a deploy/config error,
+      // not anything the client did -- surface it as 500, not 400, and log
+      // it so a bad config doesn't read as "clients keep sending oversize
+      // bodies."
+      console.error(`[github-webhook-verify] config error: ${err.message}`);
+      res.statusCode = 500;
+      res.end();
+      return;
+    }
     // readRawBody deliberately did not destroy the request stream on a
     // limit/timeout rejection (see its own comment) -- respond first, and
     // only close the now-idle connection once the response has actually

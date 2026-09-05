@@ -201,7 +201,11 @@ instance opts in independently, out of band from this repo, by setting its
 own secret and registering its own App webhook URL. Until an instance sets
 `GITHUB_WEBHOOK_SECRET`, the route responds `404` (before reading the body or
 comparing any signature), so the change is inert by default. A valid
-signature responds `200`; a missing or invalid one responds `401`. (The
+signature responds `200`; a missing or invalid one responds `401`. The
+request body cap defaults to 1 MiB and can be overridden with
+`GITHUB_WEBHOOK_MAX_BODY_BYTES` (a positive integer number of bytes; a
+malformed value is a deploy-config error and responds `500`, not `400` --
+same override pattern as `OPENCLAW_STATE_EXPORT_MAX_BYTES` above). (The
 handler also defends against a non-`POST` request with its own `405`, but
 since it's registered via `app.post(...)`, Express's router already filters
 to `POST` before the handler ever runs -- the `405` guard is unreachable

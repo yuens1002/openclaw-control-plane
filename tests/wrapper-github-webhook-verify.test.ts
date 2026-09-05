@@ -366,6 +366,25 @@ describe("handleGithubWebhookVerify", () => {
     }
   });
 
+  // A malformed GITHUB_WEBHOOK_MAX_BODY_BYTES is a deploy/config error, not
+  // anything the client did -- must surface as 500, not the 400 used for a
+  // client's own oversize/slow body.
+  it("responds 500 when GITHUB_WEBHOOK_MAX_BODY_BYTES is malformed, not 400", async () => {
+    const originalMaxBytes = process.env.GITHUB_WEBHOOK_MAX_BODY_BYTES;
+    process.env.GITHUB_WEBHOOK_MAX_BODY_BYTES = "not-a-number";
+    try {
+      const rawBody = Buffer.from(JSON.stringify({ repository: { full_name: "someone/somewhere" } }));
+      const signature = webhook.computeGithubSignature(TEST_SECRET, rawBody);
+      const req = createFakeReq({ method: "POST", headers: { "x-hub-signature-256": signature }, body: rawBody });
+      const res = createFakeRes();
+      await webhook.handleGithubWebhookVerify(req, res, { secret: TEST_SECRET });
+      expect(res.statusCode).toBe(500);
+    } finally {
+      if (originalMaxBytes === undefined) delete process.env.GITHUB_WEBHOOK_MAX_BODY_BYTES;
+      else process.env.GITHUB_WEBHOOK_MAX_BODY_BYTES = originalMaxBytes;
+    }
+  });
+
   // The route the patch script actually injects calls
   // handleGithubWebhookVerify(req, res) with no options at all -- the
   // GITHUB_WEBHOOK_SECRET env var is the only secret source in production.
