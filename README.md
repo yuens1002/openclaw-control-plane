@@ -232,9 +232,14 @@ string as one literal secret. See
 #### Dispatch to the agent hook (`GITHUB_DISPATCH_ALLOWLIST`)
 
 A verified delivery can additionally be forwarded to OpenClaw's own native
-`POST /hooks/agent` endpoint, running an agent turn under a caller-scoped
-session key -- closing the dispatch gap #108 deliberately left out of scope.
-This is off by default and opt-in per repository:
+`POST /hooks/agent` endpoint, running an isolated agent turn -- closing the
+dispatch gap #108 deliberately left out of scope. `/hooks/agent` never
+resumes a prior turn's context regardless of what session key it's given
+(confirmed against the actual OpenClaw source: `dispatchAgentHook` hardcodes
+an isolated, `forceNew` turn on every dispatch), so this module uses one
+dedup key for both the forward decision and the session-store label -- there
+is no separate stable-per-PR key to maintain. This is off by default and
+opt-in per repository:
 
 - **`GITHUB_DISPATCH_ALLOWLIST`** -- a JSON array; each entry names one
   repository (by its `owner/repo` full name), the `{event, actions[]}`
@@ -267,13 +272,14 @@ This is off by default and opt-in per repository:
   forward this delivery," never a `500` back to GitHub for a signature it
   already verified correctly.
 - A delivery is forwarded only once per distinct PR head / issue comment (an
-  in-memory dedup key scoped to this process), under a session key that stays
-  stable for every delivery on the same PR/issue regardless of head or
-  comment id -- so the dispatched agent keeps one continuous session per
-  PR/issue rather than a fresh one on every delivery.
+  in-memory dedup key scoped to this process). That same key is sent as the
+  `/hooks/agent` request's `sessionKey` field -- purely a label on the
+  resulting session-store entry, since `/hooks/agent` starts a fresh,
+  isolated turn on every dispatch regardless of the key supplied.
 - The forwarded request body is exactly `{ sessionKey, trigger: { event,
   repo, resource, actor, deliveryId } }` -- labeled metadata only. The raw
-  comment/PR body text is never included.
+  comment/PR body text is never included. (`sessionKey` here is
+  `/hooks/agent`'s own field name, not a claim of session continuity.)
 - The target URL defaults to `http://<INTERNAL_GATEWAY_HOST>:<INTERNAL_GATEWAY_PORT>/hooks/agent`,
   reusing the same env vars (and same defaults) the pinned wrapper's own
   internal gateway-proxy target already uses, so this module's default tracks

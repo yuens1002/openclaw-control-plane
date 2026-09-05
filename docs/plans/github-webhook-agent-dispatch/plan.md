@@ -5,7 +5,9 @@ Source: [issue #116](https://github.com/yuens1002/openclaw-control-plane/issues/
 
 ## Summary
 
-Extend the wrapper's verified GitHub webhook route (`POST /hooks/github-webhook-verify`, #108) so that it (a) verifies a delivery's signature against any of several independently configured secrets, and (b) forwards accepted, allowlisted deliveries to OpenClaw's native `POST /hooks/agent` endpoint — under a session key stable per PR/issue, distinct from the dedup key used to decide whether to forward at all — instead of only logging. This closes the dispatch gap #108 deliberately left out of scope.
+Extend the wrapper's verified GitHub webhook route (`POST /hooks/github-webhook-verify`, #108) so that it (a) verifies a delivery's signature against any of several independently configured secrets, and (b) forwards accepted, allowlisted deliveries to OpenClaw's native `POST /hooks/agent` endpoint — using a deterministic dedup key that decides whether to forward at all and doubles as the request's session-store label — instead of only logging. This closes the dispatch gap #108 deliberately left out of scope.
+
+**Corrected 2026-09-05:** the original draft of this plan computed a *separate* session key (stable per PR/issue) alongside the dedup key, specifically so a stable `sessionKey` could make `/hooks/agent` resume a prior turn's conversation across deliveries. That assumption was wrong — confirmed against the actual OpenClaw source on the live instance (`src/gateway/server/hooks.ts`'s `dispatchAgentHook` hardcodes `sessionTarget: "isolated"` for every hook-agent dispatch, forcing `forceNew: true` in the cron isolated-agent runner it reuses) and verified empirically (two live calls, identical `sessionKey`, two different internal session ids). `/hooks/agent` never resumes a session regardless of the label supplied. `computeSessionKey` has been removed; `computeDedupKey`'s output is now used for both jobs. See issue #117 for the full correction.
 
 ## Current State
 
@@ -18,7 +20,7 @@ Extend the wrapper's verified GitHub webhook route (`POST /hooks/github-webhook-
 Three focused module extensions to `scripts/wrapper-github-webhook-verify.mjs`, each independently testable, wired together in `handleGithubWebhookVerify`:
 
 1. Multi-secret verification (#116).
-2. Dedup-key and session-key computation, plus a generic allowlist consult (#117).
+2. Dedup-key computation, plus a generic allowlist consult (#117).
 3. Forwarding to `/hooks/agent` (#117).
 
 No new wrapper route, no OpenClaw plugin, no change to the upstream gateway/app process — same minimal-footprint approach #108 established.
@@ -45,14 +47,6 @@ export function computeDedupKey(event: string, payload: object): string | undefi
 // Returns undefined if the payload lacks the fields the event type requires
 // (malformed body) -- caller must not forward when this is undefined.
 
-export function computeSessionKey(event: string, payload: object): string | undefined
-// repo + resource number ONLY (owner/repo#N) -- stable across every delivery
-// on the same PR/issue regardless of event type, head, or comment id. This is
-// deliberately NOT the dedup key -- see #117's "Why" section for the bug an
-// earlier draft had here (a session key that varied with head/comment id gave
-// the dispatched agent a fresh, unrelated session on every delivery).
-// Returns undefined under the same malformed-payload condition as the dedup key.
-
 export function resolveDispatchAllowlist(env = process.env): DispatchAllowlistEntry[]
 // Reads GITHUB_DISPATCH_ALLOWLIST (a JSON array string): each entry names a
 // repo, its permitted { event, actions[] } combinations, and (only where
@@ -74,24 +68,26 @@ export function matchesDispatchAllowlist(entries: DispatchAllowlistEntry[], even
 // commentBody is used ONLY for this boolean pattern match -- it is never
 // returned, logged, or included in anything this function's caller forwards.
 
-export async function forwardToAgentHook(sessionKey: string, event: string, payload: object, options?: { hookUrl?: string, hookToken?: string, fetchImpl?: typeof fetch }): Promise<{ forwarded: boolean }>
-// POSTs { sessionKey, trigger: { event, repo, resource, actor, deliveryId } }
+export async function forwardToAgentHook(dispatchKey: string, event: string, payload: object, options?: { hookUrl?: string, hookToken?: string, fetchImpl?: typeof fetch }): Promise<{ forwarded: boolean }>
+// POSTs { sessionKey: dispatchKey, trigger: { event, repo, resource, actor, deliveryId } }
 // (explicitly NOT the raw comment/PR body -- only these labeled, non-executable
 // metadata fields) to options.hookUrl (default resolved per the Current State
-// note above) with options.hookToken as a bearer/hook-token header. Never
-// throws on the downstream call failing -- logs and returns { forwarded: false }
-// so a hook-endpoint outage degrades to "verified but not dispatched," never
-// a 5xx back to GitHub for something GitHub didn't cause.
+// note above) with options.hookToken as a bearer/hook-token header. The wire
+// field is named sessionKey because that's /hooks/agent's own request schema,
+// not a claim that this call resumes anything -- see the Corrected note above.
+// Never throws on the downstream call failing -- logs and returns
+// { forwarded: false } so a hook-endpoint outage degrades to "verified but
+// not dispatched," never a 5xx back to GitHub for something GitHub didn't cause.
 ```
 
-`handleGithubWebhookVerify` changes only in its post-verification branch: after logging the existing accepted-delivery line, it now also computes the dedup key, checks a small in-memory (or otherwise locally decided — implementer's call, documented in D2) set for "already forwarded," consults the allowlist, and on a new, matching delivery calls `forwardToAgentHook` with the session key. The HTTP response to GitHub (200/401/404/405/400) is **unchanged** by any of this — dispatch outcome is logged, never reflected in the status code.
+`handleGithubWebhookVerify` changes only in its post-verification branch: after logging the existing accepted-delivery line, it now also computes the dedup key, checks a small in-memory (or otherwise locally decided — implementer's call, documented in D2) set for "already forwarded," consults the allowlist, and on a new, matching delivery calls `forwardToAgentHook` with that same dedup key as the dispatch label. The HTTP response to GitHub (200/401/404/405/400) is **unchanged** by any of this — dispatch outcome is logged, never reflected in the status code.
 
 ## Deliverables (with spec-role assignment)
 
 | ID | Deliverable | Kind | Owning role | Session |
 |----|-------------|------|-------------|---------|
 | D1 | `verifyAnyGithubSignature` + `resolveGithubWebhookSecrets` in `scripts/wrapper-github-webhook-verify.mjs`; `handleGithubWebhookVerify` reads secrets via the new resolver | module extension | `/devops` | 1 |
-| D2 | `computeDedupKey`, `computeSessionKey`, `resolveDispatchAllowlist`, `matchesDispatchAllowlist` in the same module | module extension | `/devops` | 1 |
+| D2 | `computeDedupKey`, `resolveDispatchAllowlist`, `matchesDispatchAllowlist` in the same module | module extension | `/devops` | 1 |
 | D3 | `forwardToAgentHook` + wiring it into `handleGithubWebhookVerify`'s post-verification branch (dedup check, allowlist check, forward on match) — includes the empirical investigation of the local `/hooks/agent` address noted in Current State | module extension + integration | `/devops` | 1 |
 | D4 | `tests/wrapper-github-webhook-verify.test.ts` — extend with direct unit tests of every D1–D3 export, including a pre-drained-stream-shaped adversarial case for the integration point per this ecosystem's own retro rule (a fixture built fresh-only misses "already wired into the pipeline" bugs) | test | `/test-engineer` | 1 |
 | D5 | `docs/plans/github-webhook-agent-dispatch/plan.md` — this plan | doc | `/project-manager` | 1 |
@@ -123,7 +119,7 @@ export async function forwardToAgentHook(sessionKey: string, event: string, payl
 
 → See `docs/plans/github-webhook-agent-dispatch/ACs.md`.
 
-- **Session 1**: multi-secret verification is correct and backward compatible; dedup key and session key are computed correctly and are provably different keys for the same delivery; the allowlist consult fails closed on any unmatched/malformed input; forwarding never changes the HTTP response contract to GitHub; `precheck` is green; the tracking issues (#116, #117) reflect the shipped design.
+- **Session 1**: multi-secret verification is correct and backward compatible; the dedup key is computed correctly and doubles as the dispatch label with no separate session key; the allowlist consult fails closed on any unmatched/malformed input; forwarding never changes the HTTP response contract to GitHub; `precheck` is green; the tracking issues (#116, #117) reflect the shipped design.
 
 ## Commit Schedule
 

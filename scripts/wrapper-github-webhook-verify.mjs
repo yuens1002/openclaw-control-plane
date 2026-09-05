@@ -146,13 +146,30 @@ export function verifyAnyGithubSignature(secrets, rawBody, headerValue) {
   return matched;
 }
 
-// --- Dedup key / session key computation (#117) -----------------------------
+// --- Dedup key computation (#117) --------------------------------------------
+//
+// #117 originally computed a SEPARATE session key (repo + resource number
+// only, stable across head/comment changes) alongside this dedup key,
+// specifically so a caller-supplied sessionKey could make /hooks/agent
+// resume a prior turn's conversation across multiple deliveries on the same
+// PR/issue. That assumption was wrong: confirmed against the actual
+// OpenClaw source (src/gateway/server/hooks.ts's dispatchAgentHook
+// hardcodes sessionTarget: "isolated" for every hook-agent dispatch,
+// forcing forceNew: true in the cron isolated-agent runner it reuses) and
+// verified empirically (two deliveries, identical sessionKey, two different
+// internal session ids). A caller-supplied sessionKey is stored only as a
+// label on the resulting session-store entry -- it never resumes anything.
+// One key now does both jobs this module needs: decide whether to forward
+// (this dedup key), and label the dispatched session (sent as the
+// /hooks/agent request's `sessionKey` field, per that endpoint's actual
+// contract -- the field name is the external API's, not a claim that this
+// module provides session continuity).
 
 /**
  * Resolves the PR/issue resource number a payload refers to, or undefined
  * if the event type is unsupported or the field is missing/wrong-typed.
- * Shared by computeDedupKey, computeSessionKey, and forwardToAgentHook's
- * trigger-building so all three agree on where this number lives.
+ * Shared by computeDedupKey and forwardToAgentHook's trigger-building so
+ * both agree on where this number lives.
  *
  * @param {string} event
  * @param {any} payload
@@ -174,9 +191,8 @@ function resourceNumberFor(event, payload) {
 }
 
 /**
- * The pull_request-specific field computeDedupKey/computeSessionKey both
- * require to consider a pull_request payload well-formed, or undefined if
- * it's missing/wrong-typed.
+ * The pull_request-specific field computeDedupKey requires to consider a
+ * pull_request payload well-formed, or undefined if it's missing/wrong-typed.
  *
  * @param {any} payload
  * @returns {string | undefined}
@@ -187,9 +203,8 @@ function pullRequestHeadSha(payload) {
 }
 
 /**
- * The issue_comment-specific field computeDedupKey/computeSessionKey both
- * require to consider an issue_comment payload well-formed, or undefined if
- * it's missing/wrong-typed.
+ * The issue_comment-specific field computeDedupKey requires to consider an
+ * issue_comment payload well-formed, or undefined if it's missing/wrong-typed.
  *
  * @param {any} payload
  * @returns {string | number | undefined}
@@ -202,12 +217,12 @@ function issueCommentId(payload) {
 /**
  * repo + resource number + observed head for `pull_request`
  * (`owner/repo#N@sha`); repo + resource number + comment id for
- * `issue_comment` (`owner/repo#N/comment-<id>`). Deliberately DIFFERENT from
- * computeSessionKey -- this key changes on every new head push or new
- * comment, precisely so a dedup check keyed on it treats each as a distinct
- * delivery, while computeSessionKey (repo + resource number ONLY) stays
- * stable across all of them so the dispatched agent keeps one session per
- * PR/issue.
+ * `issue_comment` (`owner/repo#N/comment-<id>`). This key changes on every
+ * new head push or new comment, so a dedup check keyed on it treats each as
+ * a distinct delivery -- and it also doubles as the `/hooks/agent` request's
+ * session-store label (see the section comment above): there is no separate
+ * stable-per-PR key, because `/hooks/agent` never resumes a session
+ * regardless of what label it's given.
  *
  * @param {string} event
  * @param {any} payload
@@ -228,44 +243,6 @@ export function computeDedupKey(event, payload) {
     const commentId = issueCommentId(payload);
     if (commentId === undefined) return undefined;
     return `${repo}#${number}/comment-${commentId}`;
-  }
-  return undefined;
-}
-
-/**
- * repo + resource number ONLY (`owner/repo#N`) -- stable across every
- * delivery on the same PR/issue regardless of event type, head, or comment
- * id. This is deliberately NOT the dedup key: an earlier draft of this
- * design computed a session key that varied with head/comment id, which
- * gave the dispatched agent a fresh, unrelated session on every delivery
- * instead of one continuous session per PR/issue.
- *
- * Returns undefined under the same malformed-payload condition as
- * computeDedupKey -- this function's OUTPUT never includes head sha /
- * comment id, but it still requires their PRESENCE before returning
- * anything, matching computeDedupKey's own validation exactly. A payload
- * missing a field its event type requires is treated as
- * malformed/untrustworthy for BOTH keys together, not just the one whose
- * output happens to need that field: if the payload isn't a genuine,
- * complete instance of this event type, neither key should be built from it.
- *
- * @param {string} event
- * @param {any} payload
- * @returns {string | undefined}
- */
-export function computeSessionKey(event, payload) {
-  const repo = payload?.repository?.full_name;
-  if (typeof repo !== "string" || repo === "") return undefined;
-  const number = resourceNumberFor(event, payload);
-  if (typeof number !== "number") return undefined;
-
-  if (event === "pull_request") {
-    if (pullRequestHeadSha(payload) === undefined) return undefined;
-    return `${repo}#${number}`;
-  }
-  if (event === "issue_comment") {
-    if (issueCommentId(payload) === undefined) return undefined;
-    return `${repo}#${number}`;
   }
   return undefined;
 }
@@ -499,6 +476,13 @@ export function resolveAgentHookUrl(env = process.env) {
  * convention the pinned wrapper's own gateway proxy already uses (see
  * comment block above).
  *
+ * The wire field is named `sessionKey` because that's `/hooks/agent`'s own
+ * request schema -- not a claim that this call resumes anything. `dedup key
+ * computation` section above explains why the caller passes the same dedup
+ * key here as its dispatch-decision key: `/hooks/agent` never resumes a
+ * session regardless of the label, so there is no separate stable key to
+ * maintain.
+ *
  * Never throws on the downstream call failing: a network error, a rejected
  * promise, or a non-2xx response is caught/checked here and logged via
  * `console.error` (not the caller's injectable `log`, matching this
@@ -506,13 +490,13 @@ export function resolveAgentHookUrl(env = process.env) {
  * so a hook-endpoint outage degrades to "verified but not dispatched,"
  * never a 5xx back to GitHub for something GitHub didn't cause.
  *
- * @param {string} sessionKey
+ * @param {string} dispatchKey
  * @param {string} event
  * @param {any} payload
  * @param {{ hookUrl?: string, hookToken?: string, fetchImpl?: typeof fetch }} [options]
  * @returns {Promise<{ forwarded: boolean }>}
  */
-export async function forwardToAgentHook(sessionKey, event, payload, options = {}) {
+export async function forwardToAgentHook(dispatchKey, event, payload, options = {}) {
   const hookUrl = options.hookUrl ?? resolveAgentHookUrl();
   const hookToken = options.hookToken ?? process.env[OPENCLAW_AGENT_HOOK_TOKEN_ENV];
   const fetchImpl = options.fetchImpl ?? fetch;
@@ -533,7 +517,7 @@ export async function forwardToAgentHook(sessionKey, event, payload, options = {
     const response = await fetchImpl(hookUrl, {
       method: "POST",
       headers,
-      body: JSON.stringify({ sessionKey, trigger }),
+      body: JSON.stringify({ sessionKey: dispatchKey, trigger }),
     });
     if (!response || !response.ok) {
       console.error(`[github-webhook-verify] agent hook forward failed: HTTP ${response?.status ?? "no response"}`);
@@ -823,7 +807,7 @@ export async function handleGithubWebhookVerify(req, res, options = {}) {
     // docstring) if the downstream call itself didn't succeed, keeping this
     // function's own bounded outcome vocabulary fixed at exactly five
     // values regardless of the network result (AC-SEC-2).
-    await forwardToAgentHook(decision.sessionKey, event, { ...parsedPayload, deliveryId }, options.forward);
+    await forwardToAgentHook(decision.dispatchKey, event, { ...parsedPayload, deliveryId }, options.forward);
   }
 }
 
@@ -864,21 +848,23 @@ const defaultForwardedDeliveries = new Set();
 /**
  * Makes the post-verification dispatch DECISION -- entirely synchronous, no
  * network call -- so its outcome can ride along in the same log line as the
- * existing accepted-delivery log (AC-SEC-2). Computes the dedup key and
- * session key, treats an unsupported event type or a payload missing a
- * required field as "not-enrolled," checks `dedupStore` for a repeat
- * delivery ("duplicate"), resolves and consults the dispatch allowlist
- * (treating a thrown resolve as "config-error," never letting it escape to
- * the caller), and on a match, marks the dedup key as forwarded and returns
- * `{ dispatch: "forwarded", sessionKey }` for the caller to actually POST
- * with `forwardToAgentHook`. The dedup key is marked HERE (synchronously,
- * before any network call is even started) to close the race window
- * between two near-simultaneous deliveries carrying the same dedup key --
- * matches this file's existing "fail fast / close the obvious race"
- * conventions elsewhere (see readRawBody's settle()).
+ * existing accepted-delivery log (AC-SEC-2). Computes the dedup key, treats
+ * an unsupported event type or a payload missing a required field as
+ * "not-enrolled," checks `dedupStore` for a repeat delivery ("duplicate"),
+ * resolves and consults the dispatch allowlist (treating a thrown resolve
+ * as "config-error," never letting it escape to the caller), and on a
+ * match, marks the dedup key as forwarded and returns
+ * `{ dispatch: "forwarded", dispatchKey }` for the caller to actually POST
+ * with `forwardToAgentHook` -- the same key both decided the forward and
+ * will label the dispatched session (see the dedup-key section comment: one
+ * key does both jobs). The dedup key is marked HERE (synchronously, before
+ * any network call is even started) to close the race window between two
+ * near-simultaneous deliveries carrying the same dedup key -- matches this
+ * file's existing "fail fast / close the obvious race" conventions
+ * elsewhere (see readRawBody's settle()).
  *
  * @param {{ event: string | undefined, payload: any, dedupStore: { has(key: string): boolean, add(key: string): unknown } }} args
- * @returns {{ dispatch: "not-enrolled" | "duplicate" | "config-error" | "no-match" | "forwarded", sessionKey?: string }}
+ * @returns {{ dispatch: "not-enrolled" | "duplicate" | "config-error" | "no-match" | "forwarded", dispatchKey?: string }}
  */
 function planDispatch({ event, payload, dedupStore }) {
   if (typeof event !== "string") {
@@ -886,12 +872,11 @@ function planDispatch({ event, payload, dedupStore }) {
   }
 
   const dedupKey = computeDedupKey(event, payload);
-  const sessionKey = computeSessionKey(event, payload);
-  if (dedupKey === undefined || sessionKey === undefined) {
+  if (dedupKey === undefined) {
     // Unsupported event type (e.g. push/ping) or a malformed payload missing
     // the fields this event type requires -- either way, there is nothing
-    // to safely key a session or a dedup check on, so this delivery is
-    // simply not eligible for dispatch.
+    // to safely key a dedup check (or label a dispatched session) on, so
+    // this delivery is simply not eligible for dispatch.
     return { dispatch: "not-enrolled" };
   }
 
@@ -921,5 +906,5 @@ function planDispatch({ event, payload, dedupStore }) {
   }
 
   dedupStore.add(dedupKey);
-  return { dispatch: "forwarded", sessionKey };
+  return { dispatch: "forwarded", dispatchKey: dedupKey };
 }

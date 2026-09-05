@@ -12,8 +12,8 @@ import { describe, expect, it, vi } from "vitest";
 // docs/plans/github-webhook-verify/plan.md (D1's original exports) and
 // docs/plans/github-webhook-agent-dispatch/plan.md (D1-D3's additions:
 // verifyAnyGithubSignature, resolveGithubWebhookSecrets, computeDedupKey,
-// computeSessionKey, resolveDispatchAllowlist, matchesDispatchAllowlist,
-// forwardToAgentHook, resolveAgentHookUrl).
+// resolveDispatchAllowlist, matchesDispatchAllowlist, forwardToAgentHook,
+// resolveAgentHookUrl).
 //
 // Loaded the same way tests/openclaw-railway-wrapper-patches.test.ts loads
 // scripts/wrapper-state-export.mjs: createRequire(...)(computedPath) rather
@@ -55,9 +55,10 @@ interface WebhookVerifyModule {
   resolveGithubWebhookSecrets(env?: Record<string, string | undefined>): string[];
   GITHUB_WEBHOOK_SECRETS_ENV: string;
 
-  // #117 -- dedup/session keys + allowlist + dispatch
+  // #117 -- dedup key (also used as the /hooks/agent session-store label;
+  // there is no separate resumable session key -- /hooks/agent never
+  // resumes a session regardless of the label) + allowlist + dispatch
   computeDedupKey(event: string, payload: unknown): string | undefined;
-  computeSessionKey(event: string, payload: unknown): string | undefined;
   resolveDispatchAllowlist(env?: Record<string, string | undefined>): DispatchAllowlistEntry[];
   matchesDispatchAllowlist(
     entries: DispatchAllowlistEntry[],
@@ -69,7 +70,7 @@ interface WebhookVerifyModule {
   ): boolean;
   GITHUB_DISPATCH_ALLOWLIST_ENV: string;
   forwardToAgentHook(
-    sessionKey: string,
+    dispatchKey: string,
     event: string,
     payload: unknown,
     options?: { hookUrl?: string; hookToken?: string; fetchImpl?: typeof fetch }
@@ -712,9 +713,17 @@ describe("resolveGithubWebhookSecrets", () => {
   });
 });
 
-// --- computeDedupKey / computeSessionKey (#117, AC-FN-4/5/6/7) --------------
+// --- computeDedupKey (#117, AC-FN-4/5/7) ------------------------------------
+//
+// computeSessionKey was removed: /hooks/agent never resumes a session
+// regardless of the label supplied, confirmed against the actual OpenClaw
+// source (dispatchAgentHook hardcodes sessionTarget: "isolated") and
+// verified empirically (identical sessionKey, two different session ids
+// across two live calls). One dedup key now covers both the forward
+// decision and the session-store label -- there is no separate stable key
+// to test for cross-delivery agreement.
 
-describe("computeDedupKey / computeSessionKey", () => {
+describe("computeDedupKey", () => {
   it("pull_request: dedup key includes repo + PR number + head sha, reproducible on an identical replay", () => {
     const payload = prPayload({ repo: "replay-owner/replay-repo", number: 101, sha: "sha-replay" });
     const replay = prPayload({ repo: "replay-owner/replay-repo", number: 101, sha: "sha-replay" });
@@ -723,11 +732,10 @@ describe("computeDedupKey / computeSessionKey", () => {
     expect(webhook.computeDedupKey("pull_request", replay)).toBe(key);
   });
 
-  it("pull_request: only the head sha changing produces a different dedup key but the SAME session key", () => {
+  it("pull_request: only the head sha changing produces a different dedup key", () => {
     const before = prPayload({ repo: "move-owner/move-repo", number: 55, sha: "sha-before-push" });
     const after = prPayload({ repo: "move-owner/move-repo", number: 55, sha: "sha-after-push" });
     expect(webhook.computeDedupKey("pull_request", before)).not.toBe(webhook.computeDedupKey("pull_request", after));
-    expect(webhook.computeSessionKey("pull_request", before)).toBe(webhook.computeSessionKey("pull_request", after));
   });
 
   it("issue_comment: dedup key includes repo + resource number + comment id; a different comment on the same issue differs", () => {
@@ -737,67 +745,28 @@ describe("computeDedupKey / computeSessionKey", () => {
     expect(webhook.computeDedupKey("issue_comment", c1)).not.toBe(webhook.computeDedupKey("issue_comment", c2));
   });
 
-  // AC-FN-6: the two functions must DISAGREE on these inputs, not just
-  // individually pass their own tests -- this is the exact bug an earlier
-  // draft of this design had (a session key that varied with head/comment
-  // id gave the dispatched agent a fresh, unrelated session on every
-  // delivery). Also proves session-key stability crosses EVENT TYPE, not
-  // just within one event type's own deliveries.
-  it("session key is identical across different heads, different comment ids, AND different event types on the same repo+resource; dedup key differs for every one of them", () => {
-    const repo = "cross-event-owner/cross-event-repo";
-    const number = 314;
-    const pr1 = prPayload({ repo, number, sha: "sha-aaa" });
-    const pr2 = prPayload({ repo, number, sha: "sha-bbb" });
-    const ic1 = issueCommentPayload({ repo, number, commentId: "comment-id-one" });
-    const ic2 = issueCommentPayload({ repo, number, commentId: "comment-id-two" });
-
-    const sessionKeys = [
-      webhook.computeSessionKey("pull_request", pr1),
-      webhook.computeSessionKey("pull_request", pr2),
-      webhook.computeSessionKey("issue_comment", ic1),
-      webhook.computeSessionKey("issue_comment", ic2)
-    ];
-    for (const k of sessionKeys) expect(k).toBeDefined();
-    expect(new Set(sessionKeys).size).toBe(1);
-
-    const dedupKeys = [
-      webhook.computeDedupKey("pull_request", pr1),
-      webhook.computeDedupKey("pull_request", pr2),
-      webhook.computeDedupKey("issue_comment", ic1),
-      webhook.computeDedupKey("issue_comment", ic2)
-    ];
-    for (const k of dedupKeys) expect(k).toBeDefined();
-    expect(new Set(dedupKeys).size).toBe(4);
-  });
-
   // AC-FN-7: a payload missing a field its event type requires returns
-  // undefined from BOTH functions, never a key built from partial data --
-  // including from computeSessionKey, even though its OWN output format
-  // never includes the missing field (head sha here).
-  it("both functions return undefined for a pull_request payload with no pull_request.head.sha", () => {
+  // undefined, never a key built from partial data.
+  it("returns undefined for a pull_request payload with no pull_request.head.sha", () => {
     const malformed = { number: 42, pull_request: { number: 42 }, repository: { full_name: "malformed-owner/repo" } };
     expect(webhook.computeDedupKey("pull_request", malformed)).toBeUndefined();
-    expect(webhook.computeSessionKey("pull_request", malformed)).toBeUndefined();
   });
 
-  it("both functions return undefined for an issue_comment payload with no comment.id", () => {
+  it("returns undefined for an issue_comment payload with no comment.id", () => {
     const malformed = { issue: { number: 7 }, comment: {}, repository: { full_name: "malformed-owner/repo" } };
     expect(webhook.computeDedupKey("issue_comment", malformed)).toBeUndefined();
-    expect(webhook.computeSessionKey("issue_comment", malformed)).toBeUndefined();
   });
 
-  it("both functions return undefined when repository.full_name is missing entirely", () => {
+  it("returns undefined when repository.full_name is missing entirely", () => {
     const malformed = prPayload();
     // @ts-expect-error -- deliberately constructing a malformed payload for the adversarial case
     delete malformed.repository;
     expect(webhook.computeDedupKey("pull_request", malformed)).toBeUndefined();
-    expect(webhook.computeSessionKey("pull_request", malformed)).toBeUndefined();
   });
 
-  it("both functions return undefined for an entirely unsupported event type (e.g. push)", () => {
+  it("returns undefined for an entirely unsupported event type (e.g. push)", () => {
     const payload = { repository: { full_name: "some-owner/some-repo" }, ref: "refs/heads/main" };
     expect(webhook.computeDedupKey("push", payload)).toBeUndefined();
-    expect(webhook.computeSessionKey("push", payload)).toBeUndefined();
   });
 });
 
@@ -1118,7 +1087,7 @@ describe("handleGithubWebhookVerify -- dispatch wiring", () => {
       const call = calls[0];
       if (call === undefined) throw new Error("unreachable");
       const sentBody = JSON.parse(String(call.init["body"])) as { sessionKey: string };
-      expect(sentBody.sessionKey).toBe(webhook.computeSessionKey("pull_request", payload));
+      expect(sentBody.sessionKey).toBe(webhook.computeDedupKey("pull_request", payload));
     } finally {
       if (originalAllowlist === undefined) delete process.env.GITHUB_DISPATCH_ALLOWLIST;
       else process.env.GITHUB_DISPATCH_ALLOWLIST = originalAllowlist;
@@ -1262,7 +1231,6 @@ describe("handleGithubWebhookVerify -- dispatch wiring", () => {
       expect(["forwarded", "not-enrolled", "no-match", "duplicate", "config-error"]).toContain(parsedDispatch);
       for (const line of logged) {
         expect(line).not.toContain(secretMarker);
-        expect(line).not.toContain(webhook.computeSessionKey("issue_comment", payload) ?? "unreachable-session-key");
         expect(line).not.toContain(webhook.computeDedupKey("issue_comment", payload) ?? "unreachable-dedup-key");
       }
     } finally {
