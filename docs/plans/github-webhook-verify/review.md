@@ -1,8 +1,83 @@
-# GitHub webhook signature verification — Review
+# /review report — github-webhook-verify
 
+**Branch:** `feat/github-webhook-verify`
 **Plan:** `docs/plans/github-webhook-verify/plan.md`
 **ACs:** `docs/plans/github-webhook-verify/ACs.md`
 **Issue:** [#108](https://github.com/yuens1002/openclaw-control-plane/issues/108)
+**Generated:** 2026-09-04
+**Iterations to reach verified:** 2 (orca Verify) + 1 (`/ocr-review` Phase 4.4, Critical/High/Medium) + 1 (`/ocr-review` low-severity, applied at operator request)
+
+## Verdict
+
+**Clear.** 18/18 ACs pass, 310 tests, precheck clean, Gate 1 zero orphans, no code changes outside the deliverables list, no docs-hygiene findings introduced by this branch. Ready for human review (Phase 5). Everything below independently re-checked against the current diff for this pass, not carried forward from the orca/ocr-review reports.
+
+## Deliverables ↔ Code
+
+| Deliverable | Implementation | Docs touched? | Status |
+|-------------|-----------------|:---:|--------|
+| D1 | `scripts/wrapper-github-webhook-verify.mjs` (268 lines) — `computeGithubSignature`, `verifyGithubSignature`, `readRawBody`, `resolveGithubWebhookMaxBytes`, `handleGithubWebhookVerify` | Y (README, Dockerfile comment) | ✓ shipped |
+| D2 | `scripts/patch-wrapper-github-webhook.mjs` (113 lines) + `Dockerfile` (COPY/RUN/grep -qF/node --check block) | Y | ✓ shipped |
+| D3 | `tests/openclaw-railway-wrapper-patches.test.ts` (extended, +115/-6) + `tests/wrapper-github-webhook-verify.test.ts` (new, 479 lines) | N (tests don't need their own doc entry) | ✓ shipped |
+| D4 | `docs/plans/github-webhook-verify/plan.md` | — | ✓ shipped |
+| D5 | `docs/plans/github-webhook-verify/ACs.md` | — | ✓ shipped |
+| D6 | `docs/plans/github-webhook-verify/review.md` (this file) | — | ✓ shipped |
+| D7 | Issue [#108](https://github.com/yuens1002/openclaw-control-plane/issues/108) | — | ✓ filed |
+
+### Code changes not tied to any deliverable
+
+None. `git diff --stat` restricted to everything outside the deliverable file set returns empty.
+
+## ACs ↔ Tests (Gate 3 spot-check)
+
+Spot-checked a sample spanning both test files and both failure classes already found in this feature (functional dead-route, connection-reset):
+
+| AC | Test file | Asserts invariant? | Notes |
+|----|-----------|:---:|-------|
+| AC-TST-1 | `tests/wrapper-github-webhook-verify.test.ts` (`verifies a signature computed for the exact secret/body pair`) | ✓ | Computes via `computeGithubSignature`, verifies via `verifyGithubSignature` — a relation between the two functions, not a hardcoded digest string. |
+| AC-TST-2 | same file, adversarial block | ✓ | Each case (mutated body, wrong secret, empty header, missing header, wrong-length header) constructed independently, not copy-pasted from a fixture; asserts `false` + `not.toThrow()` per case. |
+| AC-TST-3 | same file, `handleGithubWebhookVerify` describe block | ✓ | Now includes the already-ended-stream case (added during `/ocr-review`) — this is the one that would have most plausibly passed vacuously before that fix (a fresh, unconsumed fake stream can't distinguish correct anchoring from lucky test setup). |
+| AC-TST-4 | `tests/openclaw-railway-wrapper-patches.test.ts` (`patch-wrapper-github-webhook applies once...`) | ✓ | Now asserts both the import line and the route registration (the import-line assertion was itself an `/ocr-review` finding, applied). |
+| AC-REG-1/2 | full suite / `npm run precheck` | ✓ | 310/310, precheck stamp matches current HEAD. |
+
+No `WEAK`/`MISSING` verdicts in this sample. Given `/ocr-review`'s own adversarial test-file bundle already found and closed the highest-value gap (the pre-drained-stream case) in this exact file, this spot-check intentionally re-verified the *fix* rather than re-running the same search.
+
+## Docs drift
+
+### Stale claims (contradiction)
+
+None found. `README.md`'s new subsection and the `Dockerfile` comment block were both corrected during `/ocr-review` to match the actual (post-fix) anchor and behavior — re-read in full for this pass, no remaining contradiction between prose and code.
+
+### Missing updates (omission)
+
+None. The new route is documented in `README.md`'s `## OpenClaw on Railway` section, as a `###` subsection sibling to the existing `### Scoped state export` entry — the same enumeration the precedent feature landed in, and the only place in this repo's docs that lists wrapper-level HTTP behaviors. No separate architecture/ADR doc exists for the scoped-export precedent either, so none is expected here for consistency. A full "reader-journey" check (separate overview + architecture + API + example + ops guide) is disproportionate for a single inert-by-default wrapper route — the bar in `/review`'s own protocol is for a new subsystem/API/CLI surface, not a narrow addition following an established, already-abbreviated precedent.
+
+## Docs hygiene / public-voice audit
+
+Grepped every file this branch touches (docs and code) for previously-named private terms (`dev-yuen-agency`, `openclaw-cot-agency-profile`, `#41`, Railway service/hostnames) and scanned for personalized/first-person voice.
+
+| Finding | Kind | Location | Introduced or pre-existing |
+|---------|------|----------|------------------------------|
+| None | — | — | — |
+
+Two lines matched the forbidden-term grep, both are the check's own specification (`ACs.md`'s AC-DOC-2 row and this file's own prose describing what was checked for) — not leaks. No Kind B (wrong-altitude) or Kind C (personal-voice) findings: `plan.md`'s "Current State" section describes surrounding, still-true precedent (the `/hooks*` exemption, upstream's incompatible auth schemes, the scoped-export pattern) rather than the feature's own pre-implementation state, so it needs no "Pre-Implementation Baseline" relabeling — none of those background facts became false once this feature shipped.
+
+## Recommendations
+
+None blocking. All findings from this feature's two verify passes and the `/ocr-review` pass (Critical/High/Medium and, at the operator's request, all Low) are already applied and re-verified.
+
+## Inputs for /retro
+
+- **Route:** cross-cutting → `agentic-orca.md`'s retro-sourced rules
+  **Draft principle addition:** *"A synthetic test fixture standing in for a real, multi-middleware HTTP server (a wrapper, a proxy, a gateway) needs at least one test that models the fixture in its *already-partially-consumed* state, not only its fresh/unconsumed state — the class of bug that ships silently is exactly the one where an earlier-registered piece of the real pipeline (a body parser, an auth middleware) has side effects the fixture never reproduces."*
+  **Triggered by:** AC-FN-2's functional-dead-route bug (Verify pass 1) — the synthetic `SYNTHETIC_SERVER_JS` fixture and every unit test's fake request were both structurally incapable of catching a route anchored after a stream-draining middleware, because neither ever modeled a stream that had already been read from before the module under test got a chance to.
+
+- **Route:** `/devops` → `~/.claude/commands/devops.md` (already carries the sibling `EXPOSE`/`ENV PORT` principle from a prior session; this is a related but distinct addition)
+  **Draft principle addition:** *"When a stream-consuming handler (`req.on('data'/'end')`) can reject a request (a size cap, a timeout), never call `req.destroy()` before the response has been sent — destroying the socket first races the response write and can deliver a raw connection reset instead of the intended status code to a real client, even though a socket-less test fake can't observe the difference. Respond first, then close the now-idle connection only after the response is confirmed flushed (`res.once('finish', ...)`)."*
+  **Triggered by:** the `/ocr-review`-found connection-reset bug in `readRawBody`/`handleGithubWebhookVerify`.
+
+- **Route:** `/test-engineer` → `~/.claude/commands/test-engineer.md`
+  **Draft principle addition:** *"A fake `ServerResponse`/`res` object used to test a handler that calls `res.once('finish', ...)` must actually implement `once` and emit `finish` (even if only via `queueMicrotask` after `end()`/`send()`) — a fake missing this isn't a smaller fake, it's silently untestable for exactly the response-then-cleanup ordering the handler exists to get right."*
+  **Triggered by:** `createFakeRes()` initially lacked `.once()`, which the fix for the connection-reset bug depended on; the gap surfaced immediately as a hard `TypeError` when the fix was applied, not as a silent pass, but is worth naming so the next fake-`res` author builds it in from the start rather than reactively.
 
 ## Verdict
 
