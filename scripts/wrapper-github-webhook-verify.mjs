@@ -140,6 +140,282 @@ export function verifyAnyGithubSignature(secrets, rawBody, headerValue) {
   return matched;
 }
 
+// --- Dedup key / session key computation (#117) -----------------------------
+
+/**
+ * Resolves the PR/issue resource number a payload refers to, or undefined
+ * if the event type is unsupported or the field is missing/wrong-typed.
+ * Shared by computeDedupKey, computeSessionKey, and forwardToAgentHook's
+ * trigger-building so all three agree on where this number lives.
+ *
+ * @param {string} event
+ * @param {any} payload
+ * @returns {number | undefined}
+ */
+function resourceNumberFor(event, payload) {
+  if (event === "pull_request") {
+    // GitHub sends the PR number both top-level (`number`) and nested
+    // (`pull_request.number`) on this event; prefer the nested one since
+    // it's unambiguously scoped to the PR object itself.
+    const n = payload?.pull_request?.number ?? payload?.number;
+    return typeof n === "number" ? n : undefined;
+  }
+  if (event === "issue_comment") {
+    const n = payload?.issue?.number;
+    return typeof n === "number" ? n : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * The pull_request-specific field computeDedupKey/computeSessionKey both
+ * require to consider a pull_request payload well-formed, or undefined if
+ * it's missing/wrong-typed.
+ *
+ * @param {any} payload
+ * @returns {string | undefined}
+ */
+function pullRequestHeadSha(payload) {
+  const sha = payload?.pull_request?.head?.sha;
+  return typeof sha === "string" && sha !== "" ? sha : undefined;
+}
+
+/**
+ * The issue_comment-specific field computeDedupKey/computeSessionKey both
+ * require to consider an issue_comment payload well-formed, or undefined if
+ * it's missing/wrong-typed.
+ *
+ * @param {any} payload
+ * @returns {string | number | undefined}
+ */
+function issueCommentId(payload) {
+  const id = payload?.comment?.id;
+  return typeof id === "number" || typeof id === "string" ? id : undefined;
+}
+
+/**
+ * repo + resource number + observed head for `pull_request`
+ * (`owner/repo#N@sha`); repo + resource number + comment id for
+ * `issue_comment` (`owner/repo#N/comment-<id>`). Deliberately DIFFERENT from
+ * computeSessionKey -- this key changes on every new head push or new
+ * comment, precisely so a dedup check keyed on it treats each as a distinct
+ * delivery, while computeSessionKey (repo + resource number ONLY) stays
+ * stable across all of them so the dispatched agent keeps one session per
+ * PR/issue.
+ *
+ * @param {string} event
+ * @param {any} payload
+ * @returns {string | undefined}
+ */
+export function computeDedupKey(event, payload) {
+  const repo = payload?.repository?.full_name;
+  if (typeof repo !== "string" || repo === "") return undefined;
+  const number = resourceNumberFor(event, payload);
+  if (typeof number !== "number") return undefined;
+
+  if (event === "pull_request") {
+    const sha = pullRequestHeadSha(payload);
+    if (sha === undefined) return undefined;
+    return `${repo}#${number}@${sha}`;
+  }
+  if (event === "issue_comment") {
+    const commentId = issueCommentId(payload);
+    if (commentId === undefined) return undefined;
+    return `${repo}#${number}/comment-${commentId}`;
+  }
+  return undefined;
+}
+
+/**
+ * repo + resource number ONLY (`owner/repo#N`) -- stable across every
+ * delivery on the same PR/issue regardless of event type, head, or comment
+ * id. This is deliberately NOT the dedup key: an earlier draft of this
+ * design computed a session key that varied with head/comment id, which
+ * gave the dispatched agent a fresh, unrelated session on every delivery
+ * instead of one continuous session per PR/issue.
+ *
+ * Returns undefined under the same malformed-payload condition as
+ * computeDedupKey -- this function's OUTPUT never includes head sha /
+ * comment id, but it still requires their PRESENCE before returning
+ * anything, matching computeDedupKey's own validation exactly. A payload
+ * missing a field its event type requires is treated as
+ * malformed/untrustworthy for BOTH keys together, not just the one whose
+ * output happens to need that field: if the payload isn't a genuine,
+ * complete instance of this event type, neither key should be built from it.
+ *
+ * @param {string} event
+ * @param {any} payload
+ * @returns {string | undefined}
+ */
+export function computeSessionKey(event, payload) {
+  const repo = payload?.repository?.full_name;
+  if (typeof repo !== "string" || repo === "") return undefined;
+  const number = resourceNumberFor(event, payload);
+  if (typeof number !== "number") return undefined;
+
+  if (event === "pull_request") {
+    if (pullRequestHeadSha(payload) === undefined) return undefined;
+    return `${repo}#${number}`;
+  }
+  if (event === "issue_comment") {
+    if (issueCommentId(payload) === undefined) return undefined;
+    return `${repo}#${number}`;
+  }
+  return undefined;
+}
+
+// --- Dispatch allowlist (#117) -----------------------------------------------
+
+export const GITHUB_DISPATCH_ALLOWLIST_ENV = "GITHUB_DISPATCH_ALLOWLIST";
+
+function throwDispatchAllowlistConfigError(detail) {
+  const err = new Error(`${GITHUB_DISPATCH_ALLOWLIST_ENV} ${detail}`);
+  err.code = "GITHUB_DISPATCH_ALLOWLIST_CONFIG_ERROR";
+  throw err;
+}
+
+/**
+ * Validates one `GITHUB_DISPATCH_ALLOWLIST` entry's shape, throwing a
+ * tagged config error on any violation:
+ *
+ * ```
+ * {
+ *   repo: "owner/repo",
+ *   events: [
+ *     { event: "pull_request", actions: ["opened", "synchronize"] },
+ *     { event: "issue_comment", actions: ["created"],
+ *       trustedMention: { actors: ["some-actor"], pattern: "@some-bot\\b" } }
+ *   ]
+ * }
+ * ```
+ *
+ * An `issue_comment` event entry MUST carry `trustedMention` -- there is no
+ * actor/mention gate for any other event type, so requiring it only there
+ * is deliberate, not an oversight.
+ *
+ * @param {any} entry
+ */
+function validateDispatchAllowlistEntry(entry) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    throwDispatchAllowlistConfigError("each entry must be a JSON object");
+  }
+  if (typeof entry.repo !== "string" || entry.repo.trim() === "") {
+    throwDispatchAllowlistConfigError("each entry must have a non-empty string \"repo\"");
+  }
+  if (!Array.isArray(entry.events) || entry.events.length === 0) {
+    throwDispatchAllowlistConfigError(`entry for "${entry.repo}" must have a non-empty "events" array`);
+  }
+  for (const eventEntry of entry.events) {
+    if (!eventEntry || typeof eventEntry !== "object" || Array.isArray(eventEntry)) {
+      throwDispatchAllowlistConfigError(`entry for "${entry.repo}" has a malformed "events" item`);
+    }
+    if (typeof eventEntry.event !== "string" || eventEntry.event.trim() === "") {
+      throwDispatchAllowlistConfigError(`entry for "${entry.repo}" has an "events" item missing "event"`);
+    }
+    const actions = eventEntry.actions;
+    if (!Array.isArray(actions) || actions.length === 0 || actions.some((a) => typeof a !== "string" || a === "")) {
+      throwDispatchAllowlistConfigError(
+        `entry for "${entry.repo}" event "${eventEntry.event}" must have a non-empty "actions" array of strings`
+      );
+    }
+    if (eventEntry.event === "issue_comment") {
+      const trusted = eventEntry.trustedMention;
+      const actorsOk = trusted && Array.isArray(trusted.actors) && trusted.actors.length > 0
+        && trusted.actors.every((a) => typeof a === "string" && a !== "");
+      const patternOk = trusted && typeof trusted.pattern === "string" && trusted.pattern !== "";
+      if (!actorsOk || !patternOk) {
+        throwDispatchAllowlistConfigError(
+          `entry for "${entry.repo}" permits issue_comment but is missing a valid trustedMention {actors: string[], pattern: string}`
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Reads `GITHUB_DISPATCH_ALLOWLIST` (a JSON array string): each entry names
+ * a repo, its permitted `{ event, actions[] }` combinations, and (only
+ * where `issue_comment` is permitted) a `trustedMention` condition (actor
+ * allowlist + mention pattern) -- see validateDispatchAllowlistEntry's
+ * docstring for the exact shape. Empty/unset resolves to `[]`. Malformed
+ * JSON or a shape violation throws a tagged config error (fail loud, not
+ * fail open): an allowlist that can't be parsed must never be silently
+ * treated as "allow nothing" mistaken for "allow everything," and must not
+ * crash the request pipeline either -- callers must treat a thrown resolve
+ * as "do not forward, log a config-error line," never let it propagate to a
+ * 500 back to GitHub for what is a deploy-config problem, not this
+ * delivery's fault.
+ *
+ * No repository, actor, or workflow name is hardcoded anywhere in this
+ * module -- every value here is deployment-owner configuration supplied at
+ * runtime via this env var.
+ *
+ * @param {Record<string, string | undefined>} [env]
+ * @returns {Array<{ repo: string, events: Array<{ event: string, actions: string[], trustedMention?: { actors: string[], pattern: string } }> }>}
+ */
+export function resolveDispatchAllowlist(env = process.env) {
+  const raw = env[GITHUB_DISPATCH_ALLOWLIST_ENV];
+  if (typeof raw !== "string" || raw.trim() === "") return [];
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throwDispatchAllowlistConfigError(`must be valid JSON: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (!Array.isArray(parsed)) {
+    throwDispatchAllowlistConfigError("must be a JSON array");
+  }
+  for (const entry of parsed) validateDispatchAllowlistEntry(entry);
+  return parsed;
+}
+
+/**
+ * True only if `repoFullName` has an entry permitting this `(event,
+ * action)` pair, AND, for `issue_comment` specifically, `actorLogin` is in
+ * that entry's `trustedMention.actors` AND `commentBody` matches
+ * `trustedMention.pattern` (treated as a `RegExp` source; an invalid
+ * pattern is treated as a non-match rather than throwing, since a bad
+ * pattern is caught earlier by resolveDispatchAllowlist's own validation --
+ * this is defense in depth, not the primary validation path).
+ *
+ * `commentBody` is used ONLY for this boolean pattern match -- it is never
+ * returned, logged, or included in anything this function's caller
+ * forwards (see AC-SEC-3 in docs/plans/github-webhook-agent-dispatch/ACs.md).
+ *
+ * @param {Array<{ repo: string, events: Array<{ event: string, actions: string[], trustedMention?: { actors: string[], pattern: string } }> }>} entries
+ * @param {string} event
+ * @param {string | undefined} action
+ * @param {string | undefined} repoFullName
+ * @param {string | undefined} actorLogin
+ * @param {string | undefined} commentBody
+ * @returns {boolean}
+ */
+export function matchesDispatchAllowlist(entries, event, action, repoFullName, actorLogin, commentBody) {
+  if (!Array.isArray(entries) || typeof repoFullName !== "string" || repoFullName === "") return false;
+  const repoEntry = entries.find((e) => e && e.repo === repoFullName);
+  if (!repoEntry || !Array.isArray(repoEntry.events)) return false;
+  const eventEntry = repoEntry.events.find(
+    (e) => e && e.event === event && Array.isArray(e.actions) && typeof action === "string" && e.actions.includes(action)
+  );
+  if (!eventEntry) return false;
+
+  if (event === "issue_comment") {
+    const trusted = eventEntry.trustedMention;
+    if (!trusted || !Array.isArray(trusted.actors) || typeof trusted.pattern !== "string") return false;
+    if (typeof actorLogin !== "string" || !trusted.actors.includes(actorLogin)) return false;
+    if (typeof commentBody !== "string") return false;
+    let pattern;
+    try {
+      pattern = new RegExp(trusted.pattern);
+    } catch {
+      return false;
+    }
+    return pattern.test(commentBody);
+  }
+
+  return true;
+}
+
 /**
  * Computes the GitHub webhook signature for a raw request body under a given
  * secret: `"sha256=" + hex(HMAC-SHA256(secret, rawBody))`, matching the value
