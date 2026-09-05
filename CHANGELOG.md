@@ -12,14 +12,21 @@ and uses semantic versioning.
     drift-guarded reference spec (`tests/canary-watch-patterns.test.ts`) for
     the canary's Railway service settings, scoped to exactly the wrapper
     Dockerfile's own build inputs. Railway's Config as Code is deprecated
-    and unavailable to a service adopting it for the first time, so once
-    the live service is reconnected (tracked separately, see
-    `docs/plans/canary-scoped-watch-deploy/plan.md`'s Session 2), it will
-    apply these values as native per-service settings instead of via a
-    config file — replacing the CLI/pinned model it shared with one-off
-    client instances. Once connected, docs/plans/CHANGELOG churn will no
-    longer trigger a rebuild, while a change to a watched path will. The
-    public-proof deployment and pinned client instances are unaffected.
+    and unavailable to a service adopting it for the first time, so the
+    live service applies these values as native per-service settings
+    instead of via a config file — replacing the CLI/pinned model it shared
+    with one-off client instances. The public-proof deployment and pinned
+    client instances are unaffected.
+  - The canary's Railway service is now git-connected with these settings
+    live (confirmed via config read-back and a successful deployment) and
+    "Wait for CI" enabled. An empirical push-test confirmed the scoping
+    works as intended: a docs-only commit produced no new canary
+    deployment (recorded as explicitly skipped) while the public-proof
+    service deployed normally for the same commit.
+  - `docs/live-instance-operations.md` gains a new procedure (§5.7) for
+    reconnecting a service's git source and native build/deploy settings,
+    generalized from this rollout — ordering the native-settings write
+    before the source connect, and the gotchas hit doing it live.
 
 ## [0.7.0] - 2026-09-04
 
