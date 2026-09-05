@@ -308,6 +308,55 @@ same procedure — it is itself a prod-state change, and a rollback
 applied in a hurry without a pre-flight declaration is how one incident
 becomes two.
 
+**5.7 Reconnecting a service's git source and native build/deploy settings.**
+A concrete instance of 5.1–5.5, worked out against a real
+Railway service moving from CLI-deployed (`railway up`, no git source)
+to git-connected with a scoped deploy trigger — recorded here because
+the platform-specific ordering and gotchas are not obvious from the
+general procedure above, and this exact operation recurs (any future
+service making the same transition, or a wrapper reconnect after a
+credential rotation).
+
+- **Set native build/deploy settings *before* connecting the source,
+  never after.** Connecting a git source can trigger an immediate
+  build. If the Dockerfile path, watch patterns, healthcheck, and
+  restart policy are set first, that first build already uses them; set
+  them after, and the bootstrap build runs against whatever the
+  platform auto-detects instead — a real build, on a live target, using
+  the wrong configuration.
+- **A dashboard "staged changes" draft is not applied until its own
+  explicit deploy/apply action runs — a page refresh showing the draft
+  still selected is not evidence it's live.** Read back the actual
+  applied configuration through the platform's API (not the dashboard's
+  local draft state) to confirm what's really in effect before treating
+  any staged setting as done. This bit twice in the same session: once
+  assuming a staged toggle would carry through an unrelated API call
+  that happened to also touch the source connection (it didn't — the
+  toggle silently reset to its default), and once trusting a
+  post-refresh dashboard screenshot as proof a draft had been applied
+  (it hadn't; the API read-back showed the old value).
+- **A setting can be *gated on a prior action* rather than merely
+  absent from the tooling.** Before concluding a setting isn't
+  API-settable and reaching for the dashboard as a fallback, check
+  whether the dashboard itself only exposes that control after some
+  other precondition (here: a CI-wait toggle that the platform's own
+  docs confirm only appears once a git source is already connected and
+  a matching push-triggered workflow is detected). Sequence the
+  dependent step after its precondition, not before.
+- **Never trigger a second deploy-causing action on the same service
+  while one is still in a non-terminal state (building/waiting).**
+  Apply one change, wait for it to reach `SUCCESS`/`FAILED`, then apply
+  the next. Two overlapping deploy triggers on one service risk
+  canceling the in-flight build or racing two builds against each
+  other — confirm terminal state via the platform's own deployment
+  status before starting the next mutating call.
+- **Verification (5.4) for this operation means both a config
+  read-back and a deployment outcome**, not either alone: read back the
+  live configuration to confirm the source, build settings, and any
+  gated toggle actually landed, *and* confirm the resulting deploy
+  reaches a terminal `SUCCESS` — a config read-back proves the setting
+  was accepted, not that a build with it actually completed.
+
 ## 6. Incident Annex
 
 Both operations below hit an already-provisioned live instance during
