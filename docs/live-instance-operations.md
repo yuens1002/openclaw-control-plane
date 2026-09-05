@@ -308,8 +308,8 @@ same procedure — it is itself a prod-state change, and a rollback
 applied in a hurry without a pre-flight declaration is how one incident
 becomes two.
 
-**5.7 Reconnecting a service's git source and native build/deploy
-settings.** A concrete instance of 5.1–5.5, worked out against a real
+**5.7 Reconnecting a service's git source and native build/deploy settings.**
+A concrete instance of 5.1–5.5, worked out against a real
 Railway service moving from CLI-deployed (`railway up`, no git source)
 to git-connected with a scoped deploy trigger — recorded here because
 the platform-specific ordering and gotchas are not obvious from the
