@@ -2,6 +2,12 @@
 // strict `">=X"` range, or a `"workspace:X"` link) to `"*"`, across every
 // `extensions/*/package.json` in a cloned OpenClaw checkout.
 //
+// This file is one of the canary's watched build inputs (see
+// deploy/openclaw-railway/canary.railway.toml and
+// tests/canary-watch-patterns.test.ts) -- a comment-only change here is
+// docs/plans/canary-scoped-watch-deploy's D7 positive-case push-test,
+// confirming a watched-path change actually triggers a canary redeploy.
+//
 // Extracted from the Dockerfile's own former inline `sed` loop (issue #104)
 // so both the real build (openclaw-build stage) and the lockfile-regeneration
 // path (scripts/generate-openclaw-lockfile.sh, openclaw-lockfile-refresh
