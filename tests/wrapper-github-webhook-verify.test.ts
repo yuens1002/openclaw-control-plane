@@ -7,19 +7,17 @@ import { describe, expect, it } from "vitest";
 // Issue #108 (github-webhook-verify), deliverable D3.
 //
 // Direct unit tests of scripts/wrapper-github-webhook-verify.mjs's exported
-// functions (D1). D1 is authored in parallel, against the module contract
-// pinned in docs/plans/github-webhook-verify/plan.md -- this file is written
-// against that stated contract, not against D1's source.
+// functions (D1), written against the module contract pinned in
+// docs/plans/github-webhook-verify/plan.md.
 //
 // Loaded the same way tests/openclaw-railway-wrapper-patches.test.ts loads
 // scripts/wrapper-state-export.mjs: createRequire(...)(computedPath) rather
 // than a static `import ... from "../scripts/*.mjs"`. tests/tsconfig.json has
 // rootDir "." and no allowJs, so a static import of an untyped .mjs path
 // cannot be typechecked by `tsc -b`/`pretest`; createRequire hands the file
-// to Node's own loader instead, so the missing-module failure (D1 does not
-// exist yet in this worktree) surfaces as a single runtime error scoped to
-// this file when vitest collects it, without breaking `tsc -b` for the rest
-// of the suite.
+// to Node's own loader instead, keeping any missing-module failure scoped
+// to a single runtime error in this file when vitest collects it, without
+// breaking `tsc -b` for the rest of the suite.
 const nativeRequire = createRequire(import.meta.url);
 const webhookModulePath = fileURLToPath(new URL("../scripts/wrapper-github-webhook-verify.mjs", import.meta.url));
 
@@ -32,6 +30,8 @@ interface WebhookVerifyModule {
     res: FakeRes,
     options?: { secret?: string; log?: (line: string) => void }
   ): Promise<void>;
+  resolveGithubWebhookMaxBytes(env?: Record<string, string | undefined>): number;
+  GITHUB_WEBHOOK_MAX_BODY_BYTES_ENV: string;
 }
 
 const webhook = nativeRequire(webhookModulePath) as WebhookVerifyModule;
@@ -258,6 +258,29 @@ describe("computeGithubSignature / verifyGithubSignature", () => {
     const longHeader = `sha256=${"ab".repeat(200)}`;
     expect(() => webhook.verifyGithubSignature(secret, body, longHeader)).not.toThrow();
     expect(webhook.verifyGithubSignature(secret, body, longHeader)).toBe(false);
+  });
+});
+
+// --- resolveGithubWebhookMaxBytes -------------------------------------------
+
+describe("resolveGithubWebhookMaxBytes", () => {
+  it("returns the 1 MiB default when the env var is unset or blank", () => {
+    expect(webhook.resolveGithubWebhookMaxBytes({})).toBe(1024 * 1024);
+    expect(webhook.resolveGithubWebhookMaxBytes({ [webhook.GITHUB_WEBHOOK_MAX_BODY_BYTES_ENV]: "  " })).toBe(
+      1024 * 1024
+    );
+  });
+
+  it("returns the parsed override when set to a positive integer", () => {
+    expect(webhook.resolveGithubWebhookMaxBytes({ [webhook.GITHUB_WEBHOOK_MAX_BODY_BYTES_ENV]: "2048" })).toBe(2048);
+  });
+
+  it("throws on a non-integer or non-positive override rather than silently falling back", () => {
+    for (const bad of ["0", "-5", "not-a-number", "1.5"]) {
+      expect(() => webhook.resolveGithubWebhookMaxBytes({ [webhook.GITHUB_WEBHOOK_MAX_BODY_BYTES_ENV]: bad })).toThrow(
+        webhook.GITHUB_WEBHOOK_MAX_BODY_BYTES_ENV
+      );
+    }
   });
 });
 

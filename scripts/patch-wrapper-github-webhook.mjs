@@ -1,13 +1,18 @@
 // Patches the pinned Railway wrapper with a new, wrapper-owned
 // `POST /hooks/github-webhook-verify` route that verifies a GitHub App
 // webhook delivery's `X-Hub-Signature-256` signature and responds 200/401
-// accordingly -- registered before the catch-all
-// `app.use(requireDashboardAuth, ...)` proxy to the OpenClaw gateway, so a
-// request to it never reaches the gateway at all. The verification logic
-// lives in scripts/wrapper-github-webhook-verify.mjs (copied into the image
-// as src/wrapper-github-webhook-verify.mjs); this script only injects the
-// import line and the route registration. See the Dockerfile comment above
-// the RUN step that invokes this script for the rationale.
+// accordingly -- registered before the wrapper's global
+// `app.use(express.json({ limit: "1mb" }));` body parser (the load-bearing
+// anchor -- registering after it, even while still ahead of the later
+// catch-all `app.use(requireDashboardAuth, ...)` proxy, left the route
+// functionally dead: the body parser drains the request stream first, so
+// the route's own raw-body read never sees its 'data'/'end' events fire).
+// Anchored correctly, a request to this route never reaches the gateway at
+// all. The verification logic lives in scripts/wrapper-github-webhook-verify.mjs
+// (copied into the image as src/wrapper-github-webhook-verify.mjs); this
+// script only injects the import line and the route registration. See the
+// Dockerfile comment above the RUN step that invokes this script for the
+// full rationale.
 //
 // Same shape as patch-wrapper-scoped-export.mjs: exact literal block matches
 // via String.prototype.replace, each guarded to exactly one occurrence, all
@@ -29,6 +34,14 @@ const replacements = [
     oldBlock: `import * as tar from "tar";`,
     newBlock: `import * as tar from "tar";
 import { handleGithubWebhookVerify } from "./wrapper-github-webhook-verify.mjs";`,
+    // The injected import line, checked on its own rather than as part of
+    // the full newBlock: patch-wrapper-scoped-export.mjs inserts its own
+    // import directly after this same `tar` line, so once both scripts have
+    // applied, this line is no longer necessarily *adjacent* to the tar
+    // import -- an already-applied check keyed to the full two-line block
+    // would stop matching (and silently re-apply) depending on which script
+    // ran last. The line itself is unique and adjacency-independent.
+    marker: `import { handleGithubWebhookVerify } from "./wrapper-github-webhook-verify.mjs";`,
   },
   {
     // Anchored on the global body-parser registration, NOT on the
@@ -58,18 +71,20 @@ app.post("/hooks/github-webhook-verify", (req, res) => {
 });
 
 app.use(express.json({ limit: "1mb" }));`,
+    marker: `app.post("/hooks/github-webhook-verify"`,
   },
 ];
 
 const content = fs.readFileSync(targetPath, "utf8");
 
 let failed = false;
-for (const { label, oldBlock, newBlock } of replacements) {
+for (const { label, oldBlock, newBlock, marker } of replacements) {
   // Each anchor survives inside its own replacement (a prefix for the tar
   // import, a suffix for the route registration), so an anchor count alone
-  // cannot detect a second application: also require the injected block to
-  // be absent.
-  const alreadyApplied = content.split(newBlock).length - 1;
+  // cannot detect a second application: also require the injected marker
+  // (a unique, adjacency-independent substring of newBlock -- see the tar
+  // import replacement's own comment) to be absent.
+  const alreadyApplied = content.split(marker).length - 1;
   if (alreadyApplied !== 0) {
     failed = true;
     console.error(

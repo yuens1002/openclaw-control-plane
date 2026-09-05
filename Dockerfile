@@ -241,16 +241,23 @@ RUN node --check src/wrapper-state-export.mjs
 # earlier than that. Anchoring on the catch-all alone was tried first and
 # looked correct (Express dispatches in registration order, so the route
 # still runs before the proxy) but was empirically dead in the built image:
-# express.json() is registered even earlier and unconditionally drains the
-# request stream via its own 'data'/'end' listeners, so a route registered
-# after it never sees those events fire and readRawBody hangs to its own
-# timeout on every real request. Anchoring before express.json() instead
+# express.json() is registered even earlier and drains the request stream
+# via its own 'data'/'end' listeners for any request whose Content-Type
+# matches application/json -- which every GitHub delivery does by default --
+# so a route registered after it never sees those events fire and
+# readRawBody hangs to its own timeout on every real request. (A repro using
+# a different Content-Type would not have shown this: body-parser skips the
+# stream entirely when the type doesn't match, so the failure is specific to
+# JSON deliveries, not universal.) Anchoring before express.json() instead
 # means this route reads the raw body itself before anything else can touch
 # the stream, and it is still registered ahead of the catch-all proxy, so a
-# request to it never reaches the gateway either way. `/hooks*` is already
-# exempt from the wrapper's dashboard Basic Auth (see the sed patch above,
-# "allow OpenClaw webhook endpoints to bypass dashboard auth") -- this route
-# relies on that existing exemption rather than adding a new one.
+# request to it never reaches the gateway either way. This route never
+# reaches `requireDashboardAuth` at all -- it responds and returns before
+# the catch-all that applies that gate is ever reached, registration-order.
+# `/hooks*`'s existing Basic-Auth exemption (see the sed patch above, "allow
+# OpenClaw webhook endpoints to bypass dashboard auth") is a secondary
+# safety net only, should a future template bump ever hoist
+# `requireDashboardAuth` into a global gate ahead of this route.
 #
 # Build-time wrapper patch, not an upstream change or an OpenClaw plugin, for
 # the same reason as every patch above: a plugin would mean publishing/
@@ -367,7 +374,16 @@ RUN printf '%s\n' '#!/usr/bin/env bash' 'exec node /openclaw/dist/entry.js "$@"'
 
 COPY --from=template-source /template/src ./src
 
-# The wrapper listens on Railway's injected $PORT.
+# The wrapper listens on Railway's injected $PORT (src/server.js reads
+# process.env.PORT ?? process.env.OPENCLAW_PUBLIC_PORT ?? "3000"). Pin PORT
+# to the exposed value explicitly: a platform that ever fails to inject its
+# own PORT would otherwise leave the container listening on :3000 while
+# advertising :8080 -- healthy-looking and completely unreachable, invisible
+# from inside the container or the deploy log. A runtime-injected PORT still
+# overrides this image-level default, so live behavior on Railway (which
+# does inject PORT today) is unchanged; this only closes the silent-failure
+# gap for a deploy target that doesn't.
+ENV PORT=8080
 EXPOSE 8080
 
 ENTRYPOINT ["tini", "--"]

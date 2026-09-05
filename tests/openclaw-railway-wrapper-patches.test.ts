@@ -911,10 +911,22 @@ describe("wrapper patch scripts on a synthetic server.js fixture", () => {
     expect(readFileSync(missingBodyParserAnchor, "utf8")).toBe(
       SYNTHETIC_SERVER_JS.replace(JSON_BODY_PARSER_ANCHOR, "// body parser removed")
     );
+
+    // Duplicated-anchor case for the same script (the sibling scripts above
+    // each cover their own duplicated-anchor case; this one was previously
+    // missing for patch-wrapper-github-webhook).
+    const duplicatedBodyParserAnchor = join(workDir, "duplicated-body-parser-anchor.js");
+    writeFileSync(duplicatedBodyParserAnchor, `${SYNTHETIC_SERVER_JS}\n${JSON_BODY_PARSER_ANCHOR}\n`);
+    const duplicatedBodyParser = runPatchScript(githubWebhookPatchPath, duplicatedBodyParserAnchor);
+    expect(duplicatedBodyParser.status).not.toBe(0);
+    expect(duplicatedBodyParser.stderr).toMatch(
+      /expected exactly 1 occurrence of the global JSON body-parser registration[^\n]*found 2/
+    );
+    expect(readFileSync(duplicatedBodyParserAnchor, "utf8")).toBe(`${SYNTHETIC_SERVER_JS}\n${JSON_BODY_PARSER_ANCHOR}\n`);
   });
 
-  it("without a target path both scripts print usage and exit non-zero", () => {
-    for (const scriptPath of [restartGatewayPatchPath, scopedExportPatchPath]) {
+  it("without a target path all three scripts print usage and exit non-zero", () => {
+    for (const scriptPath of [restartGatewayPatchPath, scopedExportPatchPath, githubWebhookPatchPath]) {
       const result = spawnSync(process.execPath, [scriptPath], { encoding: "utf8" });
       expect(result.status).not.toBe(0);
       expect(result.stderr).toMatch(/^usage: node patch-wrapper-/);

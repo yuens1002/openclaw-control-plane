@@ -30,6 +30,25 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 const DEFAULT_MAX_BYTES = 1024 * 1024; // 1 MiB
+export const GITHUB_WEBHOOK_MAX_BODY_BYTES_ENV = "GITHUB_WEBHOOK_MAX_BODY_BYTES";
+
+/**
+ * Resolve the raw-body byte cap: the env override when set to a positive
+ * integer, otherwise the 1 MiB default. A malformed override throws rather
+ * than silently falling back, so a typo cannot quietly lift the cap. Same
+ * pattern as wrapper-state-export.mjs's resolveStateExportMaxBytes.
+ */
+export function resolveGithubWebhookMaxBytes(env = process.env) {
+  const raw = env[GITHUB_WEBHOOK_MAX_BODY_BYTES_ENV];
+  if (raw === undefined || raw.trim() === "") return DEFAULT_MAX_BYTES;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(
+      `${GITHUB_WEBHOOK_MAX_BODY_BYTES_ENV} must be a positive integer number of bytes, got ${JSON.stringify(raw)}`,
+    );
+  }
+  return parsed;
+}
 const DEFAULT_TIMEOUT_MS = 10_000;
 const ROUTE = "/hooks/github-webhook-verify";
 
@@ -85,7 +104,7 @@ export function verifyGithubSignature(secret, rawBody, headerValue) {
  * @returns {Promise<Buffer>}
  */
 export function readRawBody(req, opts = {}) {
-  const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
+  const maxBytes = opts.maxBytes ?? resolveGithubWebhookMaxBytes();
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   return new Promise((resolve, reject) => {
     // Fast-fail if the stream has already ended before we got here -- e.g. a
@@ -166,7 +185,11 @@ export function readRawBody(req, opts = {}) {
  * - No secret configured (`options.secret` / `GITHUB_WEBHOOK_SECRET` unset)
  *   -> 404, body "Not Found", before reading the body or comparing anything.
  *   This keeps every instance that hasn't opted in inert by default.
- * - Non-POST -> 405, `Allow: POST`.
+ * - Non-POST -> 405, `Allow: POST`. Defensive: the patch script registers
+ *   this handler via `app.post(...)`, so Express's own router already
+ *   filters to POST before this handler ever runs in the deployed route --
+ *   this branch is unreachable through it today, and exists only in case
+ *   the handler is ever reused behind a method-agnostic registration.
  * - Body read failure (oversize / timeout / stream error) -> 400.
  * - Signature does not verify -> 401; logs only `{route, result:"rejected"}`
  *   -- never the payload, never the signature, never the body.
