@@ -57,6 +57,89 @@ export function resolveGithubWebhookMaxBytes(env = process.env) {
 const DEFAULT_TIMEOUT_MS = 10_000;
 const ROUTE = "/hooks/github-webhook-verify";
 
+// --- Multi-secret verification (#116) ---------------------------------------
+
+export const GITHUB_WEBHOOK_SECRETS_ENV = "GITHUB_WEBHOOK_SECRETS";
+
+function throwWebhookSecretsConfigError(detail) {
+  const err = new Error(`${GITHUB_WEBHOOK_SECRETS_ENV} ${detail}`);
+  // Tagged the same way resolveGithubWebhookMaxBytes tags its own config
+  // error, so the handler can tell "deploy misconfigured this env var"
+  // (500) apart from "this delivery's signature didn't match" (401).
+  err.code = "GITHUB_WEBHOOK_SECRETS_CONFIG_ERROR";
+  throw err;
+}
+
+/**
+ * Resolves the list of secrets a delivery's signature may be verified
+ * against. `GITHUB_WEBHOOK_SECRETS` (a JSON array of one or more non-empty
+ * strings) takes precedence when set to a non-blank value; otherwise falls
+ * back to a single-element array built from the legacy `GITHUB_WEBHOOK_SECRET`
+ * (unchanged behavior for every existing single-secret deployment); otherwise
+ * `[]`. A `GITHUB_WEBHOOK_SECRETS` value that is set but fails to parse as
+ * JSON, does not parse to an array, or contains anything other than
+ * non-empty strings throws a tagged config error -- mirroring
+ * resolveGithubWebhookMaxBytes's fail-loud-on-misconfig pattern. This never
+ * silently falls back to the legacy var, and never treats the raw string as
+ * one literal secret, because either fallback would quietly narrow the set
+ * of Apps a deployment operator believes they configured.
+ *
+ * @param {Record<string, string | undefined>} [env]
+ * @returns {string[]}
+ */
+export function resolveGithubWebhookSecrets(env = process.env) {
+  const raw = env[GITHUB_WEBHOOK_SECRETS_ENV];
+  if (typeof raw === "string" && raw.trim() !== "") {
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      throwWebhookSecretsConfigError(`must be valid JSON: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (!Array.isArray(parsed)) {
+      throwWebhookSecretsConfigError("must be a JSON array");
+    }
+    for (const entry of parsed) {
+      if (typeof entry !== "string" || entry === "") {
+        throwWebhookSecretsConfigError("every element must be a non-empty string");
+      }
+    }
+    // A deliberately-configured empty array ("[]") is accepted as-is (no
+    // secrets currently enrolled) rather than falling through to the legacy
+    // var -- an explicit GITHUB_WEBHOOK_SECRETS always wins once it's set to
+    // a non-blank value, empty or not.
+    return parsed;
+  }
+  const legacy = env.GITHUB_WEBHOOK_SECRET;
+  if (typeof legacy === "string" && legacy !== "") return [legacy];
+  return [];
+}
+
+/**
+ * True if `headerValue` verifies against ANY secret in `secrets`, using the
+ * existing timing-safe `verifyGithubSignature` for each candidate. False if
+ * `secrets` is empty. Every candidate is compared unconditionally -- the
+ * loop never short-circuits on the first match -- so a match at index 0
+ * takes observably the same number of comparisons as a match at the end (or
+ * no match at all); each individual comparison is already timing-safe via
+ * `timingSafeEqual`, and this keeps the *number of comparisons made* from
+ * also becoming an observable signal of which secret (or how many) matched.
+ * Never reveals which secret matched -- only whether at least one did.
+ *
+ * @param {string[]} secrets
+ * @param {Buffer} rawBody
+ * @param {string | undefined} headerValue
+ * @returns {boolean}
+ */
+export function verifyAnyGithubSignature(secrets, rawBody, headerValue) {
+  if (!Array.isArray(secrets) || secrets.length === 0) return false;
+  let matched = false;
+  for (const secret of secrets) {
+    if (verifyGithubSignature(secret, rawBody, headerValue)) matched = true;
+  }
+  return matched;
+}
+
 /**
  * Computes the GitHub webhook signature for a raw request body under a given
  * secret: `"sha256=" + hex(HMAC-SHA256(secret, rawBody))`, matching the value
@@ -187,17 +270,22 @@ export function readRawBody(req, opts = {}) {
  * matrix below. No dispatch, no agent involvement -- this either accepts or
  * rejects the delivery and nothing else.
  *
- * - No secret configured (`options.secret` / `GITHUB_WEBHOOK_SECRET` unset)
- *   -> 404, body "Not Found", before reading the body or comparing anything.
- *   This keeps every instance that hasn't opted in inert by default.
+ * - A configured `GITHUB_WEBHOOK_SECRETS` that fails to resolve (malformed
+ *   JSON / wrong shape) -> 500, before reading the body or comparing
+ *   anything -- a deploy-config problem, never the client's fault.
+ * - No secret configured at all (`options.secret` unset AND
+ *   `resolveGithubWebhookSecrets()` resolves to `[]`) -> 404, body
+ *   "Not Found", before reading the body or comparing anything. This keeps
+ *   every instance that hasn't opted in inert by default.
  * - Non-POST -> 405, `Allow: POST`. Defensive: the patch script registers
  *   this handler via `app.post(...)`, so Express's own router already
  *   filters to POST before this handler ever runs in the deployed route --
  *   this branch is unreachable through it today, and exists only in case
  *   the handler is ever reused behind a method-agnostic registration.
  * - Body read failure (oversize / timeout / stream error) -> 400.
- * - Signature does not verify -> 401; logs only `{route, result:"rejected"}`
- *   -- never the payload, never the signature, never the body.
+ * - Signature does not verify against ANY configured secret -> 401; logs
+ *   only `{route, result:"rejected"}` -- never the payload, never the
+ *   signature, never the body.
  * - Signature verifies -> 200, body "ok"; logs
  *   `{route, result:"accepted", event, deliveryId, repo}` where `event` and
  *   `deliveryId` come from the `X-Github-Event`/`X-Github-Delivery` headers
@@ -211,10 +299,22 @@ export function readRawBody(req, opts = {}) {
  * @returns {Promise<void>}
  */
 export async function handleGithubWebhookVerify(req, res, options = {}) {
-  const secret = options.secret ?? process.env.GITHUB_WEBHOOK_SECRET;
   const log = options.log ?? console.log;
 
-  if (!secret) {
+  let secrets;
+  try {
+    secrets = resolveSecretsForRequest(options);
+  } catch (err) {
+    if (err?.code === "GITHUB_WEBHOOK_SECRETS_CONFIG_ERROR") {
+      console.error(`[github-webhook-verify] config error: ${err.message}`);
+      res.statusCode = 500;
+      res.end();
+      return;
+    }
+    throw err;
+  }
+
+  if (secrets.length === 0) {
     res.statusCode = 404;
     res.end("Not Found");
     return;
@@ -254,7 +354,7 @@ export async function handleGithubWebhookVerify(req, res, options = {}) {
   }
 
   const headerValue = req.headers["x-hub-signature-256"];
-  if (!verifyGithubSignature(secret, rawBody, headerValue)) {
+  if (!verifyAnyGithubSignature(secrets, rawBody, headerValue)) {
     res.statusCode = 401;
     log(JSON.stringify({ route: ROUTE, result: "rejected" }));
     res.end();
@@ -280,4 +380,22 @@ export async function handleGithubWebhookVerify(req, res, options = {}) {
   );
   res.statusCode = 200;
   res.end("ok");
+}
+
+/**
+ * Resolves the secret candidates for one request. `options.secret` (a
+ * single literal secret) predates multi-secret support and is preserved
+ * for backward compatibility -- every existing caller/test that passes one
+ * secret directly keeps working byte-for-byte (AC-FN-3). Only when it's
+ * absent does this consult the new multi-secret resolver
+ * (`GITHUB_WEBHOOK_SECRETS`, falling back to legacy `GITHUB_WEBHOOK_SECRET`).
+ *
+ * @param {{ secret?: string }} options
+ * @returns {string[]}
+ */
+function resolveSecretsForRequest(options) {
+  if (typeof options.secret === "string" && options.secret !== "") {
+    return [options.secret];
+  }
+  return resolveGithubWebhookSecrets();
 }
