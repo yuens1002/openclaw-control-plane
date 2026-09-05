@@ -98,6 +98,7 @@ The canary's OpenClaw wrapper is deployed by hand today (CLI, pinned-client shap
 
 - Session 2 cannot start until Session 1's PR is merged to `main` — the reference spec (D1) and its drift guard (D2) must exist on the branch the canary's service connects to before the human confirms its settings match.
 - D6's every mutating Railway call is individually human-confirmed — this is a live, actively-used production service, not batched into one approval.
+- D6 is complete: the canary's Railway service is git-connected to `main` with "Wait for CI" enabled and its native settings (dockerfilePath, watchPatterns, healthcheck, restart policy) matching D1's reference spec, confirmed via two live config read-backs and two `SUCCESS` deployments. D7's push-tests are next — this exact commit is the intentional docs-only negative control for AC-FN-6.
 
 ## Out of Scope
 
