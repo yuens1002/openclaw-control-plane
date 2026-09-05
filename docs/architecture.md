@@ -61,26 +61,29 @@ The repository builds the wrapper image from the root `railway.toml` and
 deployments of it from the same tracked branch:
 
 - **Public-proof deployment**: sourced from root `railway.toml` via
-  Railway's Config as Code mechanism (deprecated upstream, existing
-  adopters honored until 2026-12-01 — see
-  [Railway's Config as Code docs](https://docs.railway.com/config-as-code)).
-  Declares no `watchPatterns` and deploys on every commit to the tracked
-  branch — deliberate, since this is the reference deployment proving the
-  wrapper image builds and runs cleanly, and staleness there would defeat
-  its purpose.
+  Railway's Config as Code mechanism, which Railway has deprecated in favor
+  of Infrastructure as Code — existing adopters keep working until a
+  published sunset date, after which this deployment needs its own
+  migration (see [Railway's Config as Code docs](https://docs.railway.com/config-as-code)
+  for current status and the cutoff). Declares no `watchPatterns` and
+  deploys on every commit to the tracked branch — deliberate, since this is
+  the reference deployment proving the wrapper image builds and runs
+  cleanly, and staleness there would defeat its purpose.
 - **The canary**: the one instance in continuous, heavy real-world use.
   Config as Code isn't available to it (it has never used a config file,
-  and Railway no longer allows a service to newly adopt one). Instead, its
-  Railway service is git-connected directly, with `watchPatterns` and the
-  rest of its build/deploy settings applied as native, non-deprecated
+  and Railway no longer allows a service to newly adopt one). Instead, once
+  reconnected (a live-infra step tracked separately from this repo's own
+  commits — see `docs/plans/canary-scoped-watch-deploy/plan.md`'s Session 2),
+  its Railway service is git-connected directly, with `watchPatterns` and
+  the rest of its build/deploy settings applied as native, non-deprecated
   per-service settings — the same fields Config as Code would otherwise
   express in a file, set directly instead. `deploy/openclaw-railway/canary.railway.toml`
   is committed as the readable, drift-guarded reference spec for what those
   live settings should be (see that file and
   `tests/canary-watch-patterns.test.ts`'s drift guard, which checks it
   against the Dockerfile's own `COPY` sources) — Railway does not read it.
-  A commit that doesn't touch a build-relevant path (docs, plans,
-  CHANGELOG, unrelated packages) does not trigger a rebuild.
+  Once connected, a commit that doesn't touch a build-relevant path (docs,
+  plans, CHANGELOG, unrelated packages) will not trigger a rebuild.
 
 A one-off pinned client instance (see
 [deploy/openclaw-railway/README.md](../deploy/openclaw-railway/README.md#agency-controlled-client-provisioning))

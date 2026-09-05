@@ -12,11 +12,13 @@ and uses semantic versioning.
     drift-guarded reference spec (`tests/canary-watch-patterns.test.ts`) for
     the canary's Railway service settings, scoped to exactly the wrapper
     Dockerfile's own build inputs. Railway's Config as Code is deprecated
-    and unavailable to a service adopting it for the first time, so the
-    live service applies these values as native per-service settings
-    instead of via a config file — replacing the CLI/pinned model it shared
-    with one-off client instances. Docs/plans/CHANGELOG churn no longer
-    triggers a rebuild; a change to a watched path does automatically. The
+    and unavailable to a service adopting it for the first time, so once
+    the live service is reconnected (tracked separately, see
+    `docs/plans/canary-scoped-watch-deploy/plan.md`'s Session 2), it will
+    apply these values as native per-service settings instead of via a
+    config file — replacing the CLI/pinned model it shared with one-off
+    client instances. Once connected, docs/plans/CHANGELOG churn will no
+    longer trigger a rebuild, while a change to a watched path will. The
     public-proof deployment and pinned client instances are unaffected.
 
 ## [0.7.0] - 2026-09-04
