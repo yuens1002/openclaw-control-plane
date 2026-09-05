@@ -1,0 +1,46 @@
+# Reference spec for the canary's OpenClaw wrapper service -- NOT read by
+# Railway. Railway's Config as Code (a `railway.toml`/`railway.json` file
+# wired via a service's Config File setting) is deprecated: existing
+# adopters keep working until 2026-12-01, but new services cannot opt in
+# (https://docs.railway.com/config-as-code), and the canary has never used
+# a config file. So this file is committed purely as the drift-guarded
+# source of truth for what the live service's settings should be --
+# tests/canary-watch-patterns.test.ts checks it against the Dockerfile's own
+# COPY sources, and the values below are applied to the live service
+# directly as native per-service settings (dockerfilePath, watchPatterns,
+# healthcheckPath, etc. -- all plain service-config fields, independent of
+# Config as Code) rather than via a config-file connection. See
+# docs/architecture.md's "Deployment Topology" and this directory's README
+# "The Canary" section.
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+# Scoped 1:1 to root Dockerfile's non-`--from=` COPY sources -- everything
+# else (docs, plans, CHANGELOG, other packages) has zero effect on the built
+# image and must not trigger a rebuild. Root package.json/package-lock.json
+# are never copied into this image at all (unlike a Node-workspace build),
+# so unlike other scoped-watch configs in this ecosystem there is nothing to
+# exclude here -- they were never a candidate. tests/canary-watch-patterns.test.ts
+# derives the expected set mechanically from the Dockerfile's own COPY lines
+# and fails if this list drifts from it -- a future new COPY source must be
+# added here in the same change. This file itself is deliberately NOT in the
+# list: it has zero effect on the built image (it isn't a COPY source, and
+# Railway doesn't read it), so a change to it alone must not trigger a
+# rebuild -- unlike when it was drafted as an actual config-as-code file.
+watchPatterns = [
+  "/scripts/patch-wrapper-restart-gateway.mjs",
+  "/scripts/wrapper-state-export.mjs",
+  "/scripts/patch-wrapper-scoped-export.mjs",
+  "/scripts/wrapper-github-webhook-verify.mjs",
+  "/scripts/patch-wrapper-github-webhook.mjs",
+  "/scripts/relax-openclaw-extension-versions.mjs",
+  "/deploy/openclaw-railway/openclaw.pnpm-lock.yaml",
+  "/Dockerfile",
+  "/.dockerignore"
+]
+
+[deploy]
+healthcheckPath = "/setup/healthz"
+healthcheckTimeout = 300
+restartPolicyType = "on_failure"
+requiredMountPath = "/data"
