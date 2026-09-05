@@ -1,4 +1,4 @@
-` + text + ` | PASS (QC confirmed) | |` + text + ` | PASS (QC confirmed) | |` + text + ` | PASS (QC confirmed) | |` + text + ` | PASS (QC confirmed) | |` + text + ` | PASS (QC confirmed) | |` + text + ` | PASS (QC confirmed) | |` + text + ` | PASS (QC confirmed) | |` + text + ` | PASS (QC confirmed) | |` + text + ` | PASS (QC confirmed) | |` + text + ` | PASS (QC confirmed) | |` + text + ` | PASS (QC confirmed) | |` + text + ` | PASS (QC confirmed) | |` + text + ` | PASS (QC confirmed) | |` + text + ` | PASS (QC confirmed) | |` + text + ` | PASS (QC confirmed) | |` + text + ` | PASS (QC confirmed) | |` + text + ` | PASS (QC confirmed) | |` + text + ` | PASS (QC confirmed) | |# GitHub webhook signature verification — Acceptance Criteria
+# GitHub webhook signature verification — Acceptance Criteria
 
 **Branch:** `feat/github-webhook-verify`
 **Plan:** `docs/plans/github-webhook-verify/plan.md`
