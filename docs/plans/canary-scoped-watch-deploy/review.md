@@ -58,7 +58,7 @@ None found with an existing doc home. Checked `deploy/openclaw-railway/README.md
 |---------|------|----------|------------------------------|
 | Test asserted a negative-presence check by embedding the actual forbidden identifiers in a committed test file | A | `tests/canary-watch-patterns.test.ts` (pre-`3f23d72`) | Fixed within this branch at `3f23d72`, confirmed absent at HEAD by full-diff grep. |
 | Full `git diff main..HEAD` grepped for known-sensitive patterns (identifiers, emails, credentials, URLs beyond the one legitimate Railway docs link) | — | — | No hits. |
-| `.claude/oss-hygiene-rules.json`'s denylist doesn't literally list the two `3f23d72`-removed strings | — | local, untracked | Checked: the existing `dev-yuen-agency` entry is already a superset substring match covering the actual sensitive identifier (the live project name contains it verbatim) — no gap to close. |
+| `.claude/oss-hygiene-rules.json`'s denylist doesn't literally list the two `3f23d72`-removed strings | — | local, untracked | Checked: an existing denylist entry is already a superset substring match covering the actual sensitive identifier (the live project name contains it verbatim) — no gap to close. |
 
 ## Recommendations
 

@@ -31,6 +31,8 @@ watchPatterns = [
   "/scripts/patch-wrapper-restart-gateway.mjs",
   "/scripts/wrapper-state-export.mjs",
   "/scripts/patch-wrapper-scoped-export.mjs",
+  "/scripts/wrapper-github-webhook-verify.mjs",
+  "/scripts/patch-wrapper-github-webhook.mjs",
   "/scripts/relax-openclaw-extension-versions.mjs",
   "/deploy/openclaw-railway/openclaw.pnpm-lock.yaml",
   "/Dockerfile",
