@@ -7,6 +7,36 @@ and uses semantic versioning.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-04
+
+- 2026-09-04 - feat: add signature-verified GitHub webhook route to the wrapper (#108)
+  - New wrapper-owned `POST /hooks/github-webhook-verify`, verifying a GitHub
+    App webhook delivery's `X-Hub-Signature-256` HMAC-SHA256 signature and
+    responding 200/401 -- no dispatch, no gateway involvement. Neither
+    upstream OpenClaw's generic `/hooks` gateway nor its bundled `webhooks`
+    plugin can verify this scheme (both authenticate with a static shared
+    secret; GitHub signs the raw body instead), so this is new wrapper-level
+    logic, following the exact build-time anchored-patch technique already
+    established by the scoped-export feature.
+  - Registered ahead of the wrapper's global `express.json()` body parser --
+    not merely ahead of the later dashboard-auth catch-all, which looked
+    sufficient but left the route functionally dead (every real request hung
+    to a 10s timeout and 400'd, since the body parser drained the request
+    stream first). Found and fixed during this feature's own verification,
+    with an empirical negative-control repro against the real pinned wrapper
+    confirming the fix actually discriminates.
+  - A second real bug, found during `/ocr-review`: the error path called
+    `req.destroy()` before responding on an oversize/slow body, so a real
+    client saw a connection reset instead of a clean 400. Fixed to respond
+    first and close the connection only once flushed.
+  - The route and its `GITHUB_WEBHOOK_SECRET`/`GITHUB_WEBHOOK_MAX_BODY_BYTES`
+    env vars are deliberately named generically -- not tied to one deployed
+    instance -- since this patch ships to every instance built from this
+    image; each opts in independently, out of band from this repo. Unset by
+    default, so every instance stays inert until it explicitly configures a
+    secret.
+  - Minor bump: a new capability, not a fix to existing behavior.
+
 ## [0.6.11] - 2026-08-31
 
 - 2026-08-31 - docs(ops): bring the deploy-trigger verification procedure up to three services
