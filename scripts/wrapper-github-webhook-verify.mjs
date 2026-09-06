@@ -189,6 +189,27 @@ export function verifyAnyGithubSignature(secrets, rawBody, headerValue) {
 // module provides session continuity).
 
 /**
+ * Resolves which GitHub login the issue_comment trust gate binds to for a
+ * given event -- shared by planDispatch's own trust check and
+ * forwardToAgentHook's forwarded trigger, so the two can never disagree
+ * about who "the actor" is for a delivery this gate allowed. For
+ * issue_comment specifically this is the comment's AUTHOR
+ * (comment.user.login), not whoever triggered this particular delivery
+ * (sender.login) -- they coincide for a "created" action, but the schema
+ * permits "edited"/"deleted" too, where sender is whoever performed THAT
+ * action, not the original comment's author. Every other event type has no
+ * actor-based trust gate at all, so sender.login (whoever the delivery is
+ * actually attributed to) is the only sensible value to report.
+ *
+ * @param {string} event
+ * @param {any} payload
+ * @returns {string | undefined}
+ */
+function actorLoginFor(event, payload) {
+  return event === "issue_comment" ? payload?.comment?.user?.login : payload?.sender?.login;
+}
+
+/**
  * Resolves the PR/issue resource number a payload refers to, or undefined
  * if the event type is unsupported or the field is missing/wrong-typed.
  * Shared by computeDedupKey and forwardToAgentHook's trigger-building so
@@ -576,7 +597,7 @@ export async function forwardToAgentHook(dispatchKey, event, payload, options = 
     event,
     repo: payload?.repository?.full_name,
     resource: resourceNumberFor(event, payload),
-    actor: payload?.sender?.login,
+    actor: actorLoginFor(event, payload),
     deliveryId: payload?.deliveryId,
   };
 
@@ -971,19 +992,24 @@ function planDispatch({ event, payload, dedupStore }) {
   try {
     allowlist = resolveDispatchAllowlist();
   } catch (err) {
-    console.error(`[github-webhook-verify] config error: ${err instanceof Error ? err.message : String(err)}`);
+    // Do NOT log err.message here: several of validateDispatchAllowlistEntry's
+    // own error strings deliberately embed the offending repo/event/actor
+    // value (useful to whoever is directly debugging their own malformed
+    // config), but that same descriptive detail becomes deployment-owner
+    // configuration leaking into this process's own logs the moment it's
+    // logged here -- same redaction discipline as the JSON.parse failure
+    // sites above (env var name + error code only, never content).
+    const code = err && typeof err === "object" && "code" in err ? err.code : "UNKNOWN";
+    console.error(`[github-webhook-verify] config error: ${GITHUB_DISPATCH_ALLOWLIST_ENV} is misconfigured (${code})`);
     return { dispatch: "config-error" };
   }
 
   const repoFullName = payload?.repository?.full_name;
   const action = payload?.action;
-  // For issue_comment, the trust gate must bind to whoever AUTHORED the
-  // comment text being pattern-matched below (comment.user.login), not
-  // whoever triggered this particular delivery (sender.login) -- they
-  // coincide for a "created" action, but the issue_comment schema permits
-  // "edited"/"deleted" too, where sender is whoever performed THAT action,
-  // not the original comment's author.
-  const actorLogin = event === "issue_comment" ? payload?.comment?.user?.login : payload?.sender?.login;
+  // actorLoginFor is the SAME function forwardToAgentHook's trigger uses --
+  // the trust gate and the forwarded trigger must never disagree about who
+  // "the actor" is for a delivery this gate allowed.
+  const actorLogin = actorLoginFor(event, payload);
   // commentBody is read here ONLY to hand to matchesDispatchAllowlist's
   // pattern check immediately below -- it is never logged, never assigned
   // into the forwarded trigger, and never passed to forwardToAgentHook

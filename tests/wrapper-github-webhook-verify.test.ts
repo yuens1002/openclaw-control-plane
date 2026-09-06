@@ -1067,8 +1067,12 @@ describe("forwardToAgentHook", () => {
     const payload = {
       repository: { full_name: "forward-owner/forward-repo" },
       issue: { number: 77 },
-      sender: { login: "forward-actor" },
-      comment: { id: 321, body: marker },
+      sender: { login: "someone-else-triggered-this-delivery" },
+      // actorLoginFor reads comment.user.login for issue_comment (the
+      // comment's AUTHOR), not sender.login (whoever triggered this
+      // particular delivery) -- deliberately different values here to prove
+      // trigger.actor below reflects the former, not the latter.
+      comment: { id: 321, body: marker, user: { login: "forward-actor" } },
       deliveryId: "delivery-abc-123"
     };
 
@@ -1555,6 +1559,86 @@ describe("handleGithubWebhookVerify -- dispatch wiring", () => {
       else process.env.GITHUB_DISPATCH_ALLOWLIST = originalAllowlist;
       if (originalSecret === undefined) delete process.env.GITHUB_WEBHOOK_SECRET;
       else process.env.GITHUB_WEBHOOK_SECRET = originalSecret;
+    }
+  });
+
+  // Copilot review round 2: distinct from the parse-failure case above --
+  // this is a well-formed JSON array that fails SHAPE validation, and
+  // validateDispatchAllowlistEntry's own error messages deliberately embed
+  // the offending repo/event/actor value (useful to whoever is directly
+  // debugging their config). planDispatch's console.error call must not
+  // relay that descriptive detail into this process's own logs.
+  it("never logs the raw repo/event content from a shape-validation failure (distinct from a JSON parse failure)", async () => {
+    const originalAllowlist = process.env.GITHUB_DISPATCH_ALLOWLIST;
+    const originalSecret = process.env.GITHUB_WEBHOOK_SECRET;
+    const distinctiveRepoName = "leak-probe-owner/leak-probe-repo-should-never-be-logged";
+    // Well-formed JSON, but a duplicate "events" entry for the same event --
+    // a real shape violation, not a parse failure -- so the thrown message
+    // is validateDispatchAllowlistEntry's own descriptive text, not the
+    // length-only JSON.parse-failure message the test above already covers.
+    process.env.GITHUB_DISPATCH_ALLOWLIST = JSON.stringify([
+      {
+        repo: distinctiveRepoName,
+        events: [
+          { event: "pull_request", actions: ["opened"] },
+          { event: "pull_request", actions: ["synchronize"] }
+        ]
+      }
+    ]);
+    process.env.GITHUB_WEBHOOK_SECRET = TEST_SECRET;
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const payload = prPayload({ repo: "leak-probe-owner/other-repo", number: 88, sha: "sha-leak-probe" });
+      const rawBody = Buffer.from(JSON.stringify(payload));
+      const signature = webhook.computeGithubSignature(TEST_SECRET, rawBody);
+      const req = createFakeReq({
+        method: "POST",
+        headers: { "x-hub-signature-256": signature, "x-github-event": "pull_request" },
+        body: rawBody,
+      });
+      const res = createFakeRes();
+      await webhook.handleGithubWebhookVerify(req, res, {});
+      expect(res.statusCode).toBe(200);
+      expect(errorSpy).toHaveBeenCalled();
+      const loggedText = errorSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(loggedText).toContain("config error");
+      expect(loggedText).toContain("GITHUB_DISPATCH_ALLOWLIST_CONFIG_ERROR");
+      expect(loggedText).not.toContain(distinctiveRepoName);
+    } finally {
+      errorSpy.mockRestore();
+      if (originalAllowlist === undefined) delete process.env.GITHUB_DISPATCH_ALLOWLIST;
+      else process.env.GITHUB_DISPATCH_ALLOWLIST = originalAllowlist;
+      if (originalSecret === undefined) delete process.env.GITHUB_WEBHOOK_SECRET;
+      else process.env.GITHUB_WEBHOOK_SECRET = originalSecret;
+    }
+  });
+
+  // Copilot review round 2: forwardToAgentHook's trigger.actor must agree
+  // with the trust gate that decided to forward this delivery in the first
+  // place -- both now go through the same actorLoginFor helper.
+  it("forwards trigger.actor as the comment author (comment.user.login), not the delivery's sender, for issue_comment", async () => {
+    const originalAllowlist = process.env.GITHUB_DISPATCH_ALLOWLIST;
+    const repo = "actor-parity-owner/actor-parity-repo";
+    process.env.GITHUB_DISPATCH_ALLOWLIST = allowlistEnv(repo).GITHUB_DISPATCH_ALLOWLIST;
+    try {
+      // sender.login (the account performing THIS delivery's action) is
+      // deliberately different from comment.user.login (who authored the
+      // comment text the trust gate matched against).
+      const payload = issueCommentPayload({ repo, number: 21, commentId: 5, actor: "trusted-actor", body: "@bot please act" });
+      (payload as { sender: { login: string } }).sender = { login: "someone-else-entirely" };
+      const req = createSignedRequest(payload, { event: "issue_comment", deliveryId: "delivery-actor-parity-1" });
+      const res = createFakeRes();
+      const { fetchImpl, calls } = createStubFetch();
+
+      await webhook.handleGithubWebhookVerify(req, res, { secret: TEST_SECRET, dedupStore: new Set(), forward: { fetchImpl } });
+
+      expect(res.statusCode).toBe(200);
+      expect(calls).toHaveLength(1);
+      const sentBody = JSON.parse(String(calls[0]?.init["body"])) as { trigger: { actor: string } };
+      expect(sentBody.trigger.actor).toBe("trusted-actor");
+    } finally {
+      if (originalAllowlist === undefined) delete process.env.GITHUB_DISPATCH_ALLOWLIST;
+      else process.env.GITHUB_DISPATCH_ALLOWLIST = originalAllowlist;
     }
   });
 });
