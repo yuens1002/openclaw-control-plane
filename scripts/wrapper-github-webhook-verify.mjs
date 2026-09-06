@@ -564,21 +564,25 @@ export function resolveAgentHookUrl(env = process.env) {
 }
 
 /**
- * POSTs `{ sessionKey, idempotencyKey, trigger: { event, repo, resource, actor, deliveryId } }`
+ * POSTs `{ sessionKey, idempotencyKey?, trigger: { event, repo, resource, actor, deliveryId } }`
  * -- explicitly NOT the raw comment/PR body, only these labeled,
  * non-executable metadata fields pulled off `payload` -- to
  * `options.hookUrl` (default `resolveAgentHookUrl()`) with
  * `options.hookToken` (default `process.env[OPENCLAW_AGENT_HOOK_TOKEN_ENV]`)
  * as a bearer token header, matching the `Authorization: Bearer <token>`
  * convention the pinned wrapper's own gateway proxy already uses (see
- * comment block above). `idempotencyKey` (the GitHub delivery id) lets the
- * gateway's own replay cache return the same runId instead of re-dispatching
- * if an identical delivery id reaches it again AFTER a prior dispatch
- * already succeeded -- a narrower case than this wrapper's own dedup-key
- * release on a FAILED forward (see the dedup key computation section
- * above), which exists precisely so a delivery that never reached a
- * successful dispatch can still be retried; the gateway's cache has nothing
- * stored for it yet in that case, so the two mechanisms don't conflict.
+ * comment block above). `idempotencyKey` is set to `trigger.deliveryId` and
+ * therefore OMITTED from the body entirely (never sent as a literal
+ * `"undefined"`) when the payload carries no delivery id -- JSON.stringify
+ * drops an undefined-valued key at any nesting depth. When present, it (the
+ * GitHub delivery id) lets the gateway's own replay cache return the same
+ * runId instead of re-dispatching if an identical delivery id reaches it
+ * again AFTER a prior dispatch already succeeded -- a narrower case than
+ * this wrapper's own dedup-key release on a FAILED forward (see the dedup
+ * key computation section above), which exists precisely so a delivery
+ * that never reached a successful dispatch can still be retried; the
+ * gateway's cache has nothing stored for it yet in that case, so the two
+ * mechanisms don't conflict.
  *
  * The wire field is named `sessionKey` because that's the gateway hook
  * schema's own field name -- not a claim that this call resumes anything.

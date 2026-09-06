@@ -276,15 +276,18 @@ opt-in per repository:
   `/hooks/agent` request's `sessionKey` field -- purely a label on the
   resulting session-store entry, since `/hooks/agent` starts a fresh,
   isolated turn on every dispatch regardless of the key supplied.
-- The forwarded request body is exactly `{ sessionKey, idempotencyKey,
+- The forwarded request body is exactly `{ sessionKey, idempotencyKey?,
   trigger: { event, repo, resource, actor, deliveryId } }` -- labeled
   metadata only, no `message` field. The raw comment/PR body text is never
   included. (`sessionKey` here is the gateway hook schema's own field
-  name, not a claim of session continuity. `idempotencyKey` -- the GitHub
-  delivery id -- lets the gateway's own replay cache return a cached
-  result instead of re-dispatching if the identical delivery id reaches it
-  again after a prior dispatch already succeeded; it does not affect this
-  wrapper's own dedup-key release on a failed forward, which exists so a
+  name, not a claim of session continuity. `idempotencyKey` is present
+  only when the delivery carries a `deliveryId` -- omitted entirely,
+  never sent as a literal `"undefined"`, otherwise. When present, it --
+  the GitHub delivery id -- lets the gateway's own replay cache return a
+  cached result instead of re-dispatching if the identical delivery id
+  reaches it again after a prior dispatch already succeeded; it does not
+  affect this wrapper's own dedup-key release on a failed forward, which
+  exists so a
   delivery that never reached a successful dispatch can still be retried.)
 - **The target URL's bare default is not usable in production as-is.**
   It resolves to `http://<INTERNAL_GATEWAY_HOST>:<INTERNAL_GATEWAY_PORT>/hooks/agent`
