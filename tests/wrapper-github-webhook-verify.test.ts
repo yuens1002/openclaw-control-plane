@@ -544,7 +544,7 @@ describe("handleGithubWebhookVerify", () => {
 });
 
 // ============================================================================
-// Issue #116 -- multi-secret verify -- and #117 -- dedup/session keys,
+// Issue #116 -- multi-secret verify -- and #117 -- dedup key computation,
 // dispatch allowlist, forwarding to /hooks/agent -- deliverable D4.
 //
 // Module contract: docs/plans/github-webhook-agent-dispatch/plan.md.
@@ -592,12 +592,22 @@ function issueCommentPayload(
 ) {
   const repo = overrides.repo ?? "adversarial-öwner/répo-🐙";
   const number = overrides.number ?? 8842;
+  const actor = overrides.actor ?? "adversarial-actor";
   return {
     action: overrides.action ?? "created",
     issue: { number },
-    comment: { id: overrides.commentId ?? 555, body: overrides.body ?? "COMMENT-BODY-MARKER-should-never-be-forwarded" },
+    // comment.user.login mirrors sender.login here (the common "created by
+    // the same actor who authored the comment" case) -- the trust gate
+    // reads comment.user.login specifically so it stays bound to whoever
+    // authored the TEXT being pattern-matched, not whoever triggered this
+    // particular delivery (they can differ on "edited"/"deleted").
+    comment: {
+      id: overrides.commentId ?? 555,
+      body: overrides.body ?? "COMMENT-BODY-MARKER-should-never-be-forwarded",
+      user: { login: actor }
+    },
     repository: { full_name: repo },
-    sender: { login: overrides.actor ?? "adversarial-actor" }
+    sender: { login: actor }
   };
 }
 
@@ -684,9 +694,16 @@ describe("resolveGithubWebhookSecrets", () => {
   });
 
   it("throws a tagged config error on invalid JSON, rather than treating the raw string as one secret", () => {
-    const thrown = captureThrown(() => webhook.resolveGithubWebhookSecrets({ GITHUB_WEBHOOK_SECRETS: "{not valid json" }));
+    const rawInput = "{not valid json -- s3cr3t-leak-probe";
+    const thrown = captureThrown(() => webhook.resolveGithubWebhookSecrets({ GITHUB_WEBHOOK_SECRETS: rawInput }));
     expect(thrown.code).toBe("GITHUB_WEBHOOK_SECRETS_CONFIG_ERROR");
     expect(thrown.message).toContain("GITHUB_WEBHOOK_SECRETS");
+    // The unit-level twin of the handler-level no-leak test above: confirms
+    // resolveGithubWebhookSecrets itself never echoes the raw input into its
+    // own thrown message, not just that the handler's console.error line
+    // doesn't (a fix at one layer without the other would still leak to any
+    // future caller that logs err.message directly).
+    expect(thrown.message).not.toContain(rawInput);
   });
 
   it("throws when GITHUB_WEBHOOK_SECRETS parses to valid JSON that is not an array", () => {
@@ -794,9 +811,11 @@ describe("resolveDispatchAllowlist", () => {
     expect(entries[0]?.repo).toBe("allow-owner/allow-repo");
   });
 
-  it("throws a tagged config error on invalid JSON", () => {
-    const thrown = captureThrown(() => webhook.resolveDispatchAllowlist({ GITHUB_DISPATCH_ALLOWLIST: "[not valid" }));
+  it("throws a tagged config error on invalid JSON, never echoing the raw input in its own message", () => {
+    const rawInput = "[not valid -- decoy-repo-secret-91";
+    const thrown = captureThrown(() => webhook.resolveDispatchAllowlist({ GITHUB_DISPATCH_ALLOWLIST: rawInput }));
     expect(thrown.code).toBe("GITHUB_DISPATCH_ALLOWLIST_CONFIG_ERROR");
+    expect(thrown.message).not.toContain(rawInput);
   });
 
   it("throws when an entry is missing events", () => {
@@ -1066,7 +1085,7 @@ describe("handleGithubWebhookVerify -- dispatch wiring", () => {
   }
 
   // AC-FN-13 (allowed path)
-  it("a verified, allowlisted, non-duplicate delivery results in exactly one forward call using the session key, and still responds 200", async () => {
+  it("a verified, allowlisted, non-duplicate delivery results in exactly one forward call using the dedup key as its session-store label, and still responds 200", async () => {
     const originalAllowlist = process.env.GITHUB_DISPATCH_ALLOWLIST;
     const repo = "dispatch-owner/dispatch-repo-allowed";
     process.env.GITHUB_DISPATCH_ALLOWLIST = allowlistEnv(repo).GITHUB_DISPATCH_ALLOWLIST;
@@ -1205,7 +1224,7 @@ describe("handleGithubWebhookVerify -- dispatch wiring", () => {
   // AC-SEC-2: the dispatch outcome logged alongside {route, result} is a
   // bounded value, and no log line ever includes the session key, dedup
   // key, raw allowlist config, or comment body.
-  it("logs a bounded dispatch outcome and never leaks the session key, allowlist config, or comment body", async () => {
+  it("logs a bounded dispatch outcome and never leaks the dedup key, allowlist config, or comment body", async () => {
     const originalAllowlist = process.env.GITHUB_DISPATCH_ALLOWLIST;
     const repo = "log-hygiene-owner/log-hygiene-repo";
     process.env.GITHUB_DISPATCH_ALLOWLIST = allowlistEnv(repo).GITHUB_DISPATCH_ALLOWLIST;
@@ -1214,7 +1233,7 @@ describe("handleGithubWebhookVerify -- dispatch wiring", () => {
       const payload = issueCommentPayload({ repo, number: 12, commentId: 1, actor: "trusted-actor", body: `@bot ${secretMarker}` });
       const req = createSignedRequest(payload, { event: "issue_comment", deliveryId: "delivery-log-hygiene-1" });
       const res = createFakeRes();
-      const { fetchImpl } = createStubFetch();
+      const { fetchImpl, calls } = createStubFetch();
       const logged: string[] = [];
 
       await webhook.handleGithubWebhookVerify(req, res, {
@@ -1228,9 +1247,19 @@ describe("handleGithubWebhookVerify -- dispatch wiring", () => {
       const dispatchLine = logged.find((line) => parseLoggedLine(line).dispatch !== undefined);
       expect(dispatchLine).toBeDefined();
       const parsedDispatch = dispatchLine === undefined ? undefined : parseLoggedLine(dispatchLine).dispatch;
-      expect(["forwarded", "not-enrolled", "no-match", "duplicate", "config-error"]).toContain(parsedDispatch);
+      // This payload IS a trusted actor with a matching mention against a
+      // configured allowlist entry -- assert the actual outcome ("forwarded"),
+      // not just bounded membership in the five possible values. A vacuous
+      // version of this assertion would pass identically whether the trust
+      // gate correctly forwarded or silently rejected everyone.
+      expect(parsedDispatch).toBe("forwarded");
+      expect(calls).toHaveLength(1);
+      const sentBody = JSON.parse(String(calls[0]?.init["body"])) as { sessionKey: string };
+      expect(sentBody.sessionKey).toBe(webhook.computeDedupKey("issue_comment", payload));
       for (const line of logged) {
         expect(line).not.toContain(secretMarker);
+        expect(line).not.toContain("@bot");
+        expect(line).not.toContain("trusted-actor");
         expect(line).not.toContain(webhook.computeDedupKey("issue_comment", payload) ?? "unreachable-dedup-key");
       }
     } finally {
@@ -1320,6 +1349,35 @@ describe("handleGithubWebhookVerify -- dispatch wiring", () => {
     }
   });
 
+  // Handler-level end-to-end angle on multi-secret verification: every
+  // dispatch-wiring test elsewhere in this suite passes `secret: TEST_SECRET`
+  // directly, which short-circuits resolveSecretsForRequest before it ever
+  // consults GITHUB_WEBHOOK_SECRETS -- so a regression collapsing
+  // verifyAnyGithubSignature back to "only try secrets[0]" would pass every
+  // other test in this file. Sign with the SECOND configured secret and
+  // confirm the request still verifies through the real env-driven path.
+  it("verifies a delivery signed with the second of two configured GITHUB_WEBHOOK_SECRETS, through the full handler (not just the unit-level resolver)", async () => {
+    const originalSecrets = process.env.GITHUB_WEBHOOK_SECRETS;
+    const originalLegacy = process.env.GITHUB_WEBHOOK_SECRET;
+    const secondSecret = "second-configured-secret-not-first";
+    delete process.env.GITHUB_WEBHOOK_SECRET;
+    process.env.GITHUB_WEBHOOK_SECRETS = JSON.stringify([TEST_SECRET, secondSecret]);
+    try {
+      const payload = { repository: { full_name: "multi-secret-owner/multi-secret-repo" } };
+      const rawBody = Buffer.from(JSON.stringify(payload));
+      const signature = webhook.computeGithubSignature(secondSecret, rawBody); // NOT the first configured secret
+      const req = createFakeReq({ method: "POST", headers: { "x-hub-signature-256": signature }, body: rawBody });
+      const res = createFakeRes();
+      await webhook.handleGithubWebhookVerify(req, res); // no options.secret override -- purely env-driven
+      expect(res.statusCode).toBe(200);
+    } finally {
+      if (originalSecrets === undefined) delete process.env.GITHUB_WEBHOOK_SECRETS;
+      else process.env.GITHUB_WEBHOOK_SECRETS = originalSecrets;
+      if (originalLegacy === undefined) delete process.env.GITHUB_WEBHOOK_SECRET;
+      else process.env.GITHUB_WEBHOOK_SECRET = originalLegacy;
+    }
+  });
+
   it("responds 500 and attempts no dispatch when GITHUB_WEBHOOK_SECRETS is malformed", async () => {
     const originalSecrets = process.env.GITHUB_WEBHOOK_SECRETS;
     process.env.GITHUB_WEBHOOK_SECRETS = "not valid json";
@@ -1368,7 +1426,12 @@ describe("handleGithubWebhookVerify -- dispatch wiring", () => {
     process.env.GITHUB_WEBHOOK_SECRET = TEST_SECRET;
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
-      const payload = { repository: { full_name: "parity-owner/parity-repo" }, action: "opened" };
+      // Must be a well-formed pull_request payload (repo, number, head.sha)
+      // so computeDedupKey resolves and planDispatch actually reaches
+      // resolveDispatchAllowlist() -- a payload missing those fields returns
+      // "not-enrolled" before the allowlist is ever parsed, which would make
+      // this test pass vacuously regardless of whether the leak fix works.
+      const payload = prPayload({ repo: "parity-owner/parity-repo", number: 77, sha: "sha-parity-leak-test" });
       const rawBody = Buffer.from(JSON.stringify(payload));
       const signature = webhook.computeGithubSignature(TEST_SECRET, rawBody);
       const req = createFakeReq({
@@ -1381,7 +1444,9 @@ describe("handleGithubWebhookVerify -- dispatch wiring", () => {
       // A malformed allowlist fails closed on the DISPATCH decision only --
       // the delivery itself still verified, so the HTTP response is 200.
       expect(res.statusCode).toBe(200);
+      expect(errorSpy).toHaveBeenCalled();
       const loggedText = errorSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(loggedText).toContain("config error");
       expect(loggedText).not.toContain(leakCandidate);
     } finally {
       errorSpy.mockRestore();

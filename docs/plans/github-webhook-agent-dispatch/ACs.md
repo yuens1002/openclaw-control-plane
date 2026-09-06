@@ -9,8 +9,11 @@
 
 Extends `POST /hooks/github-webhook-verify` (#108) with multi-secret
 verification (#116) and forwarding of accepted, allowlisted deliveries to
-OpenClaw's native `POST /hooks/agent` (#117), under a session key stable
-per PR/issue distinct from the dedup key. No UI in this repo — `/ui-verify`
+OpenClaw's native `POST /hooks/agent` (#117), using one dedup key (repo +
+resource#) for both the forward decision and the dispatch label — not a
+separate session key, since `/hooks/agent` never resumes a prior turn's
+context regardless of what key it's given (confirmed against OpenClaw's own
+source; see the plan's Corrected note). No UI in this repo — `/ui-verify`
 does not apply.
 
 ---

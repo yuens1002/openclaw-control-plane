@@ -7,6 +7,13 @@ and uses semantic versioning.
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-09-06
+
+- feat: verify GitHub webhook deliveries against multiple configured secrets and forward allowlisted deliveries to OpenClaw's native `POST /hooks/agent`
+  - `GITHUB_WEBHOOK_SECRETS` (#116): a JSON array of secrets, any of which may verify a delivery's signature — supports a deployment with more than one GitHub App identity delivering to this route.
+  - `GITHUB_DISPATCH_ALLOWLIST` (#117): per-repo, per-event/action dispatch enrollment, with a `trustedMention` actor+pattern gate for `issue_comment`. A stable dedup key (repo + resource# + observed head/comment) decides whether to forward and doubles as the `/hooks/agent` request's session-store label — `/hooks/agent` never resumes a prior turn's context regardless of what key it's given, confirmed against OpenClaw's own source; an earlier draft's separate session-key design was corrected before shipping.
+  - `/ocr-review` pass (two Fable-5 bundles) found and fixed: a failed forward permanently consuming its dedup key, a silently-shadowed duplicate allowlist entry, an unvalidated `trustedMention.pattern` regex, the issue_comment trust gate keying on the wrong actor field, and several vacuous test assertions.
+
 ## [0.7.1] - 2026-09-05
 
 - build(railway): scope the canary's OpenClaw wrapper deploy trigger

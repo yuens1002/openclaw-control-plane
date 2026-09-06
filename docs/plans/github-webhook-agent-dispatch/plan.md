@@ -13,7 +13,7 @@ Extend the wrapper's verified GitHub webhook route (`POST /hooks/github-webhook-
 
 - `scripts/wrapper-github-webhook-verify.mjs`'s `handleGithubWebhookVerify` reads exactly one secret (`options.secret ?? process.env.GITHUB_WEBHOOK_SECRET`), verifies it, logs `{route, result, event, deliveryId, repo}` on success, and returns. No forwarding of any kind happens today.
 - A deployment may have more than one GitHub App delivering to this route (each App signs with its own webhook secret) — today only one secret is checked, so a second App's deliveries would be rejected.
-- OpenClaw's `POST /hooks/agent` is a native gateway endpoint (`hooks.enabled`/`hooks.token`/`hooks.path` in `openclaw.json`) that runs an agent turn under a caller-scoped session key. It runs in the same OpenClaw gateway process this wrapper route is deliberately registered *ahead of* (see #108's plan — the route never reaches the gateway). Reaching `/hooks/agent` from this route therefore means an explicit HTTP call from the wrapper process to the gateway process, not an in-process function call. **The exact local address/port and how the wrapper already knows it (if it does) is not yet confirmed — the first concrete step of D3 is inspecting the pinned wrapper's `src/server.js` for its own existing gateway-proxy target, the same empirical method #108 used to find the body-parser ordering issue, rather than assuming a value.**
+- OpenClaw's `POST /hooks/agent` is a native gateway endpoint (`hooks.enabled`/`hooks.token`/`hooks.path` in `openclaw.json`) that runs an **isolated** agent turn — it never resumes a prior turn's context regardless of what session key it's given (see the Corrected note above). It runs in the same OpenClaw gateway process this wrapper route is deliberately registered *ahead of* (see #108's plan — the route never reaches the gateway). Reaching `/hooks/agent` from this route therefore means an explicit HTTP call from the wrapper process to the gateway process, not an in-process function call. **The exact local address/port and how the wrapper already knows it (if it does) is not yet confirmed — the first concrete step of D3 is inspecting the pinned wrapper's `src/server.js` for its own existing gateway-proxy target, the same empirical method #108 used to find the body-parser ordering issue, rather than assuming a value.**
 
 ## Approach
 
@@ -134,7 +134,7 @@ export async function forwardToAgentHook(dispatchKey: string, event: string, pay
 
 ## Dependencies
 
-None internal. External, owned by the private governance issue: configuring `GITHUB_WEBHOOK_SECRETS` and `GITHUB_DISPATCH_ALLOWLIST` as real Railway values, registering the second GitHub App's webhook, provisioning its secret, and confirming `/hooks/agent` supports resuming a session by caller-supplied key on the target deployment (a blocking prerequisite for D3 to be useful in production — see #117's Out of Scope) — none of this is testable or buildable from within this repo.
+None internal. External, owned by the private governance issue: configuring `GITHUB_WEBHOOK_SECRETS` and `GITHUB_DISPATCH_ALLOWLIST` as real Railway values, and registering the second GitHub App's webhook plus provisioning its secret on the target deployment — none of this is testable or buildable from within this repo. (The earlier draft of this dependency named session-resumption support as a blocking prerequisite for D3; that's resolved — see the Corrected note above — D3 never needed it.)
 
 ## Out of Scope
 

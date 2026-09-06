@@ -23,9 +23,15 @@
 // header. A GitHub App webhook delivery never sends the secret itself -- it
 // HMAC-SHA256-signs the raw request body and sends the digest in
 // `X-Hub-Signature-256`. Neither existing mechanism can verify that scheme, so
-// this route exists purely to check the signature and respond 200/401 -- no
-// dispatch, no agent involvement, no gateway process involvement. See
-// docs/plans/github-webhook-verify/plan.md for the full rationale.
+// this route exists to check the signature and respond 200/401 based on that
+// check alone -- verification itself never talks to the gateway process. (An
+// accepted, allowlisted delivery may additionally be forwarded to the
+// gateway's own `/hooks/agent` endpoint AFTER that response is sent -- see
+// the "Forwarding to OpenClaw's /hooks/agent" section below and
+// docs/plans/github-webhook-agent-dispatch/plan.md -- but that dispatch
+// decision never changes the response GitHub receives.) See
+// docs/plans/github-webhook-verify/plan.md for the verification route's own
+// original rationale.
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 
@@ -288,6 +294,7 @@ function validateDispatchAllowlistEntry(entry) {
   if (!Array.isArray(entry.events) || entry.events.length === 0) {
     throwDispatchAllowlistConfigError(`entry for "${entry.repo}" must have a non-empty "events" array`);
   }
+  const seenEvents = new Set();
   for (const eventEntry of entry.events) {
     if (!eventEntry || typeof eventEntry !== "object" || Array.isArray(eventEntry)) {
       throwDispatchAllowlistConfigError(`entry for "${entry.repo}" has a malformed "events" item`);
@@ -295,6 +302,18 @@ function validateDispatchAllowlistEntry(entry) {
     if (typeof eventEntry.event !== "string" || eventEntry.event.trim() === "") {
       throwDispatchAllowlistConfigError(`entry for "${entry.repo}" has an "events" item missing "event"`);
     }
+    if (seenEvents.has(eventEntry.event)) {
+      // matchesDispatchAllowlist's .find() would silently pick only the
+      // FIRST "events" item for a repeated event name -- a second item
+      // (e.g. meant to add a different trustedMention actor) would be
+      // parsed successfully but permanently ignored, with no config-error
+      // to say so. Reject at validation time instead of degrading to a
+      // silent partial grant.
+      throwDispatchAllowlistConfigError(
+        `entry for "${entry.repo}" has more than one "events" item for event "${eventEntry.event}" -- merge them into one item with combined actions/trustedMention instead`
+      );
+    }
+    seenEvents.add(eventEntry.event);
     const actions = eventEntry.actions;
     if (!Array.isArray(actions) || actions.length === 0 || actions.some((a) => typeof a !== "string" || a === "")) {
       throwDispatchAllowlistConfigError(
@@ -309,6 +328,20 @@ function validateDispatchAllowlistEntry(entry) {
       if (!actorsOk || !patternOk) {
         throwDispatchAllowlistConfigError(
           `entry for "${entry.repo}" permits issue_comment but is missing a valid trustedMention {actors: string[], pattern: string}`
+        );
+      }
+      // matchesDispatchAllowlist's own docstring claims an invalid pattern
+      // is "caught earlier by resolveDispatchAllowlist's own validation" --
+      // that claim was false until this check: actually compile the regex
+      // here so a malformed pattern fails loud at config-resolve time
+      // instead of silently producing "no-match" on every issue_comment
+      // forever, indistinguishable in logs from a genuinely untrusted actor.
+      try {
+        // eslint-disable-next-line no-new -- validating compile-ability only
+        new RegExp(trusted.pattern);
+      } catch {
+        throwDispatchAllowlistConfigError(
+          `entry for "${entry.repo}" has an invalid trustedMention.pattern regular expression`
         );
       }
     }
@@ -353,6 +386,18 @@ export function resolveDispatchAllowlist(env = process.env) {
     throwDispatchAllowlistConfigError("must be a JSON array");
   }
   for (const entry of parsed) validateDispatchAllowlistEntry(entry);
+  const seenRepos = new Set();
+  for (const entry of parsed) {
+    // Same reasoning as the per-entry duplicate-event check above, at the
+    // repo dimension: matchesDispatchAllowlist's .find() would silently use
+    // only the FIRST entry for a repeated repo name.
+    if (seenRepos.has(entry.repo)) {
+      throwDispatchAllowlistConfigError(
+        `has more than one entry for repo "${entry.repo}" -- merge them into one entry with combined events instead`
+      );
+    }
+    seenRepos.add(entry.repo);
+  }
   return parsed;
 }
 
@@ -657,8 +702,9 @@ export function readRawBody(req, opts = {}) {
 /**
  * Handles `POST /hooks/github-webhook-verify`: verifies the GitHub App
  * webhook signature and responds 200/401/404/405/400 per the response
- * matrix below. No dispatch, no agent involvement -- this either accepts or
- * rejects the delivery and nothing else.
+ * matrix below, based solely on that verification -- dispatch to
+ * `/hooks/agent` (see below) never changes this response and, when it
+ * happens at all, happens only after the response has already been sent.
  *
  * - A configured `GITHUB_WEBHOOK_SECRETS` that fails to resolve (malformed
  *   JSON / wrong shape) -> 500, before reading the body or comparing
@@ -696,7 +742,7 @@ export function readRawBody(req, opts = {}) {
  * @param {{
  *   secret?: string,
  *   log?: (line: string) => void,
- *   dedupStore?: { has(key: string): boolean, add(key: string): unknown },
+ *   dedupStore?: { has(key: string): boolean, add(key: string): unknown, delete(key: string): unknown },
  *   forward?: { hookUrl?: string, hookToken?: string, fetchImpl?: typeof fetch },
  * }} [options]
  * @returns {Promise<void>}
@@ -807,7 +853,18 @@ export async function handleGithubWebhookVerify(req, res, options = {}) {
     // docstring) if the downstream call itself didn't succeed, keeping this
     // function's own bounded outcome vocabulary fixed at exactly five
     // values regardless of the network result (AC-SEC-2).
-    await forwardToAgentHook(decision.dispatchKey, event, { ...parsedPayload, deliveryId }, options.forward);
+    const result = await forwardToAgentHook(decision.dispatchKey, event, { ...parsedPayload, deliveryId }, options.forward);
+    if (!result.forwarded) {
+      // A failed downstream call must not permanently consume the dedup key:
+      // this module already treats a lost dedup entry as an acceptable
+      // re-delivery, not a correctness bug (see defaultForwardedDeliveries's
+      // own comment on restart loss). Without this release, a transient
+      // gateway outage or a bad OPENCLAW_AGENT_HOOK_TOKEN would classify
+      // GitHub's own manual redelivery of the exact same event as
+      // "duplicate" forever, silently dropping the one delivery that was
+      // actually never forwarded.
+      dedupStore.delete(decision.dispatchKey);
+    }
   }
 }
 
@@ -863,7 +920,7 @@ const defaultForwardedDeliveries = new Set();
  * file's existing "fail fast / close the obvious race" conventions
  * elsewhere (see readRawBody's settle()).
  *
- * @param {{ event: string | undefined, payload: any, dedupStore: { has(key: string): boolean, add(key: string): unknown } }} args
+ * @param {{ event: string | undefined, payload: any, dedupStore: { has(key: string): boolean, add(key: string): unknown, delete(key: string): unknown } }} args
  * @returns {{ dispatch: "not-enrolled" | "duplicate" | "config-error" | "no-match" | "forwarded", dispatchKey?: string }}
  */
 function planDispatch({ event, payload, dedupStore }) {
@@ -894,7 +951,13 @@ function planDispatch({ event, payload, dedupStore }) {
 
   const repoFullName = payload?.repository?.full_name;
   const action = payload?.action;
-  const actorLogin = payload?.sender?.login;
+  // For issue_comment, the trust gate must bind to whoever AUTHORED the
+  // comment text being pattern-matched below (comment.user.login), not
+  // whoever triggered this particular delivery (sender.login) -- they
+  // coincide for a "created" action, but the issue_comment schema permits
+  // "edited"/"deleted" too, where sender is whoever performed THAT action,
+  // not the original comment's author.
+  const actorLogin = event === "issue_comment" ? payload?.comment?.user?.login : payload?.sender?.login;
   // commentBody is read here ONLY to hand to matchesDispatchAllowlist's
   // pattern check immediately below -- it is never logged, never assigned
   // into the forwarded trigger, and never passed to forwardToAgentHook
