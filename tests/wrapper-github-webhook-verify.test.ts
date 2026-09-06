@@ -38,7 +38,7 @@ interface DispatchAllowlistEntry {
 interface HandleOptions {
   secret?: string;
   log?: (line: string) => void;
-  dedupStore?: { has(key: string): boolean; add(key: string): unknown };
+  dedupStore?: { has(key: string): boolean; add(key: string): unknown; delete(key: string): unknown };
   forward?: { hookUrl?: string; hookToken?: string; fetchImpl?: typeof fetch };
 }
 
@@ -723,6 +723,19 @@ describe("resolveGithubWebhookSecrets", () => {
     expect(thrown.code).toBe("GITHUB_WEBHOOK_SECRETS_CONFIG_ERROR");
   });
 
+  it("throws when an element is whitespace-only or has leading/trailing whitespace", () => {
+    expect(captureThrown(() => webhook.resolveGithubWebhookSecrets({ GITHUB_WEBHOOK_SECRETS: JSON.stringify(["   "]) })).code).toBe(
+      "GITHUB_WEBHOOK_SECRETS_CONFIG_ERROR"
+    );
+    expect(
+      captureThrown(() => webhook.resolveGithubWebhookSecrets({ GITHUB_WEBHOOK_SECRETS: JSON.stringify([" padded-secret "]) })).code
+    ).toBe("GITHUB_WEBHOOK_SECRETS_CONFIG_ERROR");
+  });
+
+  it("rejects a whitespace-only legacy GITHUB_WEBHOOK_SECRET as unset, rather than treating it as a valid secret", () => {
+    expect(webhook.resolveGithubWebhookSecrets({ GITHUB_WEBHOOK_SECRET: "   " })).toEqual([]);
+  });
+
   it("never silently falls back to legacy on a malformed GITHUB_WEBHOOK_SECRETS, even when legacy is also set", () => {
     expect(() =>
       webhook.resolveGithubWebhookSecrets({ GITHUB_WEBHOOK_SECRETS: "not json at all", GITHUB_WEBHOOK_SECRET: "would-be-wrong-to-use" })
@@ -841,6 +854,94 @@ describe("resolveDispatchAllowlist", () => {
       webhook.resolveDispatchAllowlist({ GITHUB_DISPATCH_ALLOWLIST: JSON.stringify({ repo: "owner/repo" }) })
     );
     expect(thrown.code).toBe("GITHUB_DISPATCH_ALLOWLIST_CONFIG_ERROR");
+  });
+
+  // Copilot review round 1: every identifier below is matched by strict
+  // equality downstream (matchesDispatchAllowlist), so a config value that
+  // is merely non-empty after trimming can still config-validate
+  // successfully and then silently never match anything -- indistinguishable
+  // from a genuinely unenrolled/untrusted delivery. Each case pads or
+  // blanks exactly one identifier to confirm it's rejected at resolve time.
+  it("throws when \"repo\" has leading/trailing whitespace", () => {
+    const thrown = captureThrown(() =>
+      webhook.resolveDispatchAllowlist({
+        GITHUB_DISPATCH_ALLOWLIST: JSON.stringify([
+          { repo: " owner/repo ", events: [{ event: "pull_request", actions: ["opened"] }] }
+        ])
+      })
+    );
+    expect(thrown.code).toBe("GITHUB_DISPATCH_ALLOWLIST_CONFIG_ERROR");
+  });
+
+  it("throws when an \"events\" item's \"event\" has leading/trailing whitespace", () => {
+    const thrown = captureThrown(() =>
+      webhook.resolveDispatchAllowlist({
+        GITHUB_DISPATCH_ALLOWLIST: JSON.stringify([
+          { repo: "owner/repo", events: [{ event: " pull_request", actions: ["opened"] }] }
+        ])
+      })
+    );
+    expect(thrown.code).toBe("GITHUB_DISPATCH_ALLOWLIST_CONFIG_ERROR");
+  });
+
+  it("throws when an \"actions\" entry is whitespace-only or padded", () => {
+    expect(
+      captureThrown(() =>
+        webhook.resolveDispatchAllowlist({
+          GITHUB_DISPATCH_ALLOWLIST: JSON.stringify([{ repo: "owner/repo", events: [{ event: "pull_request", actions: ["   "] }] }])
+        })
+      ).code
+    ).toBe("GITHUB_DISPATCH_ALLOWLIST_CONFIG_ERROR");
+    expect(
+      captureThrown(() =>
+        webhook.resolveDispatchAllowlist({
+          GITHUB_DISPATCH_ALLOWLIST: JSON.stringify([{ repo: "owner/repo", events: [{ event: "pull_request", actions: ["opened "] }] }])
+        })
+      ).code
+    ).toBe("GITHUB_DISPATCH_ALLOWLIST_CONFIG_ERROR");
+  });
+
+  it("throws when a trustedMention actor is whitespace-only or padded", () => {
+    const thrown = captureThrown(() =>
+      webhook.resolveDispatchAllowlist({
+        GITHUB_DISPATCH_ALLOWLIST: JSON.stringify([
+          {
+            repo: "owner/repo",
+            events: [{ event: "issue_comment", actions: ["created"], trustedMention: { actors: [" trusted-actor "], pattern: "@bot" } }]
+          }
+        ])
+      })
+    );
+    expect(thrown.code).toBe("GITHUB_DISPATCH_ALLOWLIST_CONFIG_ERROR");
+  });
+
+  it("throws when a trustedMention.pattern is whitespace-only, but tolerates leading/trailing whitespace within an otherwise valid regex", () => {
+    expect(
+      captureThrown(() =>
+        webhook.resolveDispatchAllowlist({
+          GITHUB_DISPATCH_ALLOWLIST: JSON.stringify([
+            {
+              repo: "owner/repo",
+              events: [{ event: "issue_comment", actions: ["created"], trustedMention: { actors: ["trusted-actor"], pattern: "   " } }]
+            }
+          ])
+        })
+      ).code
+    ).toBe("GITHUB_DISPATCH_ALLOWLIST_CONFIG_ERROR");
+    // Unlike repo/event/action/actor identifiers, a pattern is a regex
+    // source compiled and matched via .test(), not compared by exact string
+    // equality -- padding is not the same defect class here, so this must
+    // NOT throw.
+    expect(() =>
+      webhook.resolveDispatchAllowlist({
+        GITHUB_DISPATCH_ALLOWLIST: JSON.stringify([
+          {
+            repo: "owner/repo",
+            events: [{ event: "issue_comment", actions: ["created"], trustedMention: { actors: ["trusted-actor"], pattern: " @bot " } }]
+          }
+        ])
+      })
+    ).not.toThrow();
   });
 });
 

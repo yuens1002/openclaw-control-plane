@@ -63,6 +63,23 @@ export function resolveGithubWebhookMaxBytes(env = process.env) {
 const DEFAULT_TIMEOUT_MS = 10_000;
 const ROUTE = "/hooks/github-webhook-verify";
 
+/**
+ * True for a string that is non-empty AFTER trimming AND has no leading or
+ * trailing whitespace to begin with -- rejects "", "   ", " foo", and "foo ".
+ * Every identifier validated with this (a secret, a repo full name, an
+ * event/action name, a trusted actor login) is compared with strict/exact
+ * equality somewhere downstream, so a `.trim() !== ""` check alone would
+ * still let a padded value ("owner/repo ") pass config validation and then
+ * silently fail to match its unpadded counterpart at comparison time --
+ * indistinguishable from a genuinely unenrolled/untrusted delivery.
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isCleanString(value) {
+  return typeof value === "string" && value.trim() !== "" && value === value.trim();
+}
+
 // --- Multi-secret verification (#116) ---------------------------------------
 
 export const GITHUB_WEBHOOK_SECRETS_ENV = "GITHUB_WEBHOOK_SECRETS";
@@ -112,8 +129,8 @@ export function resolveGithubWebhookSecrets(env = process.env) {
       throwWebhookSecretsConfigError("must be a JSON array");
     }
     for (const entry of parsed) {
-      if (typeof entry !== "string" || entry === "") {
-        throwWebhookSecretsConfigError("every element must be a non-empty string");
+      if (!isCleanString(entry)) {
+        throwWebhookSecretsConfigError("every element must be a non-empty string with no leading/trailing whitespace");
       }
     }
     // A deliberately-configured empty array ("[]") is accepted as-is (no
@@ -123,7 +140,7 @@ export function resolveGithubWebhookSecrets(env = process.env) {
     return parsed;
   }
   const legacy = env.GITHUB_WEBHOOK_SECRET;
-  if (typeof legacy === "string" && legacy !== "") return [legacy];
+  if (isCleanString(legacy)) return [legacy];
   return [];
 }
 
@@ -288,8 +305,10 @@ function validateDispatchAllowlistEntry(entry) {
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
     throwDispatchAllowlistConfigError("each entry must be a JSON object");
   }
-  if (typeof entry.repo !== "string" || entry.repo.trim() === "") {
-    throwDispatchAllowlistConfigError("each entry must have a non-empty string \"repo\"");
+  if (!isCleanString(entry.repo)) {
+    throwDispatchAllowlistConfigError(
+      "each entry must have a non-empty string \"repo\" with no leading/trailing whitespace"
+    );
   }
   if (!Array.isArray(entry.events) || entry.events.length === 0) {
     throwDispatchAllowlistConfigError(`entry for "${entry.repo}" must have a non-empty "events" array`);
@@ -299,8 +318,10 @@ function validateDispatchAllowlistEntry(entry) {
     if (!eventEntry || typeof eventEntry !== "object" || Array.isArray(eventEntry)) {
       throwDispatchAllowlistConfigError(`entry for "${entry.repo}" has a malformed "events" item`);
     }
-    if (typeof eventEntry.event !== "string" || eventEntry.event.trim() === "") {
-      throwDispatchAllowlistConfigError(`entry for "${entry.repo}" has an "events" item missing "event"`);
+    if (!isCleanString(eventEntry.event)) {
+      throwDispatchAllowlistConfigError(
+        `entry for "${entry.repo}" has an "events" item with a missing or malformed "event" (no leading/trailing whitespace allowed)`
+      );
     }
     if (seenEvents.has(eventEntry.event)) {
       // matchesDispatchAllowlist's .find() would silently pick only the
@@ -315,16 +336,21 @@ function validateDispatchAllowlistEntry(entry) {
     }
     seenEvents.add(eventEntry.event);
     const actions = eventEntry.actions;
-    if (!Array.isArray(actions) || actions.length === 0 || actions.some((a) => typeof a !== "string" || a === "")) {
+    if (!Array.isArray(actions) || actions.length === 0 || actions.some((a) => !isCleanString(a))) {
       throwDispatchAllowlistConfigError(
-        `entry for "${entry.repo}" event "${eventEntry.event}" must have a non-empty "actions" array of strings`
+        `entry for "${entry.repo}" event "${eventEntry.event}" must have a non-empty "actions" array of strings with no leading/trailing whitespace`
       );
     }
     if (eventEntry.event === "issue_comment") {
       const trusted = eventEntry.trustedMention;
       const actorsOk = trusted && Array.isArray(trusted.actors) && trusted.actors.length > 0
-        && trusted.actors.every((a) => typeof a === "string" && a !== "");
-      const patternOk = trusted && typeof trusted.pattern === "string" && trusted.pattern !== "";
+        && trusted.actors.every((a) => isCleanString(a));
+      // `pattern` is a regex source, not an identifier compared by exact
+      // string equality downstream (matchesDispatchAllowlist compiles it and
+      // calls .test()) -- leading/trailing whitespace can be semantically
+      // meaningful in a regex, so this intentionally only rejects blank, not
+      // padded, values (unlike repo/event/action/actor identifiers above).
+      const patternOk = trusted && typeof trusted.pattern === "string" && trusted.pattern.trim() !== "";
       if (!actorsOk || !patternOk) {
         throwDispatchAllowlistConfigError(
           `entry for "${entry.repo}" permits issue_comment but is missing a valid trustedMention {actors: string[], pattern: string}`
