@@ -1061,7 +1061,7 @@ describe("matchesDispatchAllowlist", () => {
 
 describe("forwardToAgentHook", () => {
   // AC-FN-11
-  it("POSTs a body containing only sessionKey and trigger{event, repo, resource, actor, deliveryId} -- never the raw comment/PR body", async () => {
+  it("POSTs a body containing only sessionKey, idempotencyKey, and trigger{event, repo, resource, actor, deliveryId} -- never the raw comment/PR body", async () => {
     const marker = "RAW-BODY-TEXT-MARKER-should-never-be-forwarded-3f8c";
     const { fetchImpl, calls } = createStubFetch();
     const payload = {
@@ -1087,9 +1087,14 @@ describe("forwardToAgentHook", () => {
     const call = calls[0];
     if (call === undefined) throw new Error("unreachable: length checked above");
     expect(call.url).toBe("http://stub-target.invalid/hooks/agent");
-    const sentBody = JSON.parse(String(call.init["body"])) as { sessionKey: string; trigger: Record<string, unknown> };
+    const sentBody = JSON.parse(String(call.init["body"])) as {
+      sessionKey: string;
+      idempotencyKey: string;
+      trigger: Record<string, unknown>;
+    };
     expect(sentBody).toEqual({
       sessionKey: "forward-owner/forward-repo#77",
+      idempotencyKey: "delivery-abc-123",
       trigger: {
         event: "issue_comment",
         repo: "forward-owner/forward-repo",
@@ -1104,6 +1109,32 @@ describe("forwardToAgentHook", () => {
     expect(headers["authorization"]).toBe("Bearer stub-token");
   });
 
+  it("omits idempotencyKey from the wire body when the payload has no deliveryId, rather than sending a literal \"undefined\"", async () => {
+    // prPayload() deliberately carries no deliveryId -- the real production
+    // path splices it in from the X-GitHub-Delivery header before this
+    // function ever sees the payload (see the handler-level tests above).
+    const { fetchImpl, calls } = createStubFetch();
+    await webhook.forwardToAgentHook("k#1", "pull_request", prPayload(), {
+      hookUrl: "http://stub-target.invalid/hooks/agent",
+      fetchImpl
+    });
+    const call = calls[0];
+    if (call === undefined) throw new Error("unreachable");
+    const sentBody = JSON.parse(String(call.init["body"])) as Record<string, unknown> & {
+      sessionKey: string;
+      trigger: Record<string, unknown>;
+    };
+    // Positive anchor: prove the rest of the body still parsed and shipped
+    // correctly, so the missing-key assertion below can't pass vacuously
+    // against an empty or malformed body.
+    expect(sentBody.sessionKey).toBe("k#1");
+    expect(sentBody.trigger["event"]).toBe("pull_request");
+    // JSON.stringify drops an undefined-valued key entirely, at any nesting
+    // depth -- trigger.deliveryId is just as absent as the top-level key.
+    expect("deliveryId" in sentBody.trigger).toBe(false);
+    expect("idempotencyKey" in sentBody).toBe(false);
+  });
+
   it("omits the authorization header when no hook token is configured", async () => {
     const { fetchImpl, calls } = createStubFetch();
     await webhook.forwardToAgentHook("k#1", "pull_request", prPayload(), {
@@ -1114,6 +1145,59 @@ describe("forwardToAgentHook", () => {
     if (call === undefined) throw new Error("unreachable");
     const headers = call.init["headers"] as Record<string, string>;
     expect(headers["authorization"]).toBeUndefined();
+  });
+
+  it("adds a diagnostic hint on a 400 against the un-overridden default endpoint, distinguishing a known-broken-default from a transient failure", async () => {
+    const originalUrl = process.env[webhook.OPENCLAW_AGENT_HOOK_URL_ENV];
+    delete process.env[webhook.OPENCLAW_AGENT_HOOK_URL_ENV];
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      // No options.hookUrl override -- forwardToAgentHook must call the real
+      // resolveAgentHookUrl() and hit its bare, un-overridden default.
+      const { fetchImpl } = createStubFetch(() => ({ ok: false, status: 400 }));
+      const result = await webhook.forwardToAgentHook("k#1", "pull_request", prPayload(), { fetchImpl });
+      expect(result).toEqual({ forwarded: false });
+      const errorLine = errorSpy.mock.calls.map((call) => String(call[0])).find((line) => line.includes("agent hook forward failed"));
+      expect(errorLine).toContain("hint");
+      expect(errorLine).toContain(webhook.OPENCLAW_AGENT_HOOK_URL_ENV);
+    } finally {
+      if (originalUrl === undefined) delete process.env[webhook.OPENCLAW_AGENT_HOOK_URL_ENV];
+      else process.env[webhook.OPENCLAW_AGENT_HOOK_URL_ENV] = originalUrl;
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("omits the diagnostic hint when the caller explicitly overrides hookUrl, even if the override string happens to end in /hooks/agent", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { fetchImpl } = createStubFetch(() => ({ ok: false, status: 400 }));
+      await webhook.forwardToAgentHook("k#1", "pull_request", prPayload(), {
+        hookUrl: "http://stub-target.invalid/hooks/agent",
+        fetchImpl
+      });
+      const errorLine = errorSpy.mock.calls.map((call) => String(call[0])).find((line) => line.includes("agent hook forward failed"));
+      expect(errorLine).toBeDefined();
+      expect(errorLine).not.toContain("hint");
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("omits the diagnostic hint on a non-400 failure against the un-overridden default", async () => {
+    const originalUrl = process.env[webhook.OPENCLAW_AGENT_HOOK_URL_ENV];
+    delete process.env[webhook.OPENCLAW_AGENT_HOOK_URL_ENV];
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { fetchImpl } = createStubFetch(() => ({ ok: false, status: 503 }));
+      await webhook.forwardToAgentHook("k#1", "pull_request", prPayload(), { fetchImpl });
+      const errorLine = errorSpy.mock.calls.map((call) => String(call[0])).find((line) => line.includes("agent hook forward failed"));
+      expect(errorLine).toBeDefined();
+      expect(errorLine).not.toContain("hint");
+    } finally {
+      if (originalUrl === undefined) delete process.env[webhook.OPENCLAW_AGENT_HOOK_URL_ENV];
+      else process.env[webhook.OPENCLAW_AGENT_HOOK_URL_ENV] = originalUrl;
+      errorSpy.mockRestore();
+    }
   });
 
   // AC-FN-12
@@ -1210,8 +1294,12 @@ describe("handleGithubWebhookVerify -- dispatch wiring", () => {
       expect(calls).toHaveLength(1);
       const call = calls[0];
       if (call === undefined) throw new Error("unreachable");
-      const sentBody = JSON.parse(String(call.init["body"])) as { sessionKey: string };
+      const sentBody = JSON.parse(String(call.init["body"])) as { sessionKey: string; idempotencyKey: string };
       expect(sentBody.sessionKey).toBe(webhook.computeDedupKey("pull_request", payload));
+      // Pins the real production path: the delivery id reaches the wire via
+      // the X-GitHub-Delivery header -> handleGithubWebhookVerify's own
+      // splice -> forwardToAgentHook, not via a hand-fed payload field.
+      expect(sentBody.idempotencyKey).toBe("delivery-allowed-1");
     } finally {
       if (originalAllowlist === undefined) delete process.env.GITHUB_DISPATCH_ALLOWLIST;
       else process.env.GITHUB_DISPATCH_ALLOWLIST = originalAllowlist;
@@ -1359,8 +1447,9 @@ describe("handleGithubWebhookVerify -- dispatch wiring", () => {
       // gate correctly forwarded or silently rejected everyone.
       expect(parsedDispatch).toBe("forwarded");
       expect(calls).toHaveLength(1);
-      const sentBody = JSON.parse(String(calls[0]?.init["body"])) as { sessionKey: string };
+      const sentBody = JSON.parse(String(calls[0]?.init["body"])) as { sessionKey: string; idempotencyKey: string };
       expect(sentBody.sessionKey).toBe(webhook.computeDedupKey("issue_comment", payload));
+      expect(sentBody.idempotencyKey).toBe("delivery-log-hygiene-1");
       for (const line of logged) {
         expect(line).not.toContain(secretMarker);
         expect(line).not.toContain("@bot");

@@ -547,6 +547,11 @@ export const OPENCLAW_AGENT_HOOK_TOKEN_ENV = "OPENCLAW_AGENT_HOOK_TOKEN";
  * wrapper's own server.js uses for its gateway proxy target -- see the
  * comment block above this section for how that was confirmed.
  *
+ * IMPORTANT -- that bare `/hooks/agent` default is not a usable production
+ * value on its own. `OPENCLAW_AGENT_HOOK_URL` must be set to point at an
+ * OpenClaw `hooks.mappings`-configured subpath in production. See
+ * `forwardToAgentHook`'s docstring below for why.
+ *
  * @param {Record<string, string | undefined>} [env]
  * @returns {string}
  */
@@ -559,21 +564,50 @@ export function resolveAgentHookUrl(env = process.env) {
 }
 
 /**
- * POSTs `{ sessionKey, trigger: { event, repo, resource, actor, deliveryId } }`
+ * POSTs `{ sessionKey, idempotencyKey?, trigger: { event, repo, resource, actor, deliveryId } }`
  * -- explicitly NOT the raw comment/PR body, only these labeled,
  * non-executable metadata fields pulled off `payload` -- to
  * `options.hookUrl` (default `resolveAgentHookUrl()`) with
  * `options.hookToken` (default `process.env[OPENCLAW_AGENT_HOOK_TOKEN_ENV]`)
  * as a bearer token header, matching the `Authorization: Bearer <token>`
  * convention the pinned wrapper's own gateway proxy already uses (see
- * comment block above).
+ * comment block above). `idempotencyKey` is set to `trigger.deliveryId` and
+ * therefore OMITTED from the body entirely (never sent as a literal
+ * `"undefined"`) when the payload carries no delivery id -- JSON.stringify
+ * drops an undefined-valued key at any nesting depth. When present, it (the
+ * GitHub delivery id) lets the gateway's own replay cache return the same
+ * runId instead of re-dispatching if an identical delivery id reaches it
+ * again AFTER a prior dispatch already succeeded -- a narrower case than
+ * this wrapper's own dedup-key release on a FAILED forward (see the dedup
+ * key computation section above), which exists precisely so a delivery
+ * that never reached a successful dispatch can still be retried; the
+ * gateway's cache has nothing stored for it yet in that case, so the two
+ * mechanisms don't conflict.
  *
- * The wire field is named `sessionKey` because that's `/hooks/agent`'s own
- * request schema -- not a claim that this call resumes anything. `dedup key
- * computation` section above explains why the caller passes the same dedup
- * key here as its dispatch-decision key: `/hooks/agent` never resumes a
- * session regardless of the label, so there is no separate stable key to
- * maintain.
+ * The wire field is named `sessionKey` because that's the gateway hook
+ * schema's own field name -- not a claim that this call resumes anything.
+ * `dedup key computation` section above explains why the caller passes the
+ * same dedup key here as its dispatch-decision key: the gateway hook path
+ * never resumes a session regardless of the label, so there is no separate
+ * stable key to maintain.
+ *
+ * IMPORTANT -- this body has no `message` field, deliberately: this wrapper
+ * only ever forwards trust-gated metadata, never composes instruction text.
+ * That means `resolveAgentHookUrl()`'s literal default (`/hooks/agent`) is
+ * NOT a usable production target on its own -- confirmed by reading the
+ * live gateway source, not docs: `/hooks/agent`'s own request validation
+ * hard-requires `message` ("message required"), and even with one supplied
+ * there is no payload field that lets a direct `/hooks/agent` call opt out
+ * of the untrusted-external-content wrapper (`allowUnsafeExternalContent`
+ * is parsed and forwarded only for OpenClaw's `hooks.mappings`-routed
+ * dispatch, never for the literal `/hooks/agent` path). Production sets
+ * `OPENCLAW_AGENT_HOOK_URL` to a `hooks.mappings`-configured subpath (e.g.
+ * `http://127.0.0.1:18789/hooks/github-review`) where a `messageTemplate`
+ * composes the actual review-dispatch instructions from this body's
+ * `trigger.*` fields and `allowUnsafeExternalContent: true` is set in that
+ * mapping's own config -- a live-instance config decision documented in the
+ * consuming profile repo's runbook, not something this generic wrapper
+ * decides or hardcodes.
  *
  * Never throws on the downstream call failing: a network error, a rejected
  * promise, or a non-2xx response is caught/checked here and logged via
@@ -609,10 +643,19 @@ export async function forwardToAgentHook(dispatchKey, event, payload, options = 
     const response = await fetchImpl(hookUrl, {
       method: "POST",
       headers,
-      body: JSON.stringify({ sessionKey: dispatchKey, trigger }),
+      body: JSON.stringify({ sessionKey: dispatchKey, idempotencyKey: trigger.deliveryId, trigger }),
     });
     if (!response || !response.ok) {
-      console.error(`[github-webhook-verify] agent hook forward failed: HTTP ${response?.status ?? "no response"}`);
+      // A 400 against the un-overridden default endpoint is almost always
+      // the known-broken-default case (see resolveAgentHookUrl's docstring),
+      // not a transient failure -- call it out explicitly so it doesn't read
+      // as a flaky network blip.
+      const isUnoverriddenDefault = options.hookUrl === undefined && hookUrl.endsWith(AGENT_HOOK_PATH);
+      const hint =
+        response?.status === 400 && isUnoverriddenDefault
+          ? ` (hint: the default ${AGENT_HOOK_PATH} target requires a "message" field this wrapper never sends and cannot opt out of content wrapping -- set ${OPENCLAW_AGENT_HOOK_URL_ENV} to a hooks.mappings subpath instead)`
+          : "";
+      console.error(`[github-webhook-verify] agent hook forward failed: HTTP ${response?.status ?? "no response"}${hint}`);
       return { forwarded: false };
     }
     return { forwarded: true };

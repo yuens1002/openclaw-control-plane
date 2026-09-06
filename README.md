@@ -276,17 +276,35 @@ opt-in per repository:
   `/hooks/agent` request's `sessionKey` field -- purely a label on the
   resulting session-store entry, since `/hooks/agent` starts a fresh,
   isolated turn on every dispatch regardless of the key supplied.
-- The forwarded request body is exactly `{ sessionKey, trigger: { event,
-  repo, resource, actor, deliveryId } }` -- labeled metadata only. The raw
-  comment/PR body text is never included. (`sessionKey` here is
-  `/hooks/agent`'s own field name, not a claim of session continuity.)
-- The target URL defaults to `http://<INTERNAL_GATEWAY_HOST>:<INTERNAL_GATEWAY_PORT>/hooks/agent`,
-  reusing the same env vars (and same defaults) the pinned wrapper's own
-  internal gateway-proxy target already uses, so this module's default tracks
-  it automatically if either is ever overridden. `OPENCLAW_AGENT_HOOK_URL`
-  overrides the full URL directly (useful if `hooks.path` is reconfigured
-  away from its default on a given instance). `OPENCLAW_AGENT_HOOK_TOKEN` is
-  the bearer token for `/hooks/agent`'s own `hooks.token` gate -- a value
+- The forwarded request body is exactly `{ sessionKey, idempotencyKey?,
+  trigger: { event, repo, resource, actor, deliveryId } }` -- labeled
+  metadata only, no `message` field. The raw comment/PR body text is never
+  included. (`sessionKey` here is the gateway hook schema's own field
+  name, not a claim of session continuity. `idempotencyKey` is present
+  only when the delivery carries a `deliveryId` -- omitted entirely,
+  never sent as a literal `"undefined"`, otherwise. When present, it --
+  the GitHub delivery id -- lets the gateway's own replay cache return a
+  cached result instead of re-dispatching if the identical delivery id
+  reaches it again after a prior dispatch already succeeded; it does not
+  affect this wrapper's own dedup-key release on a failed forward, which
+  exists so a
+  delivery that never reached a successful dispatch can still be retried.)
+- **The target URL's bare default is not usable in production as-is.**
+  It resolves to `http://<INTERNAL_GATEWAY_HOST>:<INTERNAL_GATEWAY_PORT>/hooks/agent`
+  by reusing the same env vars (and same defaults) the pinned wrapper's own
+  internal gateway-proxy target already uses -- but the literal `/hooks/agent`
+  endpoint hard-requires a `message` field (this body never sends one) and
+  has no way to opt out of OpenClaw's untrusted-external-content wrapper for
+  a direct dispatch. Production must set `OPENCLAW_AGENT_HOOK_URL` to an
+  OpenClaw `hooks.mappings`-configured subpath instead, where a
+  `messageTemplate` composes the actual instruction text from this body's
+  `trigger.*` fields and `allowUnsafeExternalContent: true` is set
+  explicitly in that mapping's own config -- a live-instance decision made
+  and documented by the consuming deployment, not by this repo. See
+  `forwardToAgentHook`'s docstring in
+  `scripts/wrapper-github-webhook-verify.mjs` for the full detail.
+  `OPENCLAW_AGENT_HOOK_TOKEN` is the bearer token for the gateway's own
+  `hooks.token` gate regardless of which subpath is targeted -- a value
   distinct from `OPENCLAW_GATEWAY_TOKEN` (which authenticates the wrapper's
   dashboard proxy, not this endpoint).
 - A failed or errored downstream call degrades to "verified but not
