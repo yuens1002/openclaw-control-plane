@@ -1,0 +1,83 @@
+# GitHub Webhook Agent Dispatch — Acceptance Criteria
+
+**Branch:** `feat/github-webhook-agent-dispatch`
+**Plan:** `docs/plans/github-webhook-agent-dispatch/plan.md`
+
+---
+
+## Context
+
+Extends `POST /hooks/github-webhook-verify` (#108) with multi-secret
+verification (#116) and forwarding of accepted, allowlisted deliveries to
+OpenClaw's native `POST /hooks/agent` (#117), using one dedup key (repo +
+resource#) for both the forward decision and the dispatch label — not a
+separate session key, since `/hooks/agent` never resumes a prior turn's
+context regardless of what key it's given (confirmed against OpenClaw's own
+source; see the plan's Corrected note). No UI in this repo — `/ui-verify`
+does not apply.
+
+---
+
+## Column Definitions
+
+| Column | Filled by | When |
+|--------|-----------|------|
+| **Plan ref** | Author of the ACs | At AC authoring — links each row to a Plan deliverable ID |
+| **Role** | Author of the ACs | At AC authoring — names the role that owns this AC's verification |
+| **Agent** | Verification sub-agent (orca Verify stage) | During Verify — PASS/FAIL with brief evidence |
+| **QC** | Main thread agent | After reading sub-agent report — confirms or overrides |
+| **Reviewer** | Human (operating owner) | During manual review — final approval per AC |
+
+---
+
+## Pass-condition rule
+
+Pass = invariant, not config-literal. A Pass cell states the relation the
+code must hold (e.g. "accepted iff signature matches any configured
+secret"), never a single hardcoded example value.
+
+---
+
+## Functional Acceptance Criteria
+
+| AC | Plan ref | Role | What | How | Pass | Agent | QC | Reviewer |
+|----|----------|------|------|-----|------|-------|----|----------|
+| AC-FN-1 | D1 | `/devops` | `verifyAnyGithubSignature` — accepts any configured secret | Code review + direct call: `scripts/wrapper-github-webhook-verify.mjs` | Given N secrets, a signature computed against any one of them verifies true; a signature computed against none of them verifies false; an empty secrets array always returns false | PASS — direct calls: first/middle/last secret each verify true, unlisted secret/different body/`[]`/non-array/undefined header all return false; source has no early `return true`/`break` | PASS · trust | |
+| AC-FN-2 | D1 | `/devops` | `resolveGithubWebhookSecrets` — precedence and fail-loud | Code review + direct call | `GITHUB_WEBHOOK_SECRETS` (valid JSON array of non-empty strings) takes precedence over `GITHUB_WEBHOOK_SECRET`; if only the legacy var is set, resolves to a one-element array (unchanged behavior for existing deployments); if `GITHUB_WEBHOOK_SECRETS` is set but is not valid JSON, is not an array, or contains a non-string/empty element, throws a tagged config error rather than silently falling back to `GITHUB_WEBHOOK_SECRET` or treating the raw string as one secret | PASS — precedence, one-element legacy fallback, and 7 distinct malformed-input cases (including malformed-while-legacy-also-set) all confirmed by direct call | PASS · trust | |
+| AC-FN-3 | D1 | `/devops` | `handleGithubWebhookVerify` — unchanged contract with one secret | Code review + integration test | With exactly one secret configured (either var), the route's response contract (200/401/404/405/400) is byte-for-byte identical to #108's shipped behavior | PASS — full handler driven with legacy var and single-element `GITHUB_WEBHOOK_SECRETS`; 200/401/405/404 identical to #108; new 500 path only reachable on malformed multi-secret config | PASS · trust | |
+| AC-FN-4 | D2 | `/devops` | `computeDedupKey` — pull_request | Code review + direct call | For a `pull_request` payload, the dedup key includes the repository, PR number, and observed head SHA; replaying the identical payload reproduces the same key; a payload with only the head SHA changed produces a different key | PASS — direct call confirms repo+PR#+head in the key, byte-identical replay, and a head-only change produces a different key | PASS · trust | |
+| AC-FN-5 | D2 | `/devops` | `computeDedupKey` — issue_comment | Code review + direct call | For an `issue_comment` payload, the dedup key includes the repository, resource number, and comment id; a different comment on the same issue produces a different key | PASS — direct call confirms repo+resource+comment-id in the key, differs on comment id change, never contains comment body | PASS · trust | |
+| AC-FN-6 | D2 | `/devops` | **Superseded 2026-09-05** — one dedup key covers both dispatch decision and session label | Code review + direct call | `computeSessionKey` has been removed: confirmed against the actual OpenClaw source (`dispatchAgentHook` hardcodes `sessionTarget: "isolated"`, forcing `forceNew: true`) that `/hooks/agent` never resumes a session regardless of the label supplied, so a separate stable-per-PR key serves no purpose. `computeDedupKey`'s output is the only key `handleGithubWebhookVerify` computes, and it is passed as both the dedup-store check and the `sessionKey` field forwarded to `/hooks/agent` | PASS — `computeSessionKey` removed from the module; `planDispatch` returns one `dispatchKey` (the dedup key) consumed by both the dedup store and `forwardToAgentHook`; no separate key exists anywhere in the diff | PASS · trust | |
+| AC-FN-7 | D2 | `/devops` | `computeDedupKey` — malformed payload | Code review + direct call | A payload missing the fields an event type requires (e.g. a `pull_request` payload with no `pull_request.head.sha`) returns `undefined`, never a key built from partial/undefined data | PASS — 14 malformed-payload variants constructed (missing/empty/wrong-type fields, unsupported event, null/string/proto-polluted payloads) all return `undefined` | PASS · trust | |
+| AC-FN-8 | D2 | `/devops` | `resolveDispatchAllowlist` — parsing and fail-loud | Code review + direct call | Valid `GITHUB_DISPATCH_ALLOWLIST` JSON parses into the documented shape; unset/empty resolves to `[]`; malformed JSON or a shape violation (missing `events`, an `issue_comment` entry with no `trustedMention`) throws a tagged config error | PASS — valid config parses correctly; unset/blank → `[]`; 9 distinct malformed/shape-violation cases all throw the tagged error. Non-blocking doc note filed (regex-validity claim in a docstring is inaccurate but the security posture — fail closed — holds) | PASS · trust | |
+| AC-FN-9 | D2 | `/devops` | `matchesDispatchAllowlist` — repo/event/action matching | Code review + direct call | Returns true only when the repo has an entry AND that entry permits the exact `(event, action)` pair; a repo not listed, or an unlisted action for a listed event, returns false | PASS — true for listed repo+event+action (multiple actions checked); false for unlisted repo, undefined/empty repo, unlisted action, unlisted event, null/empty entries, and a `"constructor"` repo probe (no prototype pollution) | PASS · trust | |
+| AC-FN-10 | D2 | `/devops` | `matchesDispatchAllowlist` — trusted-actor/mention for issue_comment | Code review + direct call, adversarial inputs the implementer constructs (not copied from the test file) | For `issue_comment`, returns true only when the actor is in `trustedMention.actors` AND the comment body matches `trustedMention.pattern`; an untrusted actor with the correct mention returns false; a trusted actor without the mention returns false; the function never returns the comment body itself, only the boolean | PASS — true only for trusted+matching; false for untrusted+matching, trusted+no-mention, near-miss word-boundary token, undefined actor/body, case-mismatched actor; strictly boolean return; invalid regex fails closed without throwing | PASS · trust | |
+| AC-FN-11 | D3 | `/devops` | `forwardToAgentHook` — payload shape | Code review + direct call against a stub HTTP target | The POST body contains `sessionKey` (the dedup key, used only as a label — see AC-FN-6) and a `trigger` object with only `{event, repo, resource, actor, deliveryId}` — the raw comment/PR body text never appears anywhere in the request | PASS — recorded POST body has exactly the two top-level keys and exactly the five trigger keys; three planted body/title markers absent from the entire recorded request | PASS · trust | |
+| AC-FN-12 | D3 | `/devops` | `forwardToAgentHook` — downstream failure is non-fatal | Code review + direct call with a fetch stub that rejects/times out | A failed or errored call to the hook endpoint returns `{forwarded: false}` and logs a config/outcome line — it never throws out to the caller and never changes `handleGithubWebhookVerify`'s HTTP response to GitHub | PASS — throwing, timeout-shaped, non-2xx, and undefined-response stubs all return `{forwarded:false}` without throwing; full-handler integration still returns 200 on a rejecting stub | PASS · trust | |
+| AC-FN-13 | D3 | `/devops` | `handleGithubWebhookVerify` — end-to-end dispatch decision | Code review + integration test against the full handler | A verified, allowlisted, non-duplicate delivery results in exactly one `forwardToAgentHook` call with the dedup key from AC-FN-4/5; a verified delivery that is unenrolled, unsupported, untrusted, or a repeat of an already-forwarded dedup key results in zero forward calls; in every case the HTTP response to GitHub (200 on verified signature) is unaffected | PASS — exactly one forward on match with the correct dedup key; zero forwards on duplicate/unenrolled/unsupported-event/untrusted-actor/malformed-allowlist, all still 200 | PASS · trust | |
+| AC-FN-14 | D3 | `/devops` | No Decision Runtime / workflow-state calls from this route | Code review: `scripts/wrapper-github-webhook-verify.mjs` | The module imports nothing beyond `node:*` built-ins (per the file's existing dependency-free constraint) and makes no call to anything resembling a workflow-state, database, or runtime API — its only external call is `forwardToAgentHook`'s HTTP request | PASS — only static import is `node:crypto`; no db/decision-runtime/workflow-state references outside a prose comment; only external call is the one `fetch` in `forwardToAgentHook` | PASS · trust | |
+
+## Documentation Acceptance Criteria
+
+| AC | Plan ref | Role | What | How | Pass | Agent | QC | Reviewer |
+|----|----------|------|------|-----|------|-------|----|----------|
+| AC-COV-1 | D5 | `/project-manager` | Plan exists | Code review: `docs/plans/github-webhook-agent-dispatch/plan.md` | Plan names the issues, branch, current state, approach, module contract, deliverables with roles, sessions, commit schedule, dependencies, out of scope | PASS — all required sections present including full module-contract signatures | PASS · trust | |
+| AC-COV-2 | D6 | `/project-manager` | ACs table exists and covers the plan | Code review: this file | Every AC row has a valid Plan ref (D1–D7, or a blank cell restricted to `AC-REG-*` rows) and a Role; every deliverable D1–D7 is referenced by at least one row; Gate 1 passes (AC-REG-002) | PASS — Gate 1 run directly: 7 deliverables, 24 AC rows, 0 orphans | PASS · trust | |
+| AC-DOC-1 | D7 | `/project-manager` | README/operations doc updated, generically | Code review: the edited README/`docs/live-instance-operations.md` section | Documents `GITHUB_WEBHOOK_SECRETS` and `GITHUB_DISPATCH_ALLOWLIST` (shape, precedence, fail-loud behavior) and that dispatch forwards to `/hooks/agent`; every example uses placeholder repo/actor names, never a real one | PASS — both env vars documented with shape/precedence/fail-loud behavior; every example value is a placeholder | PASS · trust | |
+
+## Test Coverage Acceptance Criteria
+
+| AC | Plan ref | Role | What | How | Pass | Agent | QC | Reviewer |
+|----|----------|------|------|-----|------|-------|----|----------|
+| AC-TST-1 | D4 | `/test-engineer` | Direct unit coverage of every new export | Test run: `npm test` | `tests/wrapper-github-webhook-verify.test.ts` calls each of D1–D3's exports directly (not only through `handleGithubWebhookVerify`) with adversarial inputs the test author constructs, per AC-FN-10's method | PASS — dedicated describe blocks call every new export directly; adversarial cases present (untrusted actor+mention, near-miss word boundary, malformed-JSON never-falls-back) | PASS · trust | |
+| AC-TST-2 | D4 | `/test-engineer` | Pre-drained-stream-shaped integration case | Test run: `npm test` | At least one test drives the route's shared request-stream resource into a post-side-effect state before the handler under test touches it (this ecosystem's own retro rule — a fixture built fresh-only misses "only breaks once wired into the real pipeline" bugs); document which prior-stage effect is modeled | PASS — two cases: an already-drained request stream (modeling a prior body-parser, per #108's own repro) and a dedupStore pre-seeded before the call | PASS · trust | |
+| AC-REG-001 | — | `/test-engineer` | `npm run precheck` green | Test run: `npm run precheck` | `typecheck && test && write-precheck-stamp` exits 0 | PASS — 28 test files, 379 tests (381 after the AC-SEC-2 fix's regression tests), exit 0 | PASS · trust | |
+| AC-REG-002 | — | `/test-engineer` | Gate 1 self-check | Test run: `node scripts/check-acs-coverage.mjs docs/plans/github-webhook-agent-dispatch/plan.md docs/plans/github-webhook-agent-dispatch/ACs.md` | Exits 0: every active deliverable (D1–D7) is referenced by at least one AC row; no dangling Plan-ref values | PASS — 7 deliverables, 24 AC rows, 0 orphans | PASS · trust | |
+
+## Security Acceptance Criteria
+
+| AC | Plan ref | Role | What | How | Pass | Agent | QC | Reviewer |
+|----|----------|------|------|-----|------|-------|----|----------|
+| AC-SEC-1 | D1 | `/devops` | No timing leak across secret candidates | Code review: `verifyAnyGithubSignature` | Every candidate comparison uses the existing timing-safe `verifyGithubSignature`; the loop does not short-circuit in a way whose timing reveals which secret (or how many) were checked before a match — sequential iteration with each comparison individually timing-safe is sufficient; no cumulative-timing claim beyond that is required | PASS — inspected the loop body directly (no `return true`/`break`); every candidate compared unconditionally via the existing `timingSafeEqual`-backed function | PASS · trust | |
+| AC-SEC-2 | D1, D2, D3 | `/devops` | Logging hygiene | Code review: every new `log(...)`/`console.*` call site | No log line includes a full secret, the forwarded session key, the dedup key, the raw allowlist config, or the comment/PR body — only the existing `{route, result, event, deliveryId, repo}` shape plus a bounded dispatch-outcome field (`forwarded` / `not-enrolled` / `no-match` / `duplicate` / `config-error`) | **Initial FAIL, now fixed.** Orca's first Verify pass found: a malformed `GITHUB_WEBHOOK_SECRETS` value produced a `console.error` line containing the raw value in full — V8's `JSON.parse` `SyntaxError` echoes short unparseable input verbatim, and that message was interpolated straight into the thrown config error, then logged. The exact misconfiguration this feature exists to reject (a raw secret instead of a JSON array) wrote the secret to the log. Fixed (commit `5d7a9cd`): both `JSON.parse` sites (secrets + allowlist) now report only input length, never content. Two regression tests added asserting the actual logged text, not just the response status the original tests checked. `npm run precheck`: 381/381 green post-fix. Public-Repo Rule itself was clean throughout — zero identity-name hits in the diff | PASS · fixed (5d7a9cd), re-verified | |
+| AC-SEC-3 | D2 | `/devops` | Comment body never escapes its matching role | Code review: every use of `commentBody` in the module | `commentBody` is read only inside `matchesDispatchAllowlist`'s pattern check; no other function receives it, returns it, or forwards it | PASS — every non-comment occurrence traced; never returned/logged/forwarded; empirically confirmed absent from the wire in the end-to-end trusted-comment case. Reviewer note: `handleGithubWebhookVerify` passes the whole payload object (comment body included) into `forwardToAgentHook`, which itself rebuilds an explicit 5-field trigger before the actual network call — the AC's literal invariant holds; AC-FN-11's wire-level check is what actually guards the boundary | PASS · trust | |

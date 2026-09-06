@@ -2,13 +2,18 @@ import { createRequire } from "node:module";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-// Issue #108 (github-webhook-verify), deliverable D3.
+// Issue #108 (github-webhook-verify) deliverable D3, extended by issue #116
+// (multi-secret verify) and #117 (dispatch to /hooks/agent) deliverable D4.
 //
 // Direct unit tests of scripts/wrapper-github-webhook-verify.mjs's exported
-// functions (D1), written against the module contract pinned in
-// docs/plans/github-webhook-verify/plan.md.
+// functions, written against the module contracts pinned in
+// docs/plans/github-webhook-verify/plan.md (D1's original exports) and
+// docs/plans/github-webhook-agent-dispatch/plan.md (D1-D3's additions:
+// verifyAnyGithubSignature, resolveGithubWebhookSecrets, computeDedupKey,
+// resolveDispatchAllowlist, matchesDispatchAllowlist, forwardToAgentHook,
+// resolveAgentHookUrl).
 //
 // Loaded the same way tests/openclaw-railway-wrapper-patches.test.ts loads
 // scripts/wrapper-state-export.mjs: createRequire(...)(computedPath) rather
@@ -21,17 +26,58 @@ import { describe, expect, it } from "vitest";
 const nativeRequire = createRequire(import.meta.url);
 const webhookModulePath = fileURLToPath(new URL("../scripts/wrapper-github-webhook-verify.mjs", import.meta.url));
 
+interface DispatchAllowlistEntry {
+  repo: string;
+  events: Array<{
+    event: string;
+    actions: string[];
+    trustedMention?: { actors: string[]; pattern: string };
+  }>;
+}
+
+interface HandleOptions {
+  secret?: string;
+  log?: (line: string) => void;
+  dedupStore?: { has(key: string): boolean; add(key: string): unknown; delete(key: string): unknown };
+  forward?: { hookUrl?: string; hookToken?: string; fetchImpl?: typeof fetch };
+}
+
 interface WebhookVerifyModule {
   computeGithubSignature(secret: string, rawBody: Buffer): string;
   verifyGithubSignature(secret: string, rawBody: Buffer, headerValue: string | undefined): boolean;
   readRawBody(req: FakeIncomingMessage, opts?: { maxBytes?: number; timeoutMs?: number }): Promise<Buffer>;
-  handleGithubWebhookVerify(
-    req: FakeIncomingMessage | UntouchableReq,
-    res: FakeRes,
-    options?: { secret?: string; log?: (line: string) => void }
-  ): Promise<void>;
+  handleGithubWebhookVerify(req: FakeIncomingMessage | UntouchableReq, res: FakeRes, options?: HandleOptions): Promise<void>;
   resolveGithubWebhookMaxBytes(env?: Record<string, string | undefined>): number;
   GITHUB_WEBHOOK_MAX_BODY_BYTES_ENV: string;
+
+  // #116 -- multi-secret verify
+  verifyAnyGithubSignature(secrets: string[], rawBody: Buffer, headerValue: string | undefined): boolean;
+  resolveGithubWebhookSecrets(env?: Record<string, string | undefined>): string[];
+  GITHUB_WEBHOOK_SECRETS_ENV: string;
+
+  // #117 -- dedup key (also used as the /hooks/agent session-store label;
+  // there is no separate resumable session key -- /hooks/agent never
+  // resumes a session regardless of the label) + allowlist + dispatch
+  computeDedupKey(event: string, payload: unknown): string | undefined;
+  resolveDispatchAllowlist(env?: Record<string, string | undefined>): DispatchAllowlistEntry[];
+  matchesDispatchAllowlist(
+    entries: DispatchAllowlistEntry[],
+    event: string,
+    action: string | undefined,
+    repoFullName: string | undefined,
+    actorLogin: string | undefined,
+    commentBody: string | undefined
+  ): boolean;
+  GITHUB_DISPATCH_ALLOWLIST_ENV: string;
+  forwardToAgentHook(
+    dispatchKey: string,
+    event: string,
+    payload: unknown,
+    options?: { hookUrl?: string; hookToken?: string; fetchImpl?: typeof fetch }
+  ): Promise<{ forwarded: boolean }>;
+  resolveAgentHookUrl(env?: Record<string, string | undefined>): string;
+  OPENCLAW_AGENT_HOOK_URL_ENV: string;
+  OPENCLAW_AGENT_HOOK_TOKEN_ENV: string;
 }
 
 const webhook = nativeRequire(webhookModulePath) as WebhookVerifyModule;
@@ -494,5 +540,1125 @@ describe("handleGithubWebhookVerify", () => {
     await webhook.handleGithubWebhookVerify(req, res, { secret: TEST_SECRET });
 
     expect(res.statusCode).toBe(401);
+  });
+});
+
+// ============================================================================
+// Issue #116 -- multi-secret verify -- and #117 -- dedup key computation,
+// dispatch allowlist, forwarding to /hooks/agent -- deliverable D4.
+//
+// Module contract: docs/plans/github-webhook-agent-dispatch/plan.md.
+// ============================================================================
+
+/** Captures one call a stub `fetch` implementation received, without ever touching the real network. */
+interface CapturedFetchCall {
+  url: string;
+  init: Record<string, unknown>;
+}
+
+/**
+ * A stub `fetchImpl` for forwardToAgentHook: records every call and answers
+ * with a caller-supplied result (default `{ ok: true, status: 200 }`),
+ * without ever touching the real network.
+ */
+function createStubFetch(respond?: (call: CapturedFetchCall) => { ok: boolean; status: number }) {
+  const calls: CapturedFetchCall[] = [];
+  const fetchImpl = (async (url: unknown, init?: unknown) => {
+    const call: CapturedFetchCall = { url: String(url), init: (init ?? {}) as Record<string, unknown> };
+    calls.push(call);
+    const result = respond ? respond(call) : { ok: true, status: 200 };
+    return { ok: result.ok, status: result.status } as Response;
+  }) as unknown as typeof fetch;
+  return { fetchImpl, calls };
+}
+
+/** Adversarial `pull_request` payload builder -- unicode repo name, arbitrary field values, never copied from any fixture. */
+function prPayload(overrides: { repo?: string; number?: number; sha?: string; actor?: string; action?: string; body?: string } = {}) {
+  const repo = overrides.repo ?? "adversarial-öwner/répo-🐙";
+  const number = overrides.number ?? 4177;
+  const sha = overrides.sha ?? "sha-adversarial-0001";
+  return {
+    action: overrides.action ?? "synchronize",
+    number,
+    pull_request: { number, head: { sha }, body: overrides.body ?? "PR-BODY-MARKER-should-never-be-forwarded" },
+    repository: { full_name: repo },
+    sender: { login: overrides.actor ?? "adversarial-actor" }
+  };
+}
+
+/** Adversarial `issue_comment` payload builder -- unicode repo name, arbitrary field values, never copied from any fixture. */
+function issueCommentPayload(
+  overrides: { repo?: string; number?: number; commentId?: number | string; actor?: string; action?: string; body?: string } = {}
+) {
+  const repo = overrides.repo ?? "adversarial-öwner/répo-🐙";
+  const number = overrides.number ?? 8842;
+  const actor = overrides.actor ?? "adversarial-actor";
+  return {
+    action: overrides.action ?? "created",
+    issue: { number },
+    // comment.user.login mirrors sender.login here (the common "created by
+    // the same actor who authored the comment" case) -- the trust gate
+    // reads comment.user.login specifically so it stays bound to whoever
+    // authored the TEXT being pattern-matched, not whoever triggered this
+    // particular delivery (they can differ on "edited"/"deleted").
+    comment: {
+      id: overrides.commentId ?? 555,
+      body: overrides.body ?? "COMMENT-BODY-MARKER-should-never-be-forwarded",
+      user: { login: actor }
+    },
+    repository: { full_name: repo },
+    sender: { login: actor }
+  };
+}
+
+function captureThrown(fn: () => unknown): { code?: unknown; message?: string } {
+  try {
+    fn();
+    throw new Error("expected function to throw, but it did not");
+  } catch (err) {
+    if (err instanceof Error) return { code: (err as Error & { code?: unknown }).code, message: err.message };
+    return {};
+  }
+}
+
+// --- verifyAnyGithubSignature (#116, AC-FN-1, AC-SEC-1) ---------------------
+
+describe("verifyAnyGithubSignature", () => {
+  const body = Buffer.from(JSON.stringify({ adversarial: "payload with unicode ✅ and \"quotes\"" }));
+  const secrets = ["adversarial-secret-alpha", "adversarial-secret-beta-🔑", "adversarial-secret-gamma"];
+
+  it("verifies true when the header matches the FIRST configured secret", () => {
+    const sig = webhook.computeGithubSignature(secrets[0] ?? "", body);
+    expect(webhook.verifyAnyGithubSignature(secrets, body, sig)).toBe(true);
+  });
+
+  it("verifies true when the header matches a MIDDLE configured secret", () => {
+    const sig = webhook.computeGithubSignature(secrets[1] ?? "", body);
+    expect(webhook.verifyAnyGithubSignature(secrets, body, sig)).toBe(true);
+  });
+
+  it("verifies true when the header matches the LAST configured secret", () => {
+    const sig = webhook.computeGithubSignature(secrets[2] ?? "", body);
+    expect(webhook.verifyAnyGithubSignature(secrets, body, sig)).toBe(true);
+  });
+
+  it("verifies false when the header matches none of the configured secrets", () => {
+    const sig = webhook.computeGithubSignature("a-secret-not-in-the-list", body);
+    expect(webhook.verifyAnyGithubSignature(secrets, body, sig)).toBe(false);
+  });
+
+  it("always returns false for an empty secrets array, even with an otherwise-valid signature", () => {
+    const sig = webhook.computeGithubSignature("irrelevant", body);
+    expect(webhook.verifyAnyGithubSignature([], body, sig)).toBe(false);
+  });
+
+  // AC-SEC-1: every candidate is compared unconditionally, so a match at
+  // index 0 does not short-circuit the loop -- this is a code-review
+  // criterion (the source has no early `return true`), verified functionally
+  // here as "matching at every position still returns true and never
+  // throws," since the timing property itself isn't observable in a fast
+  // in-process unit test.
+  it("does not throw and still matches correctly regardless of a mutated candidate elsewhere in the list", () => {
+    const sig = webhook.computeGithubSignature(secrets[0] ?? "", body);
+    const withGarbageSecrets = ["", "not-a-real-secret", secrets[0] ?? "", "another-decoy"];
+    expect(() => webhook.verifyAnyGithubSignature(withGarbageSecrets, body, sig)).not.toThrow();
+    expect(webhook.verifyAnyGithubSignature(withGarbageSecrets, body, sig)).toBe(true);
+  });
+});
+
+// --- resolveGithubWebhookSecrets (#116, AC-FN-2) ----------------------------
+
+describe("resolveGithubWebhookSecrets", () => {
+  it("prefers a valid GITHUB_WEBHOOK_SECRETS over legacy GITHUB_WEBHOOK_SECRET", () => {
+    const secrets = webhook.resolveGithubWebhookSecrets({
+      GITHUB_WEBHOOK_SECRETS: JSON.stringify(["secret-one", "secret-two-🔑"]),
+      GITHUB_WEBHOOK_SECRET: "legacy-secret-should-be-ignored"
+    });
+    expect(secrets).toEqual(["secret-one", "secret-two-🔑"]);
+  });
+
+  it("resolves to a one-element array from GITHUB_WEBHOOK_SECRET when SECRETS is unset (unchanged single-secret behavior)", () => {
+    expect(webhook.resolveGithubWebhookSecrets({ GITHUB_WEBHOOK_SECRET: "only-legacy-secret" })).toEqual([
+      "only-legacy-secret"
+    ]);
+  });
+
+  it("resolves to [] when neither var is set", () => {
+    expect(webhook.resolveGithubWebhookSecrets({})).toEqual([]);
+  });
+
+  it("resolves to [] for a blank GITHUB_WEBHOOK_SECRETS, falling back to legacy", () => {
+    expect(webhook.resolveGithubWebhookSecrets({ GITHUB_WEBHOOK_SECRETS: "   ", GITHUB_WEBHOOK_SECRET: "fallback" })).toEqual([
+      "fallback"
+    ]);
+  });
+
+  it("throws a tagged config error on invalid JSON, rather than treating the raw string as one secret", () => {
+    const rawInput = "{not valid json -- s3cr3t-leak-probe";
+    const thrown = captureThrown(() => webhook.resolveGithubWebhookSecrets({ GITHUB_WEBHOOK_SECRETS: rawInput }));
+    expect(thrown.code).toBe("GITHUB_WEBHOOK_SECRETS_CONFIG_ERROR");
+    expect(thrown.message).toContain("GITHUB_WEBHOOK_SECRETS");
+    // The unit-level twin of the handler-level no-leak test above: confirms
+    // resolveGithubWebhookSecrets itself never echoes the raw input into its
+    // own thrown message, not just that the handler's console.error line
+    // doesn't (a fix at one layer without the other would still leak to any
+    // future caller that logs err.message directly).
+    expect(thrown.message).not.toContain(rawInput);
+  });
+
+  it("throws when GITHUB_WEBHOOK_SECRETS parses to valid JSON that is not an array", () => {
+    const thrown = captureThrown(() =>
+      webhook.resolveGithubWebhookSecrets({ GITHUB_WEBHOOK_SECRETS: JSON.stringify({ oops: "an object, not an array" }) })
+    );
+    expect(thrown.code).toBe("GITHUB_WEBHOOK_SECRETS_CONFIG_ERROR");
+  });
+
+  it("throws when an element is a non-string", () => {
+    const thrown = captureThrown(() => webhook.resolveGithubWebhookSecrets({ GITHUB_WEBHOOK_SECRETS: JSON.stringify(["ok", 12345]) }));
+    expect(thrown.code).toBe("GITHUB_WEBHOOK_SECRETS_CONFIG_ERROR");
+  });
+
+  it("throws when an element is an empty string", () => {
+    const thrown = captureThrown(() => webhook.resolveGithubWebhookSecrets({ GITHUB_WEBHOOK_SECRETS: JSON.stringify(["ok", ""]) }));
+    expect(thrown.code).toBe("GITHUB_WEBHOOK_SECRETS_CONFIG_ERROR");
+  });
+
+  it("throws when an element is whitespace-only or has leading/trailing whitespace", () => {
+    expect(captureThrown(() => webhook.resolveGithubWebhookSecrets({ GITHUB_WEBHOOK_SECRETS: JSON.stringify(["   "]) })).code).toBe(
+      "GITHUB_WEBHOOK_SECRETS_CONFIG_ERROR"
+    );
+    expect(
+      captureThrown(() => webhook.resolveGithubWebhookSecrets({ GITHUB_WEBHOOK_SECRETS: JSON.stringify([" padded-secret "]) })).code
+    ).toBe("GITHUB_WEBHOOK_SECRETS_CONFIG_ERROR");
+  });
+
+  it("rejects a whitespace-only legacy GITHUB_WEBHOOK_SECRET as unset, rather than treating it as a valid secret", () => {
+    expect(webhook.resolveGithubWebhookSecrets({ GITHUB_WEBHOOK_SECRET: "   " })).toEqual([]);
+  });
+
+  it("never silently falls back to legacy on a malformed GITHUB_WEBHOOK_SECRETS, even when legacy is also set", () => {
+    expect(() =>
+      webhook.resolveGithubWebhookSecrets({ GITHUB_WEBHOOK_SECRETS: "not json at all", GITHUB_WEBHOOK_SECRET: "would-be-wrong-to-use" })
+    ).toThrow();
+  });
+});
+
+// --- computeDedupKey (#117, AC-FN-4/5/7) ------------------------------------
+//
+// computeSessionKey was removed: /hooks/agent never resumes a session
+// regardless of the label supplied, confirmed against the actual OpenClaw
+// source (dispatchAgentHook hardcodes sessionTarget: "isolated") and
+// verified empirically (identical sessionKey, two different session ids
+// across two live calls). One dedup key now covers both the forward
+// decision and the session-store label -- there is no separate stable key
+// to test for cross-delivery agreement.
+
+describe("computeDedupKey", () => {
+  it("pull_request: dedup key includes repo + PR number + head sha, reproducible on an identical replay", () => {
+    const payload = prPayload({ repo: "replay-owner/replay-repo", number: 101, sha: "sha-replay" });
+    const replay = prPayload({ repo: "replay-owner/replay-repo", number: 101, sha: "sha-replay" });
+    const key = webhook.computeDedupKey("pull_request", payload);
+    expect(key).toBe("replay-owner/replay-repo#101@sha-replay");
+    expect(webhook.computeDedupKey("pull_request", replay)).toBe(key);
+  });
+
+  it("pull_request: only the head sha changing produces a different dedup key", () => {
+    const before = prPayload({ repo: "move-owner/move-repo", number: 55, sha: "sha-before-push" });
+    const after = prPayload({ repo: "move-owner/move-repo", number: 55, sha: "sha-after-push" });
+    expect(webhook.computeDedupKey("pull_request", before)).not.toBe(webhook.computeDedupKey("pull_request", after));
+  });
+
+  it("issue_comment: dedup key includes repo + resource number + comment id; a different comment on the same issue differs", () => {
+    const c1 = issueCommentPayload({ repo: "comment-owner/comment-repo", number: 9, commentId: 111 });
+    const c2 = issueCommentPayload({ repo: "comment-owner/comment-repo", number: 9, commentId: 222 });
+    expect(webhook.computeDedupKey("issue_comment", c1)).toBe("comment-owner/comment-repo#9/comment-111");
+    expect(webhook.computeDedupKey("issue_comment", c1)).not.toBe(webhook.computeDedupKey("issue_comment", c2));
+  });
+
+  // AC-FN-7: a payload missing a field its event type requires returns
+  // undefined, never a key built from partial data.
+  it("returns undefined for a pull_request payload with no pull_request.head.sha", () => {
+    const malformed = { number: 42, pull_request: { number: 42 }, repository: { full_name: "malformed-owner/repo" } };
+    expect(webhook.computeDedupKey("pull_request", malformed)).toBeUndefined();
+  });
+
+  it("returns undefined for an issue_comment payload with no comment.id", () => {
+    const malformed = { issue: { number: 7 }, comment: {}, repository: { full_name: "malformed-owner/repo" } };
+    expect(webhook.computeDedupKey("issue_comment", malformed)).toBeUndefined();
+  });
+
+  it("returns undefined when repository.full_name is missing entirely", () => {
+    const malformed = prPayload();
+    // @ts-expect-error -- deliberately constructing a malformed payload for the adversarial case
+    delete malformed.repository;
+    expect(webhook.computeDedupKey("pull_request", malformed)).toBeUndefined();
+  });
+
+  it("returns undefined for an entirely unsupported event type (e.g. push)", () => {
+    const payload = { repository: { full_name: "some-owner/some-repo" }, ref: "refs/heads/main" };
+    expect(webhook.computeDedupKey("push", payload)).toBeUndefined();
+  });
+});
+
+// --- resolveDispatchAllowlist (#117, AC-FN-8) -------------------------------
+
+describe("resolveDispatchAllowlist", () => {
+  it("resolves to [] when unset or blank", () => {
+    expect(webhook.resolveDispatchAllowlist({})).toEqual([]);
+    expect(webhook.resolveDispatchAllowlist({ GITHUB_DISPATCH_ALLOWLIST: "  " })).toEqual([]);
+  });
+
+  it("parses a valid entry into the documented shape", () => {
+    const entries = webhook.resolveDispatchAllowlist({
+      GITHUB_DISPATCH_ALLOWLIST: JSON.stringify([
+        {
+          repo: "allow-owner/allow-repo",
+          events: [
+            { event: "pull_request", actions: ["opened", "synchronize"] },
+            { event: "issue_comment", actions: ["created"], trustedMention: { actors: ["trusted-one"], pattern: "@bot\\b" } }
+          ]
+        }
+      ])
+    });
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.repo).toBe("allow-owner/allow-repo");
+  });
+
+  it("throws a tagged config error on invalid JSON, never echoing the raw input in its own message", () => {
+    const rawInput = "[not valid -- decoy-repo-secret-91";
+    const thrown = captureThrown(() => webhook.resolveDispatchAllowlist({ GITHUB_DISPATCH_ALLOWLIST: rawInput }));
+    expect(thrown.code).toBe("GITHUB_DISPATCH_ALLOWLIST_CONFIG_ERROR");
+    expect(thrown.message).not.toContain(rawInput);
+  });
+
+  it("throws when an entry is missing events", () => {
+    const thrown = captureThrown(() =>
+      webhook.resolveDispatchAllowlist({ GITHUB_DISPATCH_ALLOWLIST: JSON.stringify([{ repo: "owner/repo" }]) })
+    );
+    expect(thrown.code).toBe("GITHUB_DISPATCH_ALLOWLIST_CONFIG_ERROR");
+  });
+
+  it("throws when an issue_comment entry has no trustedMention", () => {
+    const thrown = captureThrown(() =>
+      webhook.resolveDispatchAllowlist({
+        GITHUB_DISPATCH_ALLOWLIST: JSON.stringify([
+          { repo: "owner/repo", events: [{ event: "issue_comment", actions: ["created"] }] }
+        ])
+      })
+    );
+    expect(thrown.code).toBe("GITHUB_DISPATCH_ALLOWLIST_CONFIG_ERROR");
+  });
+
+  it("throws when the top-level value is not an array", () => {
+    const thrown = captureThrown(() =>
+      webhook.resolveDispatchAllowlist({ GITHUB_DISPATCH_ALLOWLIST: JSON.stringify({ repo: "owner/repo" }) })
+    );
+    expect(thrown.code).toBe("GITHUB_DISPATCH_ALLOWLIST_CONFIG_ERROR");
+  });
+
+  // Copilot review round 1: every identifier below is matched by strict
+  // equality downstream (matchesDispatchAllowlist), so a config value that
+  // is merely non-empty after trimming can still config-validate
+  // successfully and then silently never match anything -- indistinguishable
+  // from a genuinely unenrolled/untrusted delivery. Each case pads or
+  // blanks exactly one identifier to confirm it's rejected at resolve time.
+  it("throws when \"repo\" has leading/trailing whitespace", () => {
+    const thrown = captureThrown(() =>
+      webhook.resolveDispatchAllowlist({
+        GITHUB_DISPATCH_ALLOWLIST: JSON.stringify([
+          { repo: " owner/repo ", events: [{ event: "pull_request", actions: ["opened"] }] }
+        ])
+      })
+    );
+    expect(thrown.code).toBe("GITHUB_DISPATCH_ALLOWLIST_CONFIG_ERROR");
+  });
+
+  it("throws when an \"events\" item's \"event\" has leading/trailing whitespace", () => {
+    const thrown = captureThrown(() =>
+      webhook.resolveDispatchAllowlist({
+        GITHUB_DISPATCH_ALLOWLIST: JSON.stringify([
+          { repo: "owner/repo", events: [{ event: " pull_request", actions: ["opened"] }] }
+        ])
+      })
+    );
+    expect(thrown.code).toBe("GITHUB_DISPATCH_ALLOWLIST_CONFIG_ERROR");
+  });
+
+  it("throws when an \"actions\" entry is whitespace-only or padded", () => {
+    expect(
+      captureThrown(() =>
+        webhook.resolveDispatchAllowlist({
+          GITHUB_DISPATCH_ALLOWLIST: JSON.stringify([{ repo: "owner/repo", events: [{ event: "pull_request", actions: ["   "] }] }])
+        })
+      ).code
+    ).toBe("GITHUB_DISPATCH_ALLOWLIST_CONFIG_ERROR");
+    expect(
+      captureThrown(() =>
+        webhook.resolveDispatchAllowlist({
+          GITHUB_DISPATCH_ALLOWLIST: JSON.stringify([{ repo: "owner/repo", events: [{ event: "pull_request", actions: ["opened "] }] }])
+        })
+      ).code
+    ).toBe("GITHUB_DISPATCH_ALLOWLIST_CONFIG_ERROR");
+  });
+
+  it("throws when a trustedMention actor is whitespace-only or padded", () => {
+    const thrown = captureThrown(() =>
+      webhook.resolveDispatchAllowlist({
+        GITHUB_DISPATCH_ALLOWLIST: JSON.stringify([
+          {
+            repo: "owner/repo",
+            events: [{ event: "issue_comment", actions: ["created"], trustedMention: { actors: [" trusted-actor "], pattern: "@bot" } }]
+          }
+        ])
+      })
+    );
+    expect(thrown.code).toBe("GITHUB_DISPATCH_ALLOWLIST_CONFIG_ERROR");
+  });
+
+  it("throws when a trustedMention.pattern is whitespace-only, but tolerates leading/trailing whitespace within an otherwise valid regex", () => {
+    expect(
+      captureThrown(() =>
+        webhook.resolveDispatchAllowlist({
+          GITHUB_DISPATCH_ALLOWLIST: JSON.stringify([
+            {
+              repo: "owner/repo",
+              events: [{ event: "issue_comment", actions: ["created"], trustedMention: { actors: ["trusted-actor"], pattern: "   " } }]
+            }
+          ])
+        })
+      ).code
+    ).toBe("GITHUB_DISPATCH_ALLOWLIST_CONFIG_ERROR");
+    // Unlike repo/event/action/actor identifiers, a pattern is a regex
+    // source compiled and matched via .test(), not compared by exact string
+    // equality -- padding is not the same defect class here, so this must
+    // NOT throw.
+    expect(() =>
+      webhook.resolveDispatchAllowlist({
+        GITHUB_DISPATCH_ALLOWLIST: JSON.stringify([
+          {
+            repo: "owner/repo",
+            events: [{ event: "issue_comment", actions: ["created"], trustedMention: { actors: ["trusted-actor"], pattern: " @bot " } }]
+          }
+        ])
+      })
+    ).not.toThrow();
+  });
+});
+
+// --- matchesDispatchAllowlist (#117, AC-FN-9/10, AC-SEC-3) ------------------
+
+describe("matchesDispatchAllowlist", () => {
+  const entries = [
+    {
+      repo: "match-owner/match-repo",
+      events: [
+        { event: "pull_request", actions: ["opened", "synchronize"] },
+        {
+          event: "issue_comment",
+          actions: ["created"],
+          trustedMention: { actors: ["trusted-actor-one", "trusted-actor-two"], pattern: "@review-bot\\b" }
+        }
+      ]
+    }
+  ];
+
+  // AC-FN-9
+  it("returns true only when the repo has an entry AND that entry permits the exact (event, action) pair", () => {
+    expect(webhook.matchesDispatchAllowlist(entries, "pull_request", "opened", "match-owner/match-repo", "anyone", undefined)).toBe(
+      true
+    );
+  });
+
+  it("returns false for a repo that is not listed at all", () => {
+    expect(webhook.matchesDispatchAllowlist(entries, "pull_request", "opened", "unlisted-owner/unlisted-repo", "anyone", undefined)).toBe(
+      false
+    );
+  });
+
+  it("returns false for an unlisted action on an otherwise-listed event", () => {
+    expect(webhook.matchesDispatchAllowlist(entries, "pull_request", "closed", "match-owner/match-repo", "anyone", undefined)).toBe(
+      false
+    );
+  });
+
+  it("returns false for an event the repo's entry does not list at all", () => {
+    expect(
+      webhook.matchesDispatchAllowlist(entries, "pull_request_review", "submitted", "match-owner/match-repo", "anyone", undefined)
+    ).toBe(false);
+  });
+
+  // AC-FN-10 -- adversarial actor/mention combinations constructed here, not copied from any fixture.
+  it("issue_comment: true only when the actor is trusted AND the comment matches the mention pattern", () => {
+    expect(
+      webhook.matchesDispatchAllowlist(
+        entries,
+        "issue_comment",
+        "created",
+        "match-owner/match-repo",
+        "trusted-actor-two",
+        "please look at this, @review-bot"
+      )
+    ).toBe(true);
+  });
+
+  it("issue_comment: an UNTRUSTED actor with the correct mention still returns false", () => {
+    expect(
+      webhook.matchesDispatchAllowlist(
+        entries,
+        "issue_comment",
+        "created",
+        "match-owner/match-repo",
+        "a-random-drive-by-commenter",
+        "please look at this, @review-bot"
+      )
+    ).toBe(false);
+  });
+
+  it("issue_comment: a TRUSTED actor WITHOUT the mention still returns false", () => {
+    expect(
+      webhook.matchesDispatchAllowlist(
+        entries,
+        "issue_comment",
+        "created",
+        "match-owner/match-repo",
+        "trusted-actor-one",
+        "just a regular comment with no mention at all"
+      )
+    ).toBe(false);
+  });
+
+  it("issue_comment: a trusted actor's comment containing only a near-miss token (\\b boundary excludes it) returns false", () => {
+    // "@review-botnet" does NOT satisfy pattern "@review-bot\\b" -- "net"
+    // immediately follows "bot" with no word boundary between them. No
+    // other mention appears anywhere else in the body.
+    expect(
+      webhook.matchesDispatchAllowlist(
+        entries,
+        "issue_comment",
+        "created",
+        "match-owner/match-repo",
+        "trusted-actor-one",
+        "hey @review-botnet, unrelated tool, please ignore"
+      )
+    ).toBe(false);
+  });
+
+  // AC-SEC-3: the function never returns the comment body itself, only a boolean.
+  it("never returns the comment body -- only ever a boolean, even on a match", () => {
+    const result = webhook.matchesDispatchAllowlist(
+      entries,
+      "issue_comment",
+      "created",
+      "match-owner/match-repo",
+      "trusted-actor-one",
+      "@review-bot please act on UNIQUE-COMMENT-MARKER-9f2a"
+    );
+    expect(typeof result).toBe("boolean");
+  });
+});
+
+// --- forwardToAgentHook (#117, AC-FN-11/12) ---------------------------------
+
+describe("forwardToAgentHook", () => {
+  // AC-FN-11
+  it("POSTs a body containing only sessionKey and trigger{event, repo, resource, actor, deliveryId} -- never the raw comment/PR body", async () => {
+    const marker = "RAW-BODY-TEXT-MARKER-should-never-be-forwarded-3f8c";
+    const { fetchImpl, calls } = createStubFetch();
+    const payload = {
+      repository: { full_name: "forward-owner/forward-repo" },
+      issue: { number: 77 },
+      sender: { login: "someone-else-triggered-this-delivery" },
+      // actorLoginFor reads comment.user.login for issue_comment (the
+      // comment's AUTHOR), not sender.login (whoever triggered this
+      // particular delivery) -- deliberately different values here to prove
+      // trigger.actor below reflects the former, not the latter.
+      comment: { id: 321, body: marker, user: { login: "forward-actor" } },
+      deliveryId: "delivery-abc-123"
+    };
+
+    const result = await webhook.forwardToAgentHook("forward-owner/forward-repo#77", "issue_comment", payload, {
+      hookUrl: "http://stub-target.invalid/hooks/agent",
+      hookToken: "stub-token",
+      fetchImpl
+    });
+
+    expect(result).toEqual({ forwarded: true });
+    expect(calls).toHaveLength(1);
+    const call = calls[0];
+    if (call === undefined) throw new Error("unreachable: length checked above");
+    expect(call.url).toBe("http://stub-target.invalid/hooks/agent");
+    const sentBody = JSON.parse(String(call.init["body"])) as { sessionKey: string; trigger: Record<string, unknown> };
+    expect(sentBody).toEqual({
+      sessionKey: "forward-owner/forward-repo#77",
+      trigger: {
+        event: "issue_comment",
+        repo: "forward-owner/forward-repo",
+        resource: 77,
+        actor: "forward-actor",
+        deliveryId: "delivery-abc-123"
+      }
+    });
+    expect(JSON.stringify(sentBody)).not.toContain(marker);
+
+    const headers = call.init["headers"] as Record<string, string>;
+    expect(headers["authorization"]).toBe("Bearer stub-token");
+  });
+
+  it("omits the authorization header when no hook token is configured", async () => {
+    const { fetchImpl, calls } = createStubFetch();
+    await webhook.forwardToAgentHook("k#1", "pull_request", prPayload(), {
+      hookUrl: "http://stub-target.invalid/hooks/agent",
+      fetchImpl
+    });
+    const call = calls[0];
+    if (call === undefined) throw new Error("unreachable");
+    const headers = call.init["headers"] as Record<string, string>;
+    expect(headers["authorization"]).toBeUndefined();
+  });
+
+  // AC-FN-12
+  it("returns { forwarded: false } and never throws when the downstream fetch rejects", async () => {
+    const fetchImpl = (async () => {
+      throw new Error("simulated network failure reaching the gateway");
+    }) as unknown as typeof fetch;
+
+    await expect(
+      webhook.forwardToAgentHook("k#1", "pull_request", prPayload(), { hookUrl: "http://stub-target.invalid/hooks/agent", fetchImpl })
+    ).resolves.toEqual({ forwarded: false });
+  });
+
+  it("returns { forwarded: false } when the downstream responds non-2xx", async () => {
+    const { fetchImpl } = createStubFetch(() => ({ ok: false, status: 503 }));
+    const result = await webhook.forwardToAgentHook("k#1", "pull_request", prPayload(), {
+      hookUrl: "http://stub-target.invalid/hooks/agent",
+      fetchImpl
+    });
+    expect(result).toEqual({ forwarded: false });
+  });
+});
+
+// --- resolveAgentHookUrl (#117) ---------------------------------------------
+
+describe("resolveAgentHookUrl", () => {
+  it("defaults to http://127.0.0.1:18789/hooks/agent, matching the pinned wrapper's own gateway-proxy default", () => {
+    expect(webhook.resolveAgentHookUrl({})).toBe("http://127.0.0.1:18789/hooks/agent");
+  });
+
+  it("honors an explicit OPENCLAW_AGENT_HOOK_URL override", () => {
+    expect(webhook.resolveAgentHookUrl({ OPENCLAW_AGENT_HOOK_URL: "http://explicit-override.invalid/custom-path" })).toBe(
+      "http://explicit-override.invalid/custom-path"
+    );
+  });
+
+  it("tracks INTERNAL_GATEWAY_HOST / INTERNAL_GATEWAY_PORT when the wrapper's own gateway target is overridden", () => {
+    expect(webhook.resolveAgentHookUrl({ INTERNAL_GATEWAY_HOST: "10.1.2.3", INTERNAL_GATEWAY_PORT: "9999" })).toBe(
+      "http://10.1.2.3:9999/hooks/agent"
+    );
+  });
+});
+
+// --- handleGithubWebhookVerify dispatch wiring (#117, AC-FN-13/14, AC-TST-2) ---
+
+describe("handleGithubWebhookVerify -- dispatch wiring", () => {
+  /** Builds a POST request whose raw body verifies against TEST_SECRET, with the given event/delivery headers. */
+  function createSignedRequest(payload: unknown, headers: { event: string; deliveryId: string }) {
+    const rawBody = Buffer.from(JSON.stringify(payload));
+    const signature = webhook.computeGithubSignature(TEST_SECRET, rawBody);
+    return createFakeReq({
+      method: "POST",
+      headers: {
+        "x-hub-signature-256": signature,
+        "x-github-event": headers.event,
+        "x-github-delivery": headers.deliveryId
+      },
+      body: rawBody
+    });
+  }
+
+  function allowlistEnv(repo: string) {
+    return {
+      GITHUB_DISPATCH_ALLOWLIST: JSON.stringify([
+        {
+          repo,
+          events: [
+            { event: "pull_request", actions: ["opened", "synchronize"] },
+            { event: "issue_comment", actions: ["created"], trustedMention: { actors: ["trusted-actor"], pattern: "@bot\\b" } }
+          ]
+        }
+      ])
+    };
+  }
+
+  // AC-FN-13 (allowed path)
+  it("a verified, allowlisted, non-duplicate delivery results in exactly one forward call using the dedup key as its session-store label, and still responds 200", async () => {
+    const originalAllowlist = process.env.GITHUB_DISPATCH_ALLOWLIST;
+    const repo = "dispatch-owner/dispatch-repo-allowed";
+    process.env.GITHUB_DISPATCH_ALLOWLIST = allowlistEnv(repo).GITHUB_DISPATCH_ALLOWLIST;
+    try {
+      const payload = prPayload({ repo, number: 200, sha: "sha-allowed" });
+      const req = createSignedRequest(payload, { event: "pull_request", deliveryId: "delivery-allowed-1" });
+      const res = createFakeRes();
+      const { fetchImpl, calls } = createStubFetch();
+
+      await webhook.handleGithubWebhookVerify(req, res, {
+        secret: TEST_SECRET,
+        dedupStore: new Set(),
+        forward: { fetchImpl, hookUrl: "http://stub-target.invalid/hooks/agent" }
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(calls).toHaveLength(1);
+      const call = calls[0];
+      if (call === undefined) throw new Error("unreachable");
+      const sentBody = JSON.parse(String(call.init["body"])) as { sessionKey: string };
+      expect(sentBody.sessionKey).toBe(webhook.computeDedupKey("pull_request", payload));
+    } finally {
+      if (originalAllowlist === undefined) delete process.env.GITHUB_DISPATCH_ALLOWLIST;
+      else process.env.GITHUB_DISPATCH_ALLOWLIST = originalAllowlist;
+    }
+  });
+
+  // AC-FN-13 (unenrolled: repo not in allowlist)
+  it("a verified delivery for a repo NOT in the allowlist results in zero forward calls, and still responds 200", async () => {
+    const originalAllowlist = process.env.GITHUB_DISPATCH_ALLOWLIST;
+    process.env.GITHUB_DISPATCH_ALLOWLIST = allowlistEnv("some-other-owner/some-other-repo").GITHUB_DISPATCH_ALLOWLIST;
+    try {
+      const payload = prPayload({ repo: "unenrolled-owner/unenrolled-repo", number: 1, sha: "sha-x" });
+      const req = createSignedRequest(payload, { event: "pull_request", deliveryId: "delivery-unenrolled-1" });
+      const res = createFakeRes();
+      const { fetchImpl, calls } = createStubFetch();
+
+      await webhook.handleGithubWebhookVerify(req, res, {
+        secret: TEST_SECRET,
+        dedupStore: new Set(),
+        forward: { fetchImpl }
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(calls).toHaveLength(0);
+    } finally {
+      if (originalAllowlist === undefined) delete process.env.GITHUB_DISPATCH_ALLOWLIST;
+      else process.env.GITHUB_DISPATCH_ALLOWLIST = originalAllowlist;
+    }
+  });
+
+  // AC-FN-13 (unsupported event type)
+  it("a verified delivery for an unsupported event type results in zero forward calls, and still responds 200", async () => {
+    const payload = { repository: { full_name: "some-owner/some-repo" }, ref: "refs/heads/main" };
+    const req = createSignedRequest(payload, { event: "push", deliveryId: "delivery-push-1" });
+    const res = createFakeRes();
+    const { fetchImpl, calls } = createStubFetch();
+
+    await webhook.handleGithubWebhookVerify(req, res, { secret: TEST_SECRET, dedupStore: new Set(), forward: { fetchImpl } });
+
+    expect(res.statusCode).toBe(200);
+    expect(calls).toHaveLength(0);
+  });
+
+  // AC-FN-13 (untrusted issue_comment actor)
+  it("a verified issue_comment delivery from an untrusted actor results in zero forward calls, and still responds 200", async () => {
+    const originalAllowlist = process.env.GITHUB_DISPATCH_ALLOWLIST;
+    const repo = "dispatch-owner/dispatch-repo-untrusted";
+    process.env.GITHUB_DISPATCH_ALLOWLIST = allowlistEnv(repo).GITHUB_DISPATCH_ALLOWLIST;
+    try {
+      const payload = issueCommentPayload({ repo, number: 5, commentId: 9, actor: "an-untrusted-drive-by-actor", body: "@bot please act" });
+      const req = createSignedRequest(payload, { event: "issue_comment", deliveryId: "delivery-untrusted-1" });
+      const res = createFakeRes();
+      const { fetchImpl, calls } = createStubFetch();
+
+      await webhook.handleGithubWebhookVerify(req, res, { secret: TEST_SECRET, dedupStore: new Set(), forward: { fetchImpl } });
+
+      expect(res.statusCode).toBe(200);
+      expect(calls).toHaveLength(0);
+    } finally {
+      if (originalAllowlist === undefined) delete process.env.GITHUB_DISPATCH_ALLOWLIST;
+      else process.env.GITHUB_DISPATCH_ALLOWLIST = originalAllowlist;
+    }
+  });
+
+  // AC-FN-13 (duplicate dedup key)
+  it("a repeat delivery of an already-forwarded dedup key results in zero additional forward calls, and still responds 200", async () => {
+    const originalAllowlist = process.env.GITHUB_DISPATCH_ALLOWLIST;
+    const repo = "dispatch-owner/dispatch-repo-dup";
+    process.env.GITHUB_DISPATCH_ALLOWLIST = allowlistEnv(repo).GITHUB_DISPATCH_ALLOWLIST;
+    try {
+      const payload = prPayload({ repo, number: 300, sha: "sha-dup" });
+      const dedupStore = new Set<string>();
+      const { fetchImpl, calls } = createStubFetch();
+
+      const req1 = createSignedRequest(payload, { event: "pull_request", deliveryId: "delivery-dup-1" });
+      const res1 = createFakeRes();
+      await webhook.handleGithubWebhookVerify(req1, res1, { secret: TEST_SECRET, dedupStore, forward: { fetchImpl } });
+      expect(res1.statusCode).toBe(200);
+      expect(calls).toHaveLength(1);
+
+      // Same payload again -- GitHub's own at-least-once delivery guarantee
+      // means an identical redelivery is expected, not exotic.
+      const req2 = createSignedRequest(payload, { event: "pull_request", deliveryId: "delivery-dup-1-redelivered" });
+      const res2 = createFakeRes();
+      await webhook.handleGithubWebhookVerify(req2, res2, { secret: TEST_SECRET, dedupStore, forward: { fetchImpl } });
+      expect(res2.statusCode).toBe(200);
+      expect(calls).toHaveLength(1); // still 1 -- the repeat did not forward again
+    } finally {
+      if (originalAllowlist === undefined) delete process.env.GITHUB_DISPATCH_ALLOWLIST;
+      else process.env.GITHUB_DISPATCH_ALLOWLIST = originalAllowlist;
+    }
+  });
+
+  // A malformed GITHUB_DISPATCH_ALLOWLIST must degrade to "do not forward,"
+  // never a 500 to GitHub for a delivery it verified correctly.
+  it("a malformed GITHUB_DISPATCH_ALLOWLIST results in zero forward calls but STILL responds 200 (never a 500 for this delivery)", async () => {
+    const originalAllowlist = process.env.GITHUB_DISPATCH_ALLOWLIST;
+    process.env.GITHUB_DISPATCH_ALLOWLIST = "{ this is not valid JSON";
+    try {
+      const payload = prPayload({ repo: "config-error-owner/config-error-repo", number: 1, sha: "sha-x" });
+      const req = createSignedRequest(payload, { event: "pull_request", deliveryId: "delivery-config-error-1" });
+      const res = createFakeRes();
+      const { fetchImpl, calls } = createStubFetch();
+
+      await webhook.handleGithubWebhookVerify(req, res, { secret: TEST_SECRET, dedupStore: new Set(), forward: { fetchImpl } });
+
+      expect(res.statusCode).toBe(200);
+      expect(calls).toHaveLength(0);
+    } finally {
+      if (originalAllowlist === undefined) delete process.env.GITHUB_DISPATCH_ALLOWLIST;
+      else process.env.GITHUB_DISPATCH_ALLOWLIST = originalAllowlist;
+    }
+  });
+
+  // AC-SEC-2: the dispatch outcome logged alongside {route, result} is a
+  // bounded value, and no log line ever includes the session key, dedup
+  // key, raw allowlist config, or comment body.
+  it("logs a bounded dispatch outcome and never leaks the dedup key, allowlist config, or comment body", async () => {
+    const originalAllowlist = process.env.GITHUB_DISPATCH_ALLOWLIST;
+    const repo = "log-hygiene-owner/log-hygiene-repo";
+    process.env.GITHUB_DISPATCH_ALLOWLIST = allowlistEnv(repo).GITHUB_DISPATCH_ALLOWLIST;
+    try {
+      const secretMarker = "UNIQUE-COMMENT-BODY-MARKER-should-never-be-logged-7ad2";
+      const payload = issueCommentPayload({ repo, number: 12, commentId: 1, actor: "trusted-actor", body: `@bot ${secretMarker}` });
+      const req = createSignedRequest(payload, { event: "issue_comment", deliveryId: "delivery-log-hygiene-1" });
+      const res = createFakeRes();
+      const { fetchImpl, calls } = createStubFetch();
+      const logged: string[] = [];
+
+      await webhook.handleGithubWebhookVerify(req, res, {
+        secret: TEST_SECRET,
+        dedupStore: new Set(),
+        forward: { fetchImpl },
+        log: (line) => logged.push(line)
+      });
+
+      expect(logged.length).toBeGreaterThan(0);
+      const dispatchLine = logged.find((line) => parseLoggedLine(line).dispatch !== undefined);
+      expect(dispatchLine).toBeDefined();
+      const parsedDispatch = dispatchLine === undefined ? undefined : parseLoggedLine(dispatchLine).dispatch;
+      // This payload IS a trusted actor with a matching mention against a
+      // configured allowlist entry -- assert the actual outcome ("forwarded"),
+      // not just bounded membership in the five possible values. A vacuous
+      // version of this assertion would pass identically whether the trust
+      // gate correctly forwarded or silently rejected everyone.
+      expect(parsedDispatch).toBe("forwarded");
+      expect(calls).toHaveLength(1);
+      const sentBody = JSON.parse(String(calls[0]?.init["body"])) as { sessionKey: string };
+      expect(sentBody.sessionKey).toBe(webhook.computeDedupKey("issue_comment", payload));
+      for (const line of logged) {
+        expect(line).not.toContain(secretMarker);
+        expect(line).not.toContain("@bot");
+        expect(line).not.toContain("trusted-actor");
+        expect(line).not.toContain(webhook.computeDedupKey("issue_comment", payload) ?? "unreachable-dedup-key");
+      }
+    } finally {
+      if (originalAllowlist === undefined) delete process.env.GITHUB_DISPATCH_ALLOWLIST;
+      else process.env.GITHUB_DISPATCH_ALLOWLIST = originalAllowlist;
+    }
+  });
+
+  // AC-TST-2 -- the retro rule from #108: a fixture built fresh-only misses
+  // "already wired into the pipeline" bugs. This drives the SAME shared
+  // request-stream resource `readRawBody`'s own tests already cover in
+  // isolation into an already-drained (post-side-effect) state BEFORE
+  // handling it, but this time through the full, newly-extended
+  // handleGithubWebhookVerify -- proving the new multi-secret-resolution and
+  // dispatch wiring added in this deliverable never gets far enough to run
+  // (no signature check, no dedup/allowlist consult, no forward call) when
+  // an earlier pipeline stage (modeled here exactly as #108's own docs
+  // describe: e.g. a body parser registered ahead of this route) has
+  // already consumed the request stream.
+  it("responds 400 and attempts NO dispatch when the request stream was already drained by an earlier pipeline stage", async () => {
+    const req = createFakeReq({ method: "POST", headers: { "x-github-event": "pull_request" }, body: Buffer.from("already consumed") });
+    // Model the exact prior-stage effect: an earlier body-parser fully
+    // drains the stream before this handler's own readRawBody ever attaches
+    // its listeners -- the same scenario #108's own review documented.
+    req.resume();
+    await new Promise<void>((resolve) => req.once("end", () => resolve()));
+    expect(req.readableEnded).toBe(true);
+
+    const res = createFakeRes();
+    const { fetchImpl, calls } = createStubFetch();
+    await webhook.handleGithubWebhookVerify(req, res, { secret: TEST_SECRET, dedupStore: new Set(), forward: { fetchImpl } });
+
+    expect(res.statusCode).toBe(400);
+    expect(calls).toHaveLength(0); // dispatch wiring never ran -- the response short-circuited before it
+  });
+
+  // A second angle on AC-TST-2: the dedupStore itself is a resource that can
+  // already carry a prior side effect (a previous request in this same
+  // process already forwarded this exact key) BEFORE this call ever runs --
+  // proven here by pre-seeding it directly, rather than only via a first
+  // live call as the AC-FN-13 duplicate test above does.
+  it("treats a dedupStore pre-seeded with the delivery's own dedup key (a prior side effect from before this call) as a duplicate", async () => {
+    const originalAllowlist = process.env.GITHUB_DISPATCH_ALLOWLIST;
+    const repo = "preseeded-owner/preseeded-repo";
+    process.env.GITHUB_DISPATCH_ALLOWLIST = allowlistEnv(repo).GITHUB_DISPATCH_ALLOWLIST;
+    try {
+      const payload = prPayload({ repo, number: 9001, sha: "sha-preseeded" });
+      const dedupKey = webhook.computeDedupKey("pull_request", payload);
+      if (dedupKey === undefined) throw new Error("unreachable: payload is well-formed");
+      const dedupStore = new Set<string>([dedupKey]); // pre-seeded BEFORE the handler ever runs
+
+      const req = createSignedRequest(payload, { event: "pull_request", deliveryId: "delivery-preseeded-1" });
+      const res = createFakeRes();
+      const { fetchImpl, calls } = createStubFetch();
+
+      await webhook.handleGithubWebhookVerify(req, res, { secret: TEST_SECRET, dedupStore, forward: { fetchImpl } });
+
+      expect(res.statusCode).toBe(200);
+      expect(calls).toHaveLength(0);
+    } finally {
+      if (originalAllowlist === undefined) delete process.env.GITHUB_DISPATCH_ALLOWLIST;
+      else process.env.GITHUB_DISPATCH_ALLOWLIST = originalAllowlist;
+    }
+  });
+
+  // AC-FN-3 parity: with GITHUB_WEBHOOK_SECRETS resolving to exactly one
+  // secret (the new multi-secret path, not the options.secret override),
+  // the response contract is unchanged from single-secret behavior.
+  it("AC-FN-3 parity: a single secret configured via GITHUB_WEBHOOK_SECRETS (not options.secret) verifies exactly like the legacy single-secret path", async () => {
+    const originalSecrets = process.env.GITHUB_WEBHOOK_SECRETS;
+    const originalLegacy = process.env.GITHUB_WEBHOOK_SECRET;
+    delete process.env.GITHUB_WEBHOOK_SECRET;
+    process.env.GITHUB_WEBHOOK_SECRETS = JSON.stringify([TEST_SECRET]);
+    try {
+      const payload = { repository: { full_name: "parity-owner/parity-repo" } };
+      const rawBody = Buffer.from(JSON.stringify(payload));
+      const signature = webhook.computeGithubSignature(TEST_SECRET, rawBody);
+      const req = createFakeReq({ method: "POST", headers: { "x-hub-signature-256": signature }, body: rawBody });
+      const res = createFakeRes();
+      await webhook.handleGithubWebhookVerify(req, res); // no options at all -- purely env-driven
+      expect(res.statusCode).toBe(200);
+    } finally {
+      if (originalSecrets === undefined) delete process.env.GITHUB_WEBHOOK_SECRETS;
+      else process.env.GITHUB_WEBHOOK_SECRETS = originalSecrets;
+      if (originalLegacy === undefined) delete process.env.GITHUB_WEBHOOK_SECRET;
+      else process.env.GITHUB_WEBHOOK_SECRET = originalLegacy;
+    }
+  });
+
+  // Handler-level end-to-end angle on multi-secret verification: every
+  // dispatch-wiring test elsewhere in this suite passes `secret: TEST_SECRET`
+  // directly, which short-circuits resolveSecretsForRequest before it ever
+  // consults GITHUB_WEBHOOK_SECRETS -- so a regression collapsing
+  // verifyAnyGithubSignature back to "only try secrets[0]" would pass every
+  // other test in this file. Sign with the SECOND configured secret and
+  // confirm the request still verifies through the real env-driven path.
+  it("verifies a delivery signed with the second of two configured GITHUB_WEBHOOK_SECRETS, through the full handler (not just the unit-level resolver)", async () => {
+    const originalSecrets = process.env.GITHUB_WEBHOOK_SECRETS;
+    const originalLegacy = process.env.GITHUB_WEBHOOK_SECRET;
+    const secondSecret = "second-configured-secret-not-first";
+    delete process.env.GITHUB_WEBHOOK_SECRET;
+    process.env.GITHUB_WEBHOOK_SECRETS = JSON.stringify([TEST_SECRET, secondSecret]);
+    try {
+      const payload = { repository: { full_name: "multi-secret-owner/multi-secret-repo" } };
+      const rawBody = Buffer.from(JSON.stringify(payload));
+      const signature = webhook.computeGithubSignature(secondSecret, rawBody); // NOT the first configured secret
+      const req = createFakeReq({ method: "POST", headers: { "x-hub-signature-256": signature }, body: rawBody });
+      const res = createFakeRes();
+      await webhook.handleGithubWebhookVerify(req, res); // no options.secret override -- purely env-driven
+      expect(res.statusCode).toBe(200);
+    } finally {
+      if (originalSecrets === undefined) delete process.env.GITHUB_WEBHOOK_SECRETS;
+      else process.env.GITHUB_WEBHOOK_SECRETS = originalSecrets;
+      if (originalLegacy === undefined) delete process.env.GITHUB_WEBHOOK_SECRET;
+      else process.env.GITHUB_WEBHOOK_SECRET = originalLegacy;
+    }
+  });
+
+  it("responds 500 and attempts no dispatch when GITHUB_WEBHOOK_SECRETS is malformed", async () => {
+    const originalSecrets = process.env.GITHUB_WEBHOOK_SECRETS;
+    process.env.GITHUB_WEBHOOK_SECRETS = "not valid json";
+    try {
+      const req = createUntouchableReq("POST");
+      const res = createFakeRes();
+      await webhook.handleGithubWebhookVerify(req, res, {});
+      expect(res.statusCode).toBe(500);
+    } finally {
+      if (originalSecrets === undefined) delete process.env.GITHUB_WEBHOOK_SECRETS;
+      else process.env.GITHUB_WEBHOOK_SECRETS = originalSecrets;
+    }
+  });
+
+  // Regression: an earlier revision interpolated JSON.parse's own error
+  // message into the thrown config error. V8's SyntaxError echoes short
+  // unparseable inputs back in full, so a misconfigured GITHUB_WEBHOOK_SECRETS
+  // (an operator setting the raw secret string instead of `["<secret>"]`)
+  // wrote the secret itself into this console.error line. Assert the actual
+  // logged text, not just the status code the earlier test only checked.
+  it("never logs the raw GITHUB_WEBHOOK_SECRETS value, even one short enough for V8 to echo in full on a parse failure", async () => {
+    const originalSecrets = process.env.GITHUB_WEBHOOK_SECRETS;
+    const leakCandidate = "s3cr3t-webhook-value";
+    process.env.GITHUB_WEBHOOK_SECRETS = leakCandidate; // a raw secret, not JSON -- the exact misconfiguration this feature exists to reject
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const req = createUntouchableReq("POST");
+      const res = createFakeRes();
+      await webhook.handleGithubWebhookVerify(req, res, {});
+      expect(res.statusCode).toBe(500);
+      expect(errorSpy).toHaveBeenCalled();
+      const loggedText = errorSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(loggedText).not.toContain(leakCandidate);
+    } finally {
+      errorSpy.mockRestore();
+      if (originalSecrets === undefined) delete process.env.GITHUB_WEBHOOK_SECRETS;
+      else process.env.GITHUB_WEBHOOK_SECRETS = originalSecrets;
+    }
+  });
+
+  it("never logs the raw GITHUB_DISPATCH_ALLOWLIST value on a parse failure", async () => {
+    const originalAllowlist = process.env.GITHUB_DISPATCH_ALLOWLIST;
+    const originalSecret = process.env.GITHUB_WEBHOOK_SECRET;
+    const leakCandidate = "not-json-and-short";
+    process.env.GITHUB_DISPATCH_ALLOWLIST = leakCandidate;
+    process.env.GITHUB_WEBHOOK_SECRET = TEST_SECRET;
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      // Must be a well-formed pull_request payload (repo, number, head.sha)
+      // so computeDedupKey resolves and planDispatch actually reaches
+      // resolveDispatchAllowlist() -- a payload missing those fields returns
+      // "not-enrolled" before the allowlist is ever parsed, which would make
+      // this test pass vacuously regardless of whether the leak fix works.
+      const payload = prPayload({ repo: "parity-owner/parity-repo", number: 77, sha: "sha-parity-leak-test" });
+      const rawBody = Buffer.from(JSON.stringify(payload));
+      const signature = webhook.computeGithubSignature(TEST_SECRET, rawBody);
+      const req = createFakeReq({
+        method: "POST",
+        headers: { "x-hub-signature-256": signature, "x-github-event": "pull_request" },
+        body: rawBody,
+      });
+      const res = createFakeRes();
+      await webhook.handleGithubWebhookVerify(req, res, {});
+      // A malformed allowlist fails closed on the DISPATCH decision only --
+      // the delivery itself still verified, so the HTTP response is 200.
+      expect(res.statusCode).toBe(200);
+      expect(errorSpy).toHaveBeenCalled();
+      const loggedText = errorSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(loggedText).toContain("config error");
+      expect(loggedText).not.toContain(leakCandidate);
+    } finally {
+      errorSpy.mockRestore();
+      if (originalAllowlist === undefined) delete process.env.GITHUB_DISPATCH_ALLOWLIST;
+      else process.env.GITHUB_DISPATCH_ALLOWLIST = originalAllowlist;
+      if (originalSecret === undefined) delete process.env.GITHUB_WEBHOOK_SECRET;
+      else process.env.GITHUB_WEBHOOK_SECRET = originalSecret;
+    }
+  });
+
+  // Copilot review round 2: distinct from the parse-failure case above --
+  // this is a well-formed JSON array that fails SHAPE validation, and
+  // validateDispatchAllowlistEntry's own error messages deliberately embed
+  // the offending repo/event/actor value (useful to whoever is directly
+  // debugging their config). planDispatch's console.error call must not
+  // relay that descriptive detail into this process's own logs.
+  it("never logs the raw repo/event content from a shape-validation failure (distinct from a JSON parse failure)", async () => {
+    const originalAllowlist = process.env.GITHUB_DISPATCH_ALLOWLIST;
+    const originalSecret = process.env.GITHUB_WEBHOOK_SECRET;
+    const distinctiveRepoName = "leak-probe-owner/leak-probe-repo-should-never-be-logged";
+    // Well-formed JSON, but a duplicate "events" entry for the same event --
+    // a real shape violation, not a parse failure -- so the thrown message
+    // is validateDispatchAllowlistEntry's own descriptive text, not the
+    // length-only JSON.parse-failure message the test above already covers.
+    process.env.GITHUB_DISPATCH_ALLOWLIST = JSON.stringify([
+      {
+        repo: distinctiveRepoName,
+        events: [
+          { event: "pull_request", actions: ["opened"] },
+          { event: "pull_request", actions: ["synchronize"] }
+        ]
+      }
+    ]);
+    process.env.GITHUB_WEBHOOK_SECRET = TEST_SECRET;
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const payload = prPayload({ repo: "leak-probe-owner/other-repo", number: 88, sha: "sha-leak-probe" });
+      const rawBody = Buffer.from(JSON.stringify(payload));
+      const signature = webhook.computeGithubSignature(TEST_SECRET, rawBody);
+      const req = createFakeReq({
+        method: "POST",
+        headers: { "x-hub-signature-256": signature, "x-github-event": "pull_request" },
+        body: rawBody,
+      });
+      const res = createFakeRes();
+      await webhook.handleGithubWebhookVerify(req, res, {});
+      expect(res.statusCode).toBe(200);
+      expect(errorSpy).toHaveBeenCalled();
+      const loggedText = errorSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(loggedText).toContain("config error");
+      expect(loggedText).toContain("GITHUB_DISPATCH_ALLOWLIST_CONFIG_ERROR");
+      expect(loggedText).not.toContain(distinctiveRepoName);
+    } finally {
+      errorSpy.mockRestore();
+      if (originalAllowlist === undefined) delete process.env.GITHUB_DISPATCH_ALLOWLIST;
+      else process.env.GITHUB_DISPATCH_ALLOWLIST = originalAllowlist;
+      if (originalSecret === undefined) delete process.env.GITHUB_WEBHOOK_SECRET;
+      else process.env.GITHUB_WEBHOOK_SECRET = originalSecret;
+    }
+  });
+
+  // Copilot review round 2: forwardToAgentHook's trigger.actor must agree
+  // with the trust gate that decided to forward this delivery in the first
+  // place -- both now go through the same actorLoginFor helper.
+  it("forwards trigger.actor as the comment author (comment.user.login), not the delivery's sender, for issue_comment", async () => {
+    const originalAllowlist = process.env.GITHUB_DISPATCH_ALLOWLIST;
+    const repo = "actor-parity-owner/actor-parity-repo";
+    process.env.GITHUB_DISPATCH_ALLOWLIST = allowlistEnv(repo).GITHUB_DISPATCH_ALLOWLIST;
+    try {
+      // sender.login (the account performing THIS delivery's action) is
+      // deliberately different from comment.user.login (who authored the
+      // comment text the trust gate matched against).
+      const payload = issueCommentPayload({ repo, number: 21, commentId: 5, actor: "trusted-actor", body: "@bot please act" });
+      (payload as { sender: { login: string } }).sender = { login: "someone-else-entirely" };
+      const req = createSignedRequest(payload, { event: "issue_comment", deliveryId: "delivery-actor-parity-1" });
+      const res = createFakeRes();
+      const { fetchImpl, calls } = createStubFetch();
+
+      await webhook.handleGithubWebhookVerify(req, res, { secret: TEST_SECRET, dedupStore: new Set(), forward: { fetchImpl } });
+
+      expect(res.statusCode).toBe(200);
+      expect(calls).toHaveLength(1);
+      const sentBody = JSON.parse(String(calls[0]?.init["body"])) as { trigger: { actor: string } };
+      expect(sentBody.trigger.actor).toBe("trusted-actor");
+    } finally {
+      if (originalAllowlist === undefined) delete process.env.GITHUB_DISPATCH_ALLOWLIST;
+      else process.env.GITHUB_DISPATCH_ALLOWLIST = originalAllowlist;
+    }
+  });
+});
+
+// --- AC-FN-14: no dependency beyond node:* built-ins + forwardToAgentHook's own HTTP call ---
+
+describe("module dependency constraint (AC-FN-14)", () => {
+  it("imports nothing beyond node:* built-ins", async () => {
+    const fs = await import("node:fs/promises");
+    const source = await fs.readFile(webhookModulePath, "utf8");
+    const importLines = source.split("\n").filter((line) => /^\s*import\s/.test(line));
+    expect(importLines.length).toBeGreaterThan(0);
+    for (const line of importLines) {
+      expect(line).toMatch(/from\s+"node:/);
+    }
+    // No call resembling a workflow-state/database/runtime API -- the only
+    // external call this module makes is forwardToAgentHook's own fetch to
+    // the configured hook URL.
+    for (const forbidden of ["workflow-state", "prisma", "postgres", "mongodb", "redis"]) {
+      expect(source.toLowerCase()).not.toContain(forbidden);
+    }
   });
 });
