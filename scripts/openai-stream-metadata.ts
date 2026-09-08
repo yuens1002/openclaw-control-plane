@@ -41,7 +41,8 @@ export function createOpenAIStreamMetadata(
 ) {
   if (!enabled) return undefined;
   const summary = {
-    event: "openai_stream_metadata", schemaVersion: 1,
+    event: "openai_stream_metadata", schemaVersion: 2,
+    emitReasoning: null as boolean | null,
     startedAt: new Date().toISOString(), requestedModel: identifier(requestedModel),
     responseId: null as string | null, responseModel: null as string | null,
     request: null as Fields | null,
@@ -50,6 +51,7 @@ export function createOpenAIStreamMetadata(
     chunkUsage: null as ReturnType<typeof usage> | null,
     choiceUsage: null as ReturnType<typeof usage> | null,
     deltaTextChars: 0, deltaReasoningChars: 0, deltaRefusalChars: 0,
+    deltaContentArrayEntries: 0, messageContentArrayEntries: 0,
     deltaToolEntries: 0, deltaToolArgumentChars: 0,
     messageTextChars: 0, messageToolEntries: 0, messageReasoningChars: 0,
     messageRefusalChars: 0, messageToolArgumentChars: 0,
@@ -65,10 +67,13 @@ export function createOpenAIStreamMetadata(
     "deltaReasoningChars" | "deltaRefusalChars" | "deltaToolEntries" |
     "deltaToolArgumentChars" | "messageTextChars" | "messageToolEntries" |
     "reasoningDetailEntries" | "messageReasoningChars" | "messageRefusalChars" |
-    "messageToolArgumentChars", amount: number) => {
+    "messageToolArgumentChars" | "deltaContentArrayEntries" | "messageContentArrayEntries", amount: number) => {
     summary[key] = Math.min(Number.MAX_SAFE_INTEGER, summary[key] + amount);
   };
   return {
+    context(emitReasoning: boolean) {
+      observe(() => { summary.emitReasoning = typeof emitReasoning === "boolean" ? emitReasoning : null; });
+    },
     request(payload: unknown) {
       observe(() => {
         const request = fields(payload);
@@ -104,6 +109,8 @@ export function createOpenAIStreamMetadata(
         const delta = fields(choice.delta);
         const message = fields(choice.message);
         add("deltaTextChars", chars(delta.content));
+        add("deltaContentArrayEntries", entries(delta.content).length);
+        add("messageContentArrayEntries", entries(message.content).length);
         add("deltaReasoningChars", chars(delta.reasoning_content) + chars(delta.reasoning) + chars(delta.reasoning_text));
         add("deltaRefusalChars", chars(delta.refusal));
         add("reasoningDetailEntries", entries(delta.reasoning_details).length);

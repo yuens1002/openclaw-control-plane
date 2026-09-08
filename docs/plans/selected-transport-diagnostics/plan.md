@@ -3,10 +3,9 @@
 Date: 2026-09-08. Issue: [#123](https://github.com/yuens1002/openclaw-control-plane/issues/123).
 Branch: `codex/selected-transport-diagnostics`.
 Base: `4ef71175caf9366ef3b8dd74f93b51be370a2e1e` (fresh origin/main).
-Status: planning complete for review; implementation has not started.
-Cadence: full for the forthcoming implementation. This commit contains planning
-and the prior iteration's retrospective only. No UI/login preflight applies to
-this build integration. No deployment or model call is part of this planning turn.
+Status: implementation prepared; final-artifact and independent verification underway.
+Cadence: full. Planning was approved before implementation. No UI/login preflight
+applies to this build integration. No deployment or model call is part of this iteration.
 
 ## Problem and evidence boundary
 
@@ -110,4 +109,7 @@ Codex agents may fill the role responsibilities; model choice may vary while
 verification independence and phase order remain fixed. There is no local gate
 adapter assumed active: check Plan-ref coverage mechanically, inspect invariant
 wording, and require the independent verifier to check each implemented AC.
-ACs below are a proposed contract; no implementation PASS is claimed at planning.
+The acceptance criteria began as a proposed contract; current results are tracked
+in [ACs.md](ACs.md). The bypassed SDK integration was removed as proposed. A
+structured-content-array case and scalar entry counters were added because zero
+string counts cannot establish absence of decoded structured content.

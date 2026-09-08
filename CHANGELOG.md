@@ -7,6 +7,17 @@ and uses semantic versioning.
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-09-08
+
+- fix(diagnostics): observe the application-owned completions transport selected
+  by the embedded-agent resolver, replacing the bypassed SDK adapter patch.
+  - Retain source-hash guards and opt-in bounded metadata; schema 2 adds reasoning
+    emission and structured-content entry counts without capturing their contents.
+  - Exercise the real bundled resolver and transport against synthetic loopback
+    SSE, including enabled/disabled comparisons and a collector-removal mutation.
+    These diagnostics prepare evidence for a separately approved production canary;
+    they do not establish review-dispatch recovery.
+
 ## [0.7.4] - 2026-09-08
 
 - feat(diagnostics): add opt-in metadata for OpenRouter completion streams
