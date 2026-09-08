@@ -4,7 +4,7 @@ Date: 2026-09-08. Base: `63c5350e3501f69d0454086e2210d82d54d49321`, freshly fetc
 
 ## Verdict and scope
 
-Repository verification passed; no outstanding code-review findings. Docker build validation is still pending at this report revision. This change supplies opt-in diagnostics, not a production repair. No deployment, new live trigger or flag change was performed during implementation.
+Repository and build validation passed; no outstanding code-review findings. This change supplies opt-in diagnostics, not a production repair. No deployment, new live trigger or flag change was performed during implementation.
 
 ## Deliverables and tests
 
@@ -28,7 +28,7 @@ No functional/security findings. Two low rule-compliance findings were corrected
 
 - Request capture follows onPayload; observation precedes the chunk guard; normalization snapshot precedes tool removal; finalization is in finally. No second stream reader, retry or request modification was added.
 - Usage absence and zero differ. Character counts are documented as string lengths, tool entries as deltas, reasoning totals as possibly mirrored, and routing IDs as unverified provider metadata. Adapter completion is not described as agent-run success.
-- Source hash is checked before writes; companion overwrite is refused. The exact fixture matches the upstream source hash. Relative helper imports enter the upstream AI bundle per its tsdown configuration; Docker build completion remains a separate requirement.
+- Source hash is checked before writes; companion overwrite is refused. The exact fixture matches the upstream source hash. Relative helper imports enter the upstream AI bundle per its tsdown configuration and the compiled artifact check below.
 - Docker COPY inputs and watch reference agree with the existing mechanical guard. The operator guide explicitly says the native live watch list is not changed by editing that reference file.
 - The guide includes default-off behavior, shared-process scope, exact-state rollback requirements, serving readiness and byte readback. It does not present a generic procedure as live approval.
 - Local documentation links resolve; counts, headings and intra-document claims checked after the final code fix. No previous product behavior was removed. The new operator guide is indexed in docs/README.md.
@@ -38,8 +38,14 @@ No functional/security findings. Two low rule-compliance findings were corrected
 
 Discovery/read-before-write: existing wrapper patch scripts, sibling tests, Dockerfile, watch guard, upstream adapter and AI bundler were inspected. References: engineering-base, backend/devops/test roles, workflow/review adapters and live operations procedure. Layer: build-time integration owns instrumentation; no workflow policy is moved into the generic control plane. DRY: one collector, one patch, one watch derivation; fixture is immutable upstream test input. Variants: extend no provider registry; exact opt-in provider gate is deliberate. Values: runtime observations remain data; source hash is an intentional compatibility guard. Names identify request/chunk/normalization stages. No shared abstraction introduced beyond local sanitizers/counters. Duplication grep found only the intended collector export, patch insertion and tests. Claims derive from source/test output; full runtime and production claims remain excluded.
 
+## Build evidence
+
+`docker build --target openclaw-build --tag openclaw-stream-metadata-check .` completed successfully using the implementation inputs at `8fecff9`. Frozen dependency install, full upstream build (including declarations/bootstrap guards) and UI build passed. The resulting local image manifest list is `sha256:00f352f9839238b8791b00cd7e24db052ede97c269c31c741ce1d56516edc732`.
+
+After the rule-only helper correction in `8c79dc6`, the final helper was mounted into a disposable container from that image and compiled with the real AI tsdown configuration (`--no-dts`). The emitted bundle retained exactly one diagnostic event module and one runtime flag module. Full upstream declarations were not repeated after that correction; the final helper was independently typechecked and all 411 repository tests reran successfully. This verifies the final helper's bundle inclusion, not a second full Docker build of the final commit. No image was deployed. GitHub PR CI also passed.
+
 ## Remaining gates and retro input
 
-Docker build evidence, human review, release/deployment and post-release retro remain pending. Plan/AC gate ran before code, but the contract commit followed initial implementation; that deviation is recorded in the plan.
+Human review, release/deployment and post-release retro remain pending. Plan/AC gate ran before code, but the contract commit followed initial implementation; that deviation is recorded in the plan.
 
 For the devops/test-engineer baseline (canonical skills in the user's dotfiles command collection): preserve both sides of lossy normalization in diagnostics; validate build-time patches against immutable upstream fixtures and exercise the real loop with mocked external dependencies. Existing base principles already cover measured claims and boundary tests; evaluate whether a new rule is necessary during retro instead of duplicating them.

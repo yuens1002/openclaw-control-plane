@@ -1,7 +1,7 @@
 # Dispatch stream diagnostics
 
 Issue: #123. Branch: `codex/dispatch-stream-diagnostics`.
-Status: implementation authorized in conversation; no live deployment authorized.
+Status: implementation, independent reviews and build validation complete; human release/deployment approval pending.
 Base: `63c5350e3501f69d0454086e2210d82d54d49321`; base precheck passed 394 tests.
 
 ## Problem and decision
