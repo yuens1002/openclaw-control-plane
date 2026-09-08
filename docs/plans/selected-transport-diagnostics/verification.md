@@ -49,7 +49,10 @@ a timeout, import failure or unrelated crash is not accepted as mutation evidenc
 The post-OCR change adds only the choice-level usage unit test; root reran the
 full precheck with 403 passing. Runtime patch/helper bytes are unchanged from
 `c1a180d`, so the final-image evidence still applies. A later harness edit only
-removed two blank lines at EOF.
+removed two blank lines at EOF. Copilot subsequently identified unguarded parsing
+of unrelated stderr in the harness. That test-only correction guards parsing,
+forwards unrelated logs and exercises malformed/valid unrelated JSON. Both scripts
+were rerun against the same final image: 14 scenarios and mutation pass, exit 0.
 
 ## Final runtime artifact
 

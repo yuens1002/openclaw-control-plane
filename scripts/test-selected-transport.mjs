@@ -47,13 +47,14 @@ async function runScenario(scenario, { enabled = true, provider = 'openrouter', 
   const abort = new AbortController();
   let streamingResponse;
   console.error = (...args) => {
+    let record;
     if (typeof args[0] === 'string' && args[0].startsWith('{')) {
-      const record = JSON.parse(args[0]);
-      if (record.event === 'openai_stream_metadata') {
-        records.push(record);
-        if (throwingSink) throw new Error(secretMarker);
-      }
+      try { record = JSON.parse(args[0]); } catch { /* unrelated stderr */ }
     }
+    if (record?.event === 'openai_stream_metadata') {
+      records.push(record);
+      if (throwingSink) throw new Error(secretMarker);
+    } else originalError(...args);
   };
   process.env.OPENCLAW_STREAM_METADATA_DIAGNOSTICS = enabled ? '1' : '0';
   const server = createServer(async (request, response) => {
@@ -82,6 +83,11 @@ async function runScenario(scenario, { enabled = true, provider = 'openrouter', 
     contextWindow: 4096, maxTokens: 100,
   };
   try {
+    if (scenario.name === 'visible' && enabled && !throwingSink && provider === 'openrouter') {
+      // Unrelated malformed/valid JSON logs must not abort or become diagnostics.
+      console.error('{synthetic malformed JSON');
+      console.error('{"event":"synthetic_unrelated"}');
+    }
     const streamFn = resolver({ sessionId: 'synthetic-session', model, resolvedApiKey: 'synthetic-no-secret', signal: abort.signal });
     const stream = await streamFn(model, { messages: [{ role: 'user', content: secretMarker, timestamp: 0 }] }, {
       maxTokens: 100,

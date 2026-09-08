@@ -6,7 +6,8 @@ Date: 2026-09-08. Release version: 0.7.5.
 
 Status: independent AC verification, main-thread QC, OCR and holistic review passed.
 Ready for human review; merge and live rollout are pending. One implementation
-iteration with one test-coverage correction; no runtime correction was needed.
+iteration with a coverage correction and a log-capture correction in the test
+harness; no production runtime correction was needed.
 
 ## Artifact binding
 
@@ -63,7 +64,7 @@ One whitespace-only harness cleanup removes blank lines at EOF.
 The supplemental reviewer inspected fix SHA `91ef8cdbbc5c9d0e7b6f07405bbcc9c9dcac2b18`
 and independently ran all nine focused tests, closing the finding. Runtime bytes
 remain those of `c1a180d`; final test and documentation changes are included in
-`91ef8cd`. Subsequent review-record updates do not change that verified scope.
+`91ef8cd`. The external-review correction below changes only the test harness.
 
 Coverage: six regular OCR files plus one supplemental test file reviewed. Thirteen
 unsupported-extension files (prose and upstream fixture add/delete) were excluded
@@ -72,6 +73,15 @@ low findings remain. ReportFindings is not available in this runtime; findings
 and disposition are preserved here instead.
 
 ## Holistic documentation and scope audit
+
+Copilot round 1 reviewed `6481fed` and reported one in-scope medium test issue:
+the harness parsed unrelated JSON-looking stderr without a guard. Its complete
+review body had no suppressed findings. Capture now guards only parsing and
+forwards unrelated logs to the original sink; the intentional diagnostic sink
+exception remains outside that catch. The visible scenario exercises malformed
+and valid unrelated JSON. Both final-image scripts were rerun: 14 scenarios and
+the targeted mutation pass. The production image inputs did not change.
+GitHub CI passed `6481fed`; the corrected head requires its own CI result.
 
 - Current operations guide names the selected application-owned transport and
   removed SDK integration. README → docs index → diagnostics guide is reachable.
