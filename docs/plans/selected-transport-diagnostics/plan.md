@@ -3,7 +3,7 @@
 Date: 2026-09-08. Issue: [#123](https://github.com/yuens1002/openclaw-control-plane/issues/123).
 Branch: `codex/selected-transport-diagnostics`.
 Base: `4ef71175caf9366ef3b8dd74f93b51be370a2e1e` (fresh origin/main).
-Status: implementation prepared; final-artifact and independent verification underway.
+Status: implemented and independently verified; human review pending.
 Cadence: full. Planning was approved before implementation. No UI/login preflight
 applies to this build integration. No deployment or model call is part of this iteration.
 

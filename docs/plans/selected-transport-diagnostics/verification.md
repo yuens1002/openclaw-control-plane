@@ -32,18 +32,24 @@ a timeout, import failure or unrelated crash is not accepted as mutation evidenc
 ## Repository checks and independent inspection
 
 - Gate 1: five deliverables, eight ACs, zero orphans.
-- `npm run precheck`: 402 tests across 29 files, no skips; typecheck and build pass.
-- Eight focused unit/patch tests cover bounded metadata, usage presence,
+- Final `npm run precheck`: 403 tests across 29 files, no skips; typecheck and build pass.
+- Nine focused unit/patch tests cover bounded metadata, usage presence,
   throwing sink, independent helper typecheck, complete source hash, anchors,
   CLI installation and reapplication refusal.
-- Previous suite count was 411. Nine mocked-adapter cases were replaced by the
-  standalone real-path suite; the 14 scenarios are additional to the 402 count.
+- Previous suite count was 411. Replacing the mocked-adapter suite initially left
+  402 tests. OCR caught lost choice-level usage coverage; restoring that assertion
+  brings the final count to 403. The 14 real-path scenarios are separate.
 - Independent verifier `transport_ac_verify` inspected call placement, mock
   boundaries, exact mutation failure, hash/watch integration and handoff, and
   independently ran the full precheck. No blocking source finding was identified.
   It also independently ran both final-image scripts against the immutable latest
   image ID below, exit 0. Main-thread QC accepted this evidence; no blocker remains
   in the implementation ACs. OCR and holistic review are recorded separately.
+
+The post-OCR change adds only the choice-level usage unit test; root reran the
+full precheck with 403 passing. Runtime patch/helper bytes are unchanged from
+`c1a180d`, so the final-image evidence still applies. A later harness edit only
+removed two blank lines at EOF.
 
 ## Final runtime artifact
 

@@ -70,6 +70,16 @@ describe("OpenAI stream metadata", () => {
     const collector = createCollector(true, "test/model", () => { throw new Error("sink"); })!;
     expect(() => collector.finish({ stopReason: "stop" })).not.toThrow();
   });
+  it("retains choice-level usage when top-level usage is absent", () => {
+    const lines: string[] = [];
+    const collector = createCollector(true, "test/model", line => lines.push(line))!;
+    collector.chunk({ choices: [{ delta: {}, finish_reason: "stop",
+      usage: { prompt_tokens: 5, completion_tokens: 8, total_tokens: 13 } }] });
+    collector.finish({ content: [], stopReason: "stop" });
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0]!)).toMatchObject({ chunkUsageSeen: false, chunkUsage: null,
+      choiceUsageSeen: true, choiceUsage: { input: 5, output: 8, total: 13 } });
+  });
   it("excludes payload secrets, bounds records and ignores invalid metadata", () => {
     const lines: string[] = [];
     const collector = createCollector(true, "bad\nmodel", line => lines.push(line))!;
