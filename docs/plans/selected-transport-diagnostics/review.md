@@ -60,6 +60,10 @@ input/output/total counters while top-level usage stays absent. The final full
 precheck passes 403 tests in 29 files, including nine focused tests. This correction
 does not change deployed code; the final-image 14 cases and mutation remain valid.
 One whitespace-only harness cleanup removes blank lines at EOF.
+The supplemental reviewer inspected fix SHA `91ef8cdbbc5c9d0e7b6f07405bbcc9c9dcac2b18`
+and independently ran all nine focused tests, closing the finding. Runtime bytes
+remain those of `c1a180d`; final test and documentation changes are included in
+`91ef8cd`. Subsequent review-record updates do not change that verified scope.
 
 Coverage: six regular OCR files plus one supplemental test file reviewed. Thirteen
 unsupported-extension files (prose and upstream fixture add/delete) were excluded
