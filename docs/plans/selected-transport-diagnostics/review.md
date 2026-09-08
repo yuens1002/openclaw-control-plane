@@ -82,6 +82,10 @@ exception remains outside that catch. The visible scenario exercises malformed
 and valid unrelated JSON. Both final-image scripts were rerun: 14 scenarios and
 the targeted mutation pass. The production image inputs did not change.
 GitHub CI passed `6481fed`; the corrected head requires its own CI result.
+Internal fix review covered `6481fed..e02e7ae`: the OCR transport reviewer found
+no actionable issue and confirmed the intentional sink exception remains outside
+the parsing catch. Main-thread holistic recheck found the AC counts, scope and
+evidence unchanged. Full precheck passed at `e02e7ae`: 403 tests, 29 files.
 
 - Current operations guide names the selected application-owned transport and
   removed SDK integration. README → docs index → diagnostics guide is reachable.
