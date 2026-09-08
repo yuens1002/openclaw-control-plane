@@ -7,6 +7,13 @@ and uses semantic versioning.
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-09-08
+
+- feat(diagnostics): add opt-in metadata for OpenRouter completion streams
+  - Observe SDK-decoded chunk counters, usage presence and parsed block counts before and after normalization, without logging prompt/output text, tool arguments or credentials.
+  - Gate the pinned adapter patch by source hash and enable collection only with `OPENCLAW_STREAM_METADATA_DIAGNOSTICS=1`; update the build-input watch reference and document operational limits and rollback.
+  - Validate the real pinned adapter loop with mocked dependencies; 411 repository tests pass. The upstream Docker build and final-helper bundle check passed with scope recorded in the review report. This instrumentation does not itself establish production recovery.
+
 ## [0.7.3] - 2026-09-06
 
 - fix(webhook): document and harden the actual production `/hooks/agent` dispatch target

@@ -338,6 +338,9 @@ FROM openclaw-source AS openclaw-lockfile-refresh
 RUN pnpm install --no-frozen-lockfile
 
 FROM openclaw-source AS openclaw-build
+COPY scripts/patch-openai-stream-metadata.mjs /tmp/patch-openai-stream-metadata.mjs
+COPY scripts/openai-stream-metadata.ts /tmp/openai-stream-metadata.ts
+RUN node /tmp/patch-openai-stream-metadata.mjs /openclaw
 COPY deploy/openclaw-railway/openclaw.pnpm-lock.yaml ./pnpm-lock.yaml
 RUN pnpm install --frozen-lockfile
 RUN pnpm build
