@@ -60,6 +60,9 @@ were rerun against the same final image: 14 scenarios and mutation pass, exit 0.
 Round 2 added a setup-failure cleanup check and broadened try/finally to cover
 server setup, including listen-error rejection. The latest final-image run passes
 15 cases plus mutation, exit 0. Runtime patch/helper/image bytes remain unchanged.
+The independent reviewer also executed that final suite against the immutable
+image at test-harness commit `7e2b8ac7f6a5c8804609a076b6ad8e1248be7ffc`:
+15 cases plus mutation, exit 0. Final code precheck: 403 tests / 29 files.
 
 ## Final runtime artifact
 

@@ -47,7 +47,7 @@ remaining handoff-binding condition is fulfilled by this report's explicit
 candidate/artifact binding. All eight Agent/QC ACs pass; human Reviewer cells remain pending.
 
 OCR v1.11.6 resolved base `4ef7117`. Review scope was `4ef7117..b352db4`;
-subsequent runtime code is unchanged. Four fresh read-only reviewers covered:
+subsequent production runtime code is unchanged. Four fresh read-only reviewers covered:
 
 - `ocr_lock`: package-lock.json, complete group 1 rules — no findings.
 - `ocr_manifest`: package.json, complete group 2 rules — no findings.
@@ -95,6 +95,12 @@ post-listen setup failure asserts rejection and stderr restoration; the script
 exits cleanly. Final suite: **15 cases** (the original 14 plus setup cleanup) and
 the targeted mutation pass against the same production image. No third Copilot
 round is requested; the workflow closes round-2 findings with local verification.
+Final independent close-out inspected `a3c592f..7e2b8ac` with no actionable finding
+and executed both scripts against the immutable image: 15 cases plus mutation,
+exit 0. Main-thread QC accepted the report and rechecked documentation counts.
+The final code precheck at `7e2b8ac` passes 403 tests across 29 files; later changes
+only record that evidence. Final PR CI and thread disposition are recorded on
+the PR to avoid changing its head solely to record its own review result.
 
 - Current operations guide names the selected application-owned transport and
   removed SDK integration. README → docs index → diagnostics guide is reachable.
@@ -103,7 +109,8 @@ round is requested; the workflow closes round-2 findings with local verification
   point-in-time records, per this repository's documentation convention.
 - Changelog, ACs, evidence and handoff agree that synthetic diagnostic reachability
   is verified and production recovery is not. The final 403 count is distinguished
-  from the earlier independent 402-test run and the separate 14-case suite.
+  from the earlier independent 402-test run, initial 14-case suite and final
+  15-case suite including setup cleanup.
 - Local references, section anchors, counts, deictic references, correction
   propagation and procedure consistency were inspected. No dangling reference or
   copyable example contradicts the contract. The Docker example was executed in
