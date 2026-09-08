@@ -34,6 +34,8 @@ watchPatterns = [
   "/scripts/wrapper-github-webhook-verify.mjs",
   "/scripts/patch-wrapper-github-webhook.mjs",
   "/scripts/relax-openclaw-extension-versions.mjs",
+  "/scripts/patch-openai-stream-metadata.mjs",
+  "/scripts/openai-stream-metadata.ts",
   "/deploy/openclaw-railway/openclaw.pnpm-lock.yaml",
   "/Dockerfile",
   "/.dockerignore"

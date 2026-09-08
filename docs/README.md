@@ -45,6 +45,8 @@ Examples:
 
 - [Architecture](architecture.md): current package, ownership, and
   deployment-topology boundaries.
+- [Stream diagnostics](openai-stream-diagnostics.md): opt-in metadata for
+  investigating empty OpenAI-compatible completions.
 - [Setup Profile Applier](setup-profile-applier.md): how a generated client
   profile (model providers, channels, MCP server attachments) drives a live
   OpenClaw instance's `/setup` API.
