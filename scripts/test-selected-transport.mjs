@@ -40,49 +40,57 @@ const scenarios = [
   { name: 'adversarial', chunks: [chunk({ content: secretMarker, refusal: secretMarker }, 'stop', { id: `bad\n${secretMarker}`, model: '<script>secret</script>' })], text: secretMarker.length, blocks: 1, finish: 'stop', adversarial: true },
 ];
 
-async function runScenario(scenario, { enabled = true, provider = 'openrouter', throwingSink = false } = {}) {
+async function runScenario(scenario, { enabled = true, provider = 'openrouter', throwingSink = false, failSetup = false } = {}) {
   const records = [];
   const requests = [];
   const events = [];
   const abort = new AbortController();
   let streamingResponse;
-  console.error = (...args) => {
-    let record;
-    if (typeof args[0] === 'string' && args[0].startsWith('{')) {
-      try { record = JSON.parse(args[0]); } catch { /* unrelated stderr */ }
-    }
-    if (record?.event === 'openai_stream_metadata') {
-      records.push(record);
-      if (throwingSink) throw new Error(secretMarker);
-    } else originalError(...args);
-  };
-  process.env.OPENCLAW_STREAM_METADATA_DIAGNOSTICS = enabled ? '1' : '0';
-  const server = createServer(async (request, response) => {
-    let body = '';
-    for await (const part of request) body += part;
-    requests.push({ method: request.method, path: request.url, payload: JSON.parse(body) });
-    if (scenario.status) {
-      response.writeHead(scenario.status, { 'content-type': 'application/json' });
-      response.end(JSON.stringify({ error: { message: secretMarker } }));
-      return;
-    }
-    response.writeHead(200, { 'content-type': 'text/event-stream' });
-    for (const value of scenario.chunks) response.write(`data: ${JSON.stringify(value)}\n\n`);
-    if (scenario.destroy || scenario.abort) {
-      // Terminate only once the real consumer observes its first text delta.
-      streamingResponse = response;
-      return;
-    }
-    response.end(scenario.noDone ? '' : 'data: [DONE]\n\n');
-  });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const model = {
-    id: 'synthetic-model', name: 'Synthetic', api: 'openai-completions', provider,
-    baseUrl: `http://127.0.0.1:${server.address().port}/v1`, reasoning: false,
-    input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 4096, maxTokens: 100,
-  };
+  let server;
   try {
+    console.error = (...args) => {
+      let record;
+      if (typeof args[0] === 'string' && args[0].startsWith('{')) {
+        try { record = JSON.parse(args[0]); } catch { /* unrelated stderr */ }
+      }
+      if (record?.event === 'openai_stream_metadata') {
+        records.push(record);
+        if (throwingSink) throw new Error(secretMarker);
+      } else originalError(...args);
+    };
+    process.env.OPENCLAW_STREAM_METADATA_DIAGNOSTICS = enabled ? '1' : '0';
+    server = createServer(async (request, response) => {
+      let body = '';
+      for await (const part of request) body += part;
+      requests.push({ method: request.method, path: request.url, payload: JSON.parse(body) });
+      if (scenario.status) {
+        response.writeHead(scenario.status, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ error: { message: secretMarker } }));
+        return;
+      }
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      for (const value of scenario.chunks) response.write(`data: ${JSON.stringify(value)}\n\n`);
+      if (scenario.destroy || scenario.abort) {
+        // Terminate only once the real consumer observes its first text delta.
+        streamingResponse = response;
+        return;
+      }
+      response.end(scenario.noDone ? '' : 'data: [DONE]\n\n');
+    });
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', () => {
+        server.off('error', reject);
+        resolve();
+      });
+    });
+    if (failSetup) throw new Error('synthetic setup failure');
+    const model = {
+      id: 'synthetic-model', name: 'Synthetic', api: 'openai-completions', provider,
+      baseUrl: `http://127.0.0.1:${server.address().port}/v1`, reasoning: false,
+      input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 4096, maxTokens: 100,
+    };
     if (scenario.name === 'visible' && enabled && !throwingSink && provider === 'openrouter') {
       // Unrelated malformed/valid JSON logs must not abort or become diagnostics.
       console.error('{synthetic malformed JSON');
@@ -141,9 +149,9 @@ async function runScenario(scenario, { enabled = true, provider = 'openrouter', 
     return { requests, events, output };
   } finally {
 
-    server.closeAllConnections();
-    await new Promise(resolve => server.close(resolve));
     console.error = originalError;
+    server?.closeAllConnections();
+    if (server?.listening) await new Promise(resolve => server.close(resolve));
   }
 }
 
@@ -156,7 +164,9 @@ try {
   }
   await runScenario(scenarios[0], { provider: 'synthetic-other' });
   await runScenario(scenarios[0], { throwingSink: true });
-  console.log(`PASS ${scenarios.length + 2} cases; shipped resolver ${candidate.name}; ${expectUninstrumented ? 'baseline has no metadata' : 'selected-path diagnostics reached'}`);
+  await assert.rejects(runScenario(scenarios[0], { failSetup: true }), /synthetic setup failure/);
+  assert.equal(console.error, originalError, 'Setup failure restores stderr capture');
+  console.log(`PASS ${scenarios.length + 3} cases; shipped resolver ${candidate.name}; ${expectUninstrumented ? 'baseline has no metadata' : 'selected-path diagnostics reached'}`);
 } finally {
   console.error = originalError;
   if (previousFlag === undefined) delete process.env.OPENCLAW_STREAM_METADATA_DIAGNOSTICS;

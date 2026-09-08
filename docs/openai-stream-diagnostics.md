@@ -75,8 +75,8 @@ docker run --rm --network none --mount type=bind,source="$(pwd)/scripts",target=
 ```
 
 The example uses a POSIX shell; in PowerShell use `${PWD}/scripts` for the
-mount source. The first check executes 14 scenarios through the real bundled
-resolver. The second removes only the selected collector in a disposable copy
+mount source. The first check executes 14 resolver scenarios plus a setup-failure
+cleanup case (15 total). The second removes only the selected collector in a disposable copy
 and requires the diagnostic-reachability assertion to fail. Neither check calls
 an external provider. These checks complement `npm run precheck`; they are not
 included in that command and must be recorded separately.

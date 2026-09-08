@@ -4,6 +4,10 @@ Candidate source: `c1a180d2d955a2e5e38dfb41980fe1ba81bc64fd`.
 Base: `4ef71175caf9366ef3b8dd74f93b51be370a2e1e`.
 Date: 2026-09-08. Root and independent final-artifact execution passed.
 
+Latest harness result after external review: **15 cases plus targeted mutation**,
+including a setup-failure cleanup case added to the original 14 resolver cases.
+Earlier 14-case runs below remain historical evidence, not the final case count.
+
 ## Reproduction and mock boundary
 
 The original image, containing only the SDK adapter patch, passed the synthetic
@@ -53,6 +57,9 @@ removed two blank lines at EOF. Copilot subsequently identified unguarded parsin
 of unrelated stderr in the harness. That test-only correction guards parsing,
 forwards unrelated logs and exercises malformed/valid unrelated JSON. Both scripts
 were rerun against the same final image: 14 scenarios and mutation pass, exit 0.
+Round 2 added a setup-failure cleanup check and broadened try/finally to cover
+server setup, including listen-error rejection. The latest final-image run passes
+15 cases plus mutation, exit 0. Runtime patch/helper/image bytes remain unchanged.
 
 ## Final runtime artifact
 

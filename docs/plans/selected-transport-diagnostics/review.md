@@ -6,8 +6,8 @@ Date: 2026-09-08. Release version: 0.7.5.
 
 Status: independent AC verification, main-thread QC, OCR and holistic review passed.
 Ready for human review; merge and live rollout are pending. One implementation
-iteration with a coverage correction and a log-capture correction in the test
-harness; no production runtime correction was needed.
+iteration with a coverage correction and log-capture/setup-cleanup corrections
+in the test harness; no production runtime correction was needed.
 
 ## Artifact binding
 
@@ -86,6 +86,15 @@ Internal fix review covered `6481fed..e02e7ae`: the OCR transport reviewer found
 no actionable issue and confirmed the intentional sink exception remains outside
 the parsing catch. Main-thread holistic recheck found the AC counts, scope and
 evidence unchanged. Full precheck passed at `e02e7ae`: 403 tests, 29 files.
+
+Copilot round 2 reviewed `a3c592f` and reported one in-scope medium harness setup
+cleanup gap, with no suppressed findings. The try/finally now covers stderr
+replacement, server creation/listen and model setup; listen errors reject the
+setup promise. Cleanup restores stderr and closes any listening server. A forced
+post-listen setup failure asserts rejection and stderr restoration; the script
+exits cleanly. Final suite: **15 cases** (the original 14 plus setup cleanup) and
+the targeted mutation pass against the same production image. No third Copilot
+round is requested; the workflow closes round-2 findings with local verification.
 
 - Current operations guide names the selected application-owned transport and
   removed SDK integration. README → docs index → diagnostics guide is reachable.
