@@ -9,9 +9,13 @@ const number = (value: unknown): number | null =>
 const chars = (value: unknown): number => typeof value === "string" ? value.length : 0;
 const identifier = (value: unknown): string | null =>
   typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,159}$/.test(value) ? value : null;
-const reason = (value: unknown): string | null =>
-  typeof value === "string" && ["stop", "length", "tool_calls", "function_call", "content_filter",
-    "toolUse", "error", "aborted"].includes(value) ? value : value == null ? null : "other";
+const present = (value: unknown): boolean => value !== null && value !== undefined;
+const reason = (value: unknown): string | null => {
+  if (!present(value)) return null;
+  if (typeof value === "string" && ["stop", "length", "tool_calls", "function_call", "content_filter",
+    "toolUse", "error", "aborted"].includes(value)) return value;
+  return "other";
+};
 const usage = (value: unknown) => {
   const reported = fields(value);
   return {
@@ -84,7 +88,7 @@ export function createOpenAIStreamMetadata(
         const chunk = fields(value);
         summary.responseId ??= identifier(chunk.id);
         summary.responseModel ??= identifier(chunk.model);
-        if (chunk.usage != null) {
+        if (present(chunk.usage)) {
           summary.chunkUsageSeen = true;
           summary.chunkUsage = usage(chunk.usage);
         }
@@ -92,8 +96,8 @@ export function createOpenAIStreamMetadata(
         if (choices.length === 0) return;
         add("primaryChoiceCount", 1);
         const choice = fields(choices[0]);
-        if (choice.finish_reason != null) summary.finishReason = reason(choice.finish_reason);
-        if (choice.usage != null) {
+        if (present(choice.finish_reason)) summary.finishReason = reason(choice.finish_reason);
+        if (present(choice.usage)) {
           summary.choiceUsageSeen = true;
           summary.choiceUsage = usage(choice.usage);
         }

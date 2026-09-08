@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import ts from "typescript";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const fixture = readFileSync(join(root, "fixtures/openai-stream-metadata/openai-completions.ts.txt"), "utf8");
@@ -28,9 +28,13 @@ function compile(source: string) {
     reportDiagnostics: true,
   });
 }
-const helperExports: { createOpenAIStreamMetadata?: CreateCollector } = {};
-new Function("exports", compile(readFileSync(helperPath, "utf8")).outputText)(helperExports);
-const createCollector = helperExports.createOpenAIStreamMetadata!;
+const compiledDirectory = mkdtempSync(join(tmpdir(), "stream-metadata-modules-"));
+const nativeRequire = createRequire(import.meta.url);
+const compiledHelper = join(compiledDirectory, "metadata.cjs");
+writeFileSync(compiledHelper, compile(readFileSync(helperPath, "utf8")).outputText);
+const createCollector = (nativeRequire(compiledHelper) as { createOpenAIStreamMetadata: CreateCollector }).createOpenAIStreamMetadata;
+afterAll(() => { rmSync(compiledDirectory, { recursive: true, force: true }); });
+let adapterModuleCount = 0;
 
 // Execute the real, patched upstream stream function with a mock SDK iterable.
 // Dependency mocks deliberately do not reimplement the normalization branch.
@@ -80,9 +84,11 @@ async function runAdapter(chunks: unknown[], settings: {
     mapOpenAIStopReason: (value: string) => ({ stopReason: value === "tool_calls" ? "toolUse" : value }),
     parseChunkUsage: (value: unknown) => value,
   };
-  const moduleExports: Record<string, any> = {};
-  new Function("exports", ...Object.keys(dependencies), compile(functionSource).outputText)(
-    moduleExports, ...Object.values(dependencies));
+  const compiledAdapter = join(compiledDirectory, `adapter-${adapterModuleCount++}.cjs`);
+  // Compile trusted fixture code into an ordinary module; inject only mocked
+  // dependencies, leaving the upstream stream/normalization body intact.
+  writeFileSync(compiledAdapter, `module.exports = (dependencies) => {\nconst { ${Object.keys(dependencies).join(", ")} } = dependencies;\nconst exports = {};\n${compile(functionSource).outputText}\nreturn exports;\n};`);
+  const moduleExports = nativeRequire(compiledAdapter)(dependencies) as Record<string, any>;
   const amendedRequest = { model: "openrouter/auto", max_tokens: 123, messages: [], tools: [], stream_options: { include_usage: true } };
   moduleExports.streamOpenAICompletions({ provider: settings.provider ?? "openrouter", id: "openrouter/auto", api: "openai-completions", reasoning: true }, {}, {
     signal: { aborted: settings.aborted ?? false }, reasoningEffort: "low", onPayload: () => amendedRequest,
