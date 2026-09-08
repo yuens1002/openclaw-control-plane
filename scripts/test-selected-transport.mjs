@@ -156,5 +156,3 @@ try {
   if (previousFlag === undefined) delete process.env.OPENCLAW_STREAM_METADATA_DIAGNOSTICS;
   else process.env.OPENCLAW_STREAM_METADATA_DIAGNOSTICS = previousFlag;
 }
-
-
