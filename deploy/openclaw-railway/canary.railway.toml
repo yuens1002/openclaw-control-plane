@@ -30,6 +30,7 @@ dockerfilePath = "Dockerfile"
 watchPatterns = [
   "/scripts/patch-wrapper-restart-gateway.mjs",
   "/scripts/patch-wrapper-gateway-image-auth.mjs",
+  "/scripts/patch-wrapper-doctor-fix-gateway-stopped.mjs",
   "/scripts/wrapper-state-export.mjs",
   "/scripts/patch-wrapper-scoped-export.mjs",
   "/scripts/wrapper-github-webhook-verify.mjs",

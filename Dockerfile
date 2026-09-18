@@ -205,6 +205,22 @@ RUN grep -qF 'proc.once("exit"' src/server.js
 RUN test "$(grep -cF 'await sleep(750);' src/server.js)" -eq 2
 RUN node --check src/server.js
 
+# POST /setup/api/run restarts the gateway and then runs `openclaw doctor
+# --fix` against it. OpenClaw v2026.9.x doctor refuses to run while a gateway
+# owns the state database (StateDatabaseCoordinatorContentionError), so on 9.x
+# the step always failed and never enabled configured-but-not-enabled
+# channels/plugins. scripts/patch-wrapper-doctor-fix-gateway-stopped.mjs runs
+# doctor --fix inside a maintenance hold -- gateway stopped via the
+# exit-confirmed stopGatewayAndWait() above, and ensureGatewayRunning()
+# waiting on the hold so no proxied request respawns it mid-doctor -- then
+# starts the gateway once. Must run after patch-wrapper-restart-gateway.mjs.
+COPY scripts/patch-wrapper-doctor-fix-gateway-stopped.mjs ./patch-wrapper-doctor-fix-gateway-stopped.mjs
+RUN node patch-wrapper-doctor-fix-gateway-stopped.mjs src/server.js
+RUN test "$(grep -cF 'async function runWithGatewayStopped(fn) {' src/server.js)" -eq 1
+RUN test "$(grep -cF 'const fix = await runWithGatewayStopped(' src/server.js)" -eq 1
+RUN ! grep -qF 'const fix = await runCmd(OPENCLAW_NODE, clawArgs(["doctor", "--fix"]));' src/server.js
+RUN node --check src/server.js
+
 # The wrapper's GET /setup/export tars all of STATE_DIR plus WORKSPACE_DIR with
 # no filter. Measured on a live instance during planning (read-only `du -sh`):
 # STATE_DIR is 541 MB -- bin/ 415 MB, agents/main/sessions/ 64 MB, lib/ 32 MB,
