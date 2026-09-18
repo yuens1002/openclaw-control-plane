@@ -141,6 +141,25 @@ RUN sed -i \
 RUN grep -qF '  if (OPENCLAW_GATEWAY_TOKEN) {' src/server.js
 RUN ! grep -qF '!req?.headers?.authorization' src/server.js
 
+# OpenClaw v2026.9.x added gateway-authenticated Control UI image routes
+# (/__openclaw__/{workspace-icon,link-favicon,plugin-icon,catalog-icon,
+# channel-avatar}/<id> and /api/users/<id>/avatar) that the UI loads with
+# fetch() and its own `Bearer <paired device token>`. The wrapper gate above
+# rejects that token (it only knows OPENCLAW_GATEWAY_TOKEN) with a Basic
+# challenge, so the native sign-in popup returns on every chat view. Exempting
+# the paths like /avatar/ would be an auth bypass, because the overwrite
+# above would then hand anonymous requests the gateway token. Instead,
+# scripts/patch-wrapper-gateway-image-auth.mjs lets only a request to those
+# exact route shapes that carries its own Bearer skip the wrapper gate, and
+# stops attachGatewayAuthHeader from replacing that Bearer -- the gateway
+# validates it. Requests without a Bearer still need dashboard Basic Auth.
+# Must run after the sed patches above: its anchors are their output.
+COPY scripts/patch-wrapper-gateway-image-auth.mjs ./patch-wrapper-gateway-image-auth.mjs
+RUN node patch-wrapper-gateway-image-auth.mjs src/server.js
+RUN test "$(grep -cF 'req.openclawClientBearerPassthrough = true' src/server.js)" -eq 1
+RUN test "$(grep -cF 'if (req.openclawClientBearerPassthrough) return;' src/server.js)" -eq 1
+RUN node --check src/server.js
+
 # restartGateway() sends SIGTERM to the wrapped OpenClaw gateway process, waits
 # a flat 750ms with no confirmation the process actually exited, then
 # unconditionally spawns a replacement. If OpenClaw's own shutdown (closing a

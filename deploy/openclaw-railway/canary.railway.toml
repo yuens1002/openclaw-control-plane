@@ -29,6 +29,7 @@ dockerfilePath = "Dockerfile"
 # rebuild -- unlike when it was drafted as an actual config-as-code file.
 watchPatterns = [
   "/scripts/patch-wrapper-restart-gateway.mjs",
+  "/scripts/patch-wrapper-gateway-image-auth.mjs",
   "/scripts/wrapper-state-export.mjs",
   "/scripts/patch-wrapper-scoped-export.mjs",
   "/scripts/wrapper-github-webhook-verify.mjs",
