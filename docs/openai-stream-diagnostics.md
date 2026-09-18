@@ -58,7 +58,10 @@ debugger. Do not enable broader payload logging as part of this procedure.
 `src/agents/openai-transport-stream.ts` source
 SHA-256 before writing and refuses an existing companion. This intentionally
 blocks builds on a source change, including alternate `OPENCLAW_GIT_REF`
-versions, until reviewed. The frozen dependency lock and upstream model
+versions, until reviewed. For a ref where the patch cannot apply (from
+v2026.9.x the transport lives in `@openclaw/ai/transports`), build with
+`OPENCLAW_STREAM_METADATA_PATCH=0` to skip the step; the diagnostics are then
+absent from that image. The frozen dependency lock and upstream model
 defaults remain unchanged. Fast tests retain the exact upstream file for hash,
 anchor and CLI checks; the companion is separately typechecked. The execution
 test uses the real bundled resolver, factory and transport with a local synthetic

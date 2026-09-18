@@ -7,7 +7,7 @@
 # gateway.controlUi.basePath is unset (its documented default) and nothing in
 # this repo sets it. See docs/plans/live-instance-operations/mount-analysis.md.
 
-FROM node:22-bookworm AS template-source
+FROM node:24-bookworm AS template-source
 
 ARG OPENCLAW_TEMPLATE_REF=b9e2467189d02dfe51a80173c40bad650a58eaf2
 ARG OPENCLAW_TEMPLATE_REPO=https://github.com/vignesh07/clawdbot-railway-template
@@ -195,7 +195,7 @@ RUN node --check src/server.js
 # agents/*/agent/{*.sqlite,models.json,auth-profiles*}) is ~7.2 MB. A daily
 # backup pulling 541 MB to save 7 MB is the defect. state/openclaw.sqlite also
 # runs in WAL mode with a live -wal/-shm pair, so even a filtered plain file
-# copy is not a consistent database; the runtime image (node:22-bookworm) has
+# copy is not a consistent database; the runtime image (node:24-bookworm) has
 # no sqlite3 CLI, but node:sqlite (unflagged since Node 22.13) provides
 # `VACUUM INTO`, which yields a consistent single-file snapshot from a
 # read-only connection.
@@ -290,7 +290,7 @@ RUN test "$(grep -cF 'app.post("/hooks/github-webhook-verify"' src/server.js)" -
 RUN node --check src/server.js
 RUN node --check src/wrapper-github-webhook-verify.mjs
 
-FROM node:22-bookworm AS openclaw-source
+FROM node:24-bookworm AS openclaw-source
 
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -312,7 +312,7 @@ RUN corepack enable
 
 WORKDIR /openclaw
 
-ARG OPENCLAW_GIT_REF=v2026.7.1-2
+ARG OPENCLAW_GIT_REF=v2026.9.4
 RUN git clone --depth 1 --branch "${OPENCLAW_GIT_REF}" https://github.com/openclaw/openclaw.git .
 
 # Extracted to scripts/relax-openclaw-extension-versions.mjs (issue #104) so
@@ -340,14 +340,22 @@ RUN pnpm install --no-frozen-lockfile
 FROM openclaw-source AS openclaw-build
 COPY scripts/patch-openai-stream-metadata.mjs /tmp/patch-openai-stream-metadata.mjs
 COPY scripts/openai-stream-metadata.ts /tmp/openai-stream-metadata.ts
-RUN node /tmp/patch-openai-stream-metadata.mjs /openclaw
+# Optional OpenRouter stream diagnostics (docs/openai-stream-diagnostics.md).
+# The patch is hash-pinned to the default OPENCLAW_GIT_REF's
+# src/agents/openai-transport-stream.ts; from v2026.9.x that transport moved
+# into @openclaw/ai/transports, so the patch has nothing to apply to. Build
+# with OPENCLAW_STREAM_METADATA_PATCH=0 to skip it for such refs (e.g. a
+# dogfood of a newer OpenClaw) until it is ported. Any other value keeps the
+# fail-closed hash check.
+ARG OPENCLAW_STREAM_METADATA_PATCH=1
+RUN if [ "${OPENCLAW_STREAM_METADATA_PATCH}" = "0" ]; then       echo "skipping OpenAI stream metadata patch (OPENCLAW_STREAM_METADATA_PATCH=0)";     else       node /tmp/patch-openai-stream-metadata.mjs /openclaw;     fi
 COPY deploy/openclaw-railway/openclaw.pnpm-lock.yaml ./pnpm-lock.yaml
 RUN pnpm install --frozen-lockfile
 RUN pnpm build
 ENV OPENCLAW_PREFER_PNPM=1
 RUN pnpm ui:install && pnpm ui:build
 
-FROM node:22-bookworm
+FROM node:24-bookworm
 ENV NODE_ENV=production
 
 RUN apt-get update \
