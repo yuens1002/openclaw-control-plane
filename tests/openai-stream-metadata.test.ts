@@ -8,12 +8,18 @@ import ts from "typescript";
 import { afterAll, describe, expect, it } from "vitest";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const fixture = readFileSync(join(root, "fixtures/openai-stream-metadata/openai-transport-stream.ts.txt"), "utf8");
+const fixtureDir = join(root, "fixtures/openai-stream-metadata/v2026.9.4");
+const fixture = {
+  transport: readFileSync(join(fixtureDir, "openai-completions-transport.ts.txt"), "utf8"),
+  stream: readFileSync(join(fixtureDir, "openai-completions-stream.ts.txt"), "utf8"),
+};
+type Sources = typeof fixture;
 const helperPath = join(root, "scripts/openai-stream-metadata.ts");
 const patchPath = join(root, "scripts/patch-openai-stream-metadata.mjs");
 const patch = createRequire(import.meta.url)(patchPath) as {
-  patchOpenAIStreamMetadata(source: string): string;
-  instrumentOpenAIStreamMetadata(source: string): string;
+  TRANSPORT_DIR: string;
+  patchOpenAIStreamMetadata(sources: Sources): Sources;
+  instrumentOpenAIStreamMetadata(sources: Sources): Sources;
 };
 interface Collector {
   context(emitReasoning: boolean): void;
@@ -98,26 +104,58 @@ describe("OpenAI stream metadata", () => {
 });
 
 describe("selected transport build patch", () => {
-  it("applies to the complete pinned source and emits syntactically valid TS", () => {
-    expect(compile(patch.patchOpenAIStreamMetadata(fixture)).diagnostics).toEqual([]);
-    expect(() => patch.patchOpenAIStreamMetadata(fixture + "\n")).toThrow(/drift/);
-    expect(() => patch.patchOpenAIStreamMetadata(patch.patchOpenAIStreamMetadata(fixture))).toThrow(/drift/);
-    expect(() => patch.instrumentOpenAIStreamMetadata(fixture.replace("export function createOpenAICompletionsTransportStreamFn(): StreamFn {", ""))).toThrow(/anchor/);
+  it("applies to the complete pinned sources and emits syntactically valid TS", () => {
+    const patched = patch.patchOpenAIStreamMetadata(fixture);
+    expect(compile(patched.transport).diagnostics).toEqual([]);
+    expect(compile(patched.stream).diagnostics).toEqual([]);
+    expect(patched.transport).toContain('model.provider === "openrouter"');
+    expect(patched.stream).toContain("options?.streamMetadata?.chunk(rawChunk);");
+    expect(() => patch.patchOpenAIStreamMetadata({ ...fixture, transport: fixture.transport + "\n" })).toThrow(/drift/);
+    expect(() => patch.patchOpenAIStreamMetadata({ ...fixture, stream: fixture.stream + "\n" })).toThrow(/drift/);
+    expect(() => patch.patchOpenAIStreamMetadata(patched)).toThrow(/drift/);
+    expect(() => patch.instrumentOpenAIStreamMetadata({ ...fixture,
+      transport: fixture.transport.replace("export function createOpenAICompletionsTransportStreamFn(): StreamFn {", "") })).toThrow(/anchor/);
+    expect(() => patch.instrumentOpenAIStreamMetadata({ ...fixture,
+      stream: fixture.stream.replace("  for await (const rawChunk of guardedStream) {", "") })).toThrow(/anchor/);
+  });
+  it("records the pre-normalization shape immediately before tool-call finalization", () => {
+    const { stream } = patch.patchOpenAIStreamMetadata(fixture);
+    const hook = stream.indexOf("options?.streamMetadata?.beforeNormalization(output);");
+    expect(hook).toBeGreaterThan(stream.indexOf("  for await (const rawChunk of guardedStream) {"));
+    expect(stream.indexOf("finalizeOpenAICompletionsToolCalls(output, {", hook)).toBeGreaterThan(hook);
   });
   it("CLI installs the companion and rejects reapplication without changing files", () => {
     const directory = mkdtempSync(join(tmpdir(), "stream-metadata-test-"));
     try {
-      const providerDir = join(directory, "src/agents");
-      mkdirSync(providerDir, { recursive: true });
-      const target = join(providerDir, "openai-transport-stream.ts");
-      writeFileSync(target, fixture);
+      const transportDir = join(directory, patch.TRANSPORT_DIR);
+      mkdirSync(transportDir, { recursive: true });
+      const targets = {
+        transport: join(transportDir, "openai-completions-transport.ts"),
+        stream: join(transportDir, "openai-completions-stream.ts"),
+      };
+      writeFileSync(targets.transport, fixture.transport);
+      writeFileSync(targets.stream, fixture.stream);
       const run = () => spawnSync(process.execPath, [patchPath, directory], { encoding: "utf8" });
       expect(run().status).toBe(0);
-      const patched = readFileSync(target, "utf8");
-      expect(patched).toBe(patch.patchOpenAIStreamMetadata(fixture));
-      expect(existsSync(join(providerDir, "openai-stream-metadata.ts"))).toBe(true);
+      const patched = { transport: readFileSync(targets.transport, "utf8"), stream: readFileSync(targets.stream, "utf8") };
+      expect(patched).toEqual(patch.patchOpenAIStreamMetadata(fixture));
+      expect(existsSync(join(transportDir, "openai-stream-metadata.ts"))).toBe(true);
       expect(run().status).not.toBe(0);
-      expect(readFileSync(target, "utf8")).toBe(patched);
+      expect(readFileSync(targets.transport, "utf8")).toBe(patched.transport);
+      expect(readFileSync(targets.stream, "utf8")).toBe(patched.stream);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  });
+  it("leaves both files untouched when only one source drifted", () => {
+    const directory = mkdtempSync(join(tmpdir(), "stream-metadata-drift-"));
+    try {
+      const transportDir = join(directory, patch.TRANSPORT_DIR);
+      mkdirSync(transportDir, { recursive: true });
+      writeFileSync(join(transportDir, "openai-completions-transport.ts"), fixture.transport);
+      writeFileSync(join(transportDir, "openai-completions-stream.ts"), fixture.stream + "// drift\n");
+      const result = spawnSync(process.execPath, [patchPath, directory], { encoding: "utf8" });
+      expect(result.status).not.toBe(0);
+      expect(readFileSync(join(transportDir, "openai-completions-transport.ts"), "utf8")).toBe(fixture.transport);
+      expect(existsSync(join(transportDir, "openai-stream-metadata.ts"))).toBe(false);
     } finally { rmSync(directory, { recursive: true, force: true }); }
   });
 });

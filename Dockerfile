@@ -376,14 +376,18 @@ FROM openclaw-source AS openclaw-build
 COPY scripts/patch-openai-stream-metadata.mjs /tmp/patch-openai-stream-metadata.mjs
 COPY scripts/openai-stream-metadata.ts /tmp/openai-stream-metadata.ts
 # Optional OpenRouter stream diagnostics (docs/openai-stream-diagnostics.md).
-# The patch is hash-pinned to the default OPENCLAW_GIT_REF's
-# src/agents/openai-transport-stream.ts; from v2026.9.x that transport moved
-# into @openclaw/ai/transports, so the patch has nothing to apply to. Build
-# with OPENCLAW_STREAM_METADATA_PATCH=0 to skip it for such refs (e.g. a
-# dogfood of a newer OpenClaw) until it is ported. Any other value keeps the
-# fail-closed hash check.
+# The patch is hash-pinned to the default OPENCLAW_GIT_REF's completions
+# transport (packages/ai/src/transports/openai-completions-{transport,stream}.ts
+# since v2026.9.x) and fails the build on any source drift. Build with
+# OPENCLAW_STREAM_METADATA_PATCH=0 to skip it for a ref it has not been ported
+# to; the diagnostics are then absent from that image. Any other value keeps
+# the fail-closed hash check.
 ARG OPENCLAW_STREAM_METADATA_PATCH=1
-RUN if [ "${OPENCLAW_STREAM_METADATA_PATCH}" = "0" ]; then       echo "skipping OpenAI stream metadata patch (OPENCLAW_STREAM_METADATA_PATCH=0)";     else       node /tmp/patch-openai-stream-metadata.mjs /openclaw;     fi
+RUN if [ "${OPENCLAW_STREAM_METADATA_PATCH}" = "0" ]; then \
+      echo "skipping OpenAI stream metadata patch (OPENCLAW_STREAM_METADATA_PATCH=0)"; \
+    else \
+      node /tmp/patch-openai-stream-metadata.mjs /openclaw; \
+    fi
 COPY deploy/openclaw-railway/openclaw.pnpm-lock.yaml ./pnpm-lock.yaml
 RUN pnpm install --frozen-lockfile
 RUN pnpm build

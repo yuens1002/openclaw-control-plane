@@ -9,12 +9,13 @@ import { pathToFileURL } from 'node:url';
 
 const dist = resolvePath(process.argv[2] ?? '/openclaw/dist');
 const expectUninstrumented = process.argv.includes('--expect-uninstrumented');
-const candidates = readdirSync(dist).filter(name => name.endsWith('.js')).map(name => ({
+// v2026.9.x: the embedded-agent resolver returns { streamFn, strategy }; bundles may be .js or .mjs.
+const candidates = readdirSync(dist).filter(name => /\.m?js$/.test(name)).map(name => ({
   name, source: readFileSync(`${dist}/${name}`, 'utf8'),
-})).filter(({ source }) => source.includes('function resolveEmbeddedAgentStreamFn('));
+})).filter(({ source }) => source.includes('function resolveEmbeddedAgentStream('));
 assert.equal(candidates.length, 1, 'Exactly one shipped resolver implementation is required');
 const candidate = candidates[0];
-const alias = candidate.source.match(/resolveEmbeddedAgentStreamFn as (\w+)/)?.[1];
+const alias = candidate.source.match(/resolveEmbeddedAgentStream as (\w+)/)?.[1];
 assert.ok(alias, 'The real bundled resolver must be exported; fail closed if packaging changes');
 const resolver = (await import(pathToFileURL(`${dist}/${candidate.name}`)))[alias];
 assert.equal(typeof resolver, 'function');
@@ -96,7 +97,12 @@ async function runScenario(scenario, { enabled = true, provider = 'openrouter', 
       console.error('{synthetic malformed JSON');
       console.error('{"event":"synthetic_unrelated"}');
     }
-    const streamFn = resolver({ sessionId: 'synthetic-session', model, resolvedApiKey: 'synthetic-no-secret', signal: abort.signal });
+    // Minimal lifecycle runtime: with no session stream and a resolved key, the real
+    // resolver must pick the managed boundary-aware transport, as production does.
+    const llmRuntime = { streamSimple: () => { throw new Error('stream-simple must not be selected'); } };
+    const { streamFn, strategy } = resolver({ llmRuntime, currentStreamFn: undefined, sessionId: 'synthetic-session',
+      model, resolvedApiKey: 'synthetic-no-secret', signal: abort.signal });
+    assert.equal(strategy, 'boundary-aware:openai-completions', 'Resolver must select the instrumented transport');
     const stream = await streamFn(model, { messages: [{ role: 'user', content: secretMarker, timestamp: 0 }] }, {
       maxTokens: 100,
       onPayload: payload => ({ ...payload, max_completion_tokens: 37 }),

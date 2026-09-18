@@ -54,18 +54,23 @@ debugger. Do not enable broader payload logging as part of this procedure.
 
 ## Build and source upgrades
 
-`scripts/patch-openai-stream-metadata.mjs` checks the complete upstream
-`src/agents/openai-transport-stream.ts` source
-SHA-256 before writing and refuses an existing companion. This intentionally
-blocks builds on a source change, including alternate `OPENCLAW_GIT_REF`
-versions, until reviewed. For a ref where the patch cannot apply (from
-v2026.9.x the transport lives in `@openclaw/ai/transports`), build with
-`OPENCLAW_STREAM_METADATA_PATCH=0` to skip the step; the diagnostics are then
-absent from that image. The frozen dependency lock and upstream model
-defaults remain unchanged. Fast tests retain the exact upstream file for hash,
-anchor and CLI checks; the companion is separately typechecked. The execution
-test uses the real bundled resolver, factory and transport with a local synthetic
-SSE server and external networking disabled. It does not replace the factory.
+Since OpenClaw v2026.9.x the transport lives in the `@openclaw/ai` workspace
+package. `scripts/patch-openai-stream-metadata.mjs` checks the complete upstream
+SHA-256 of both files it edits,
+`packages/ai/src/transports/openai-completions-transport.ts` (factory: collector
+creation, request capture, final record) and `openai-completions-stream.ts`
+(chunk loop, and the pre-normalization capture immediately before tool-call
+finalization), before writing either, and refuses an existing companion. This
+intentionally blocks builds on a source change, including alternate
+`OPENCLAW_GIT_REF` versions, until reviewed. For a ref the patch has not been
+ported to, build with `OPENCLAW_STREAM_METADATA_PATCH=0` to skip the step; the
+diagnostics are then absent from that image. The frozen dependency lock and
+upstream model defaults remain unchanged. Fast tests retain the exact upstream
+files for hash, anchor and CLI checks; the companion is separately typechecked.
+The execution test uses the real bundled resolver (`resolveEmbeddedAgentStream`,
+asserting it selects `boundary-aware:openai-completions`), factory and transport
+with a local synthetic SSE server and external networking disabled. It does not
+replace the factory.
 Run it against the final Docker image before deployment; bundle-marker checks
 alone do not establish execution-path coverage.
 
@@ -78,9 +83,11 @@ docker run --rm --network none --mount type=bind,source="$(pwd)/scripts",target=
 ```
 
 The example uses a POSIX shell; in PowerShell use `${PWD}/scripts` for the
-mount source. The first check executes 14 resolver scenarios plus a setup-failure
-cleanup case (15 total). The second removes only the selected collector in a
-disposable copy and requires the diagnostic-reachability assertion to fail. Neither check calls
+mount source. The first check executes 12 resolver scenarios plus two provider/sink cases and a setup-failure
+cleanup case (15 total). The second removes only the selected collector from the
+built `@openclaw/ai` transport bundle in place (restoring it afterwards, so run it
+only in a disposable `--rm` container) and requires the diagnostic-reachability
+assertion to fail. Neither check calls
 an external provider. These checks complement `npm run precheck`; they are not
 included in that command and must be recorded separately.
 
