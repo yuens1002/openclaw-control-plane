@@ -23,6 +23,15 @@
 // and the gateway's own 401 carries no WWW-Authenticate header, so a
 // rejected token cannot trigger the browser popup.
 //
+// The same two hooks also carry OpenClaw's public device-pairing join link,
+// /j/<22-char shortcode>. The gateway serves it anonymously by design (the
+// shortcode is the credential, rate-limited per client), and `openclaw doctor`
+// requires an edge proxy to let it through without identity auth -- otherwise
+// a phone opening the link hits the wrapper's Basic challenge. It skips the
+// wrapper gate and is forwarded with NO Authorization header at all, so the
+// gateway sees exactly the anonymous request it expects rather than one the
+// wrapper silently upgraded to the gateway token.
+//
 // Same contract as the sibling patch-wrapper-*.mjs scripts: exact literal
 // anchors, each guarded to exactly one occurrence plus an already-applied
 // marker, all guards evaluated before anything is written. The anchors are
@@ -42,6 +51,9 @@ if (!targetPath) {
 // base path -- the Control UI is root-mounted here). /avatar/ and
 // /__openclaw__/assistant-media are deliberately absent: the wrapper already
 // exempts them outright (see the Dockerfile).
+// OpenClaw's device-pairing join shortcode: 16 random bytes, base64url
+// (src/pairing/join-code.ts). Exact shape only -- this is an auth bypass.
+const JOIN_PATTERN = String.raw`/^\/j\/[A-Za-z0-9_-]{22}$/`;
 const ROUTE_PATTERN = String.raw`/^\/(?:__openclaw__\/(?:workspace-icon|link-favicon|plugin-icon|catalog-icon|channel-avatar)\/[^/]+|api\/users\/[^/]+\/avatar)$/`;
 
 const replacements = [
@@ -49,9 +61,11 @@ const replacements = [
     label: "requireDashboardAuth definition (anchor for the gateway image route pattern)",
     oldBlock: `function requireDashboardAuth(req, res, next) {`,
     newBlock: `// Control-plane patch (scripts/patch-wrapper-gateway-image-auth.mjs): the
-// gateway's own authenticated Control UI image routes. See requireDashboardAuth
-// and attachGatewayAuthHeader below for how requests to them are handled.
+// gateway's own authenticated Control UI image routes and its public
+// device-pairing join link. See requireDashboardAuth and
+// attachGatewayAuthHeader below for how requests to them are handled.
 const GATEWAY_AUTHED_IMAGE_PATH = ${ROUTE_PATTERN};
+const GATEWAY_PUBLIC_JOIN_PATH = ${JOIN_PATTERN};
 
 function requireDashboardAuth(req, res, next) {`,
     marker: `const GATEWAY_AUTHED_IMAGE_PATH =`,
@@ -60,7 +74,8 @@ function requireDashboardAuth(req, res, next) {`,
     label: "assistant-media exemption line (anchor for the Bearer pass-through check)",
     oldBlock: `  if (req.path === "/__openclaw__/assistant-media") return next(); // exact match, not prefix -- see comment above this RUN step for why`,
     newBlock: `  if (req.path === "/__openclaw__/assistant-media") return next(); // exact match, not prefix -- see comment above this RUN step for why
-  if (GATEWAY_AUTHED_IMAGE_PATH.test(req.path) && /^Bearer \\S+$/.test(req.headers.authorization || "")) { req.openclawClientBearerPassthrough = true; return next(); } // gateway validates this request's own Bearer -- see scripts/patch-wrapper-gateway-image-auth.mjs`,
+  if (GATEWAY_AUTHED_IMAGE_PATH.test(req.path) && /^Bearer \\S+$/.test(req.headers.authorization || "")) { req.openclawClientBearerPassthrough = true; return next(); } // gateway validates this request's own Bearer -- see scripts/patch-wrapper-gateway-image-auth.mjs
+  if (GATEWAY_PUBLIC_JOIN_PATH.test(req.path)) { req.openclawStripAuthorization = true; return next(); } // public pairing join link, forwarded anonymously -- see scripts/patch-wrapper-gateway-image-auth.mjs`,
     marker: `req.openclawClientBearerPassthrough = true`,
   },
   {
@@ -69,6 +84,7 @@ function requireDashboardAuth(req, res, next) {`,
   if (OPENCLAW_GATEWAY_TOKEN) {`,
     newBlock: `function attachGatewayAuthHeader(req) {
   if (req.openclawClientBearerPassthrough) return; // keep the client's own Bearer for the gateway to validate -- never upgrade it to the gateway token
+  if (req.openclawStripAuthorization) { delete req.headers.authorization; return; } // public join link: the gateway must see it anonymously
   if (OPENCLAW_GATEWAY_TOKEN) {`,
     marker: `if (req.openclawClientBearerPassthrough) return;`,
   },
@@ -104,4 +120,4 @@ for (const { oldBlock, newBlock } of replacements) {
   patched = patched.replace(oldBlock, () => newBlock);
 }
 fs.writeFileSync(targetPath, patched);
-console.log(`patched ${targetPath} with gateway-validated Bearer pass-through for the Control UI image routes`);
+console.log(`patched ${targetPath} with gateway-validated Bearer pass-through for the Control UI image routes and anonymous pairing join links`);

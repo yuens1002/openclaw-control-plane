@@ -153,11 +153,16 @@ RUN ! grep -qF '!req?.headers?.authorization' src/server.js
 # exact route shapes that carries its own Bearer skip the wrapper gate, and
 # stops attachGatewayAuthHeader from replacing that Bearer -- the gateway
 # validates it. Requests without a Bearer still need dashboard Basic Auth.
+# The same script lets the public device-pairing join link (/j/<shortcode>,
+# which `openclaw doctor` requires an edge proxy to leave unauthenticated)
+# through the gate and forwards it with no Authorization header at all.
 # Must run after the sed patches above: its anchors are their output.
 COPY scripts/patch-wrapper-gateway-image-auth.mjs ./patch-wrapper-gateway-image-auth.mjs
 RUN node patch-wrapper-gateway-image-auth.mjs src/server.js
 RUN test "$(grep -cF 'req.openclawClientBearerPassthrough = true' src/server.js)" -eq 1
 RUN test "$(grep -cF 'if (req.openclawClientBearerPassthrough) return;' src/server.js)" -eq 1
+RUN test "$(grep -cF 'req.openclawStripAuthorization = true' src/server.js)" -eq 1
+RUN test "$(grep -cF 'if (req.openclawStripAuthorization) { delete req.headers.authorization; return; }' src/server.js)" -eq 1
 RUN node --check src/server.js
 
 # restartGateway() sends SIGTERM to the wrapped OpenClaw gateway process, waits

@@ -231,6 +231,34 @@ describe("patch-wrapper-gateway-image-auth", () => {
       }
     });
 
+    it("forwards a pairing join link anonymously, with or without client credentials", () => {
+      const joinPath = "/j/AbCdEfGhIjKlMnOpQrStUv"; // 22-char base64url shortcode
+      for (const authorization of [undefined, BASIC, `Bearer ${DEVICE_TOKEN}`, `Bearer ${GATEWAY_TOKEN}`]) {
+        expect(dispatch(patched, joinPath, authorization)).toEqual({
+          proxied: true,
+          status: undefined,
+          challenge: undefined,
+          forwardedAuthorization: undefined
+        });
+      }
+      // Before the patch the phone's plain GET got a Basic challenge.
+      expect(dispatch(unpatched, joinPath)).toMatchObject({ proxied: false, status: 401 });
+    });
+
+    it("does not extend the join-link bypass to other /j shapes", () => {
+      for (const path of [
+        "/j",
+        "/j/",
+        "/j/short",
+        "/j/AbCdEfGhIjKlMnOpQrStUvW",
+        "/j/AbCdEfGhIjKlMnOpQrStU!",
+        "/j/AbCdEfGhIjKlMnOpQrStUv/extra",
+        "/x/j/AbCdEfGhIjKlMnOpQrStUv"
+      ]) {
+        expect(dispatch(patched, path), path).toMatchObject({ proxied: false, status: 401 });
+      }
+    });
+
     it("leaves the unrelated gates unchanged", () => {
       expect(dispatch(patched, "/setup/healthz")).toMatchObject({ proxied: true });
       expect(dispatch(patched, "/api/anything", `Bearer ${GATEWAY_TOKEN}`)).toMatchObject({
