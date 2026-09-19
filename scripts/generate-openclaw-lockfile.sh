@@ -1,22 +1,32 @@
 #!/usr/bin/env bash
-# Regenerates the committed OpenClaw lockfile
-# (deploy/openclaw-railway/openclaw.pnpm-lock.yaml) against the currently
-# pinned OPENCLAW_GIT_REF, plus its ref-tracking meta.json.
+# Generates the committed OpenClaw lockfile for one OpenClaw ref:
+# deploy/openclaw-railway/lockfiles/<ref>.pnpm-lock.yaml.
 #
-# Run this whenever bumping OPENCLAW_GIT_REF in the Dockerfile, then commit
-# both output files. This is the one deliberate point where dependency
-# resolution for the OpenClaw monorepo touches the live npm registry -- the
-# real build (Dockerfile's `openclaw-build` stage) never does, by design.
-# See issue #104 and docs/plans/openclaw-build-determinism/plan.md.
+# Usage: scripts/generate-openclaw-lockfile.sh [<openclaw-git-ref>]
+# The ref defaults to the Dockerfile's `ARG OPENCLAW_GIT_REF=` value.
+#
+# Run it for every ref an instance may pin (the default and any per-client
+# OPENCLAW_GIT_REF override), then commit the output. The real build selects
+# the file matching the ref it cloned and fails if none exists. Delete a ref's
+# file once no instance pins it. This is the one deliberate point where
+# dependency resolution for the OpenClaw monorepo touches the live npm
+# registry -- the real build (Dockerfile's `openclaw-build` stage) never does,
+# by design. See issue #104 and docs/plans/openclaw-build-determinism/plan.md.
 #
 # Requires a local Docker daemon.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-OPENCLAW_GIT_REF="$(sed -n 's/^ARG OPENCLAW_GIT_REF=\(.*\)$/\1/p' Dockerfile)"
-if [ -z "$OPENCLAW_GIT_REF" ]; then
+DEFAULT_REF="$(sed -n 's/^ARG OPENCLAW_GIT_REF=\(.*\)$/\1/p' Dockerfile)"
+if [ -z "$DEFAULT_REF" ]; then
   echo "could not find 'ARG OPENCLAW_GIT_REF=...' in Dockerfile -- has it moved or changed shape?" >&2
+  exit 1
+fi
+OPENCLAW_GIT_REF="${1:-$DEFAULT_REF}"
+# The ref becomes a filename; accept only tag/branch-safe characters.
+if ! [[ "$OPENCLAW_GIT_REF" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+  echo "refusing unsafe OpenClaw ref '$OPENCLAW_GIT_REF' (allowed: letters, digits, '.', '_', '-')" >&2
   exit 1
 fi
 
@@ -29,18 +39,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-docker build --target openclaw-lockfile-refresh -t "$IMAGE_TAG" .
+docker build --target openclaw-lockfile-refresh --build-arg "OPENCLAW_GIT_REF=$OPENCLAW_GIT_REF" -t "$IMAGE_TAG" .
 docker create --name "$CONTAINER_NAME" "$IMAGE_TAG" >/dev/null
 
-mkdir -p deploy/openclaw-railway
-docker cp "$CONTAINER_NAME:/openclaw/pnpm-lock.yaml" deploy/openclaw-railway/openclaw.pnpm-lock.yaml
+OUTPUT="deploy/openclaw-railway/lockfiles/$OPENCLAW_GIT_REF.pnpm-lock.yaml"
+mkdir -p deploy/openclaw-railway/lockfiles
+docker cp "$CONTAINER_NAME:/openclaw/pnpm-lock.yaml" "$OUTPUT"
 
-GENERATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-cat > deploy/openclaw-railway/openclaw.pnpm-lock.meta.json <<EOF
-{
-  "openclawGitRef": "$OPENCLAW_GIT_REF",
-  "generatedAt": "$GENERATED_AT"
-}
-EOF
-
-echo "regenerated deploy/openclaw-railway/openclaw.pnpm-lock.yaml for OPENCLAW_GIT_REF=$OPENCLAW_GIT_REF"
+echo "generated $OUTPUT for OPENCLAW_GIT_REF=$OPENCLAW_GIT_REF"

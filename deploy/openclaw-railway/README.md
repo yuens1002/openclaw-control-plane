@@ -240,6 +240,16 @@ overridden per client without touching any other service:
 .\deploy\openclaw-railway\update-client-openclaw-ref.ps1 -Service acme-openclaw -OpenClawRef v2026.7.1-2 -ExpectedCurrentRef v2026.6.0-1
 ```
 
+A ref is only buildable if this repo commits a lockfile for it:
+`deploy/openclaw-railway/lockfiles/<ref>.pnpm-lock.yaml`. The build installs
+frozen from the file matching the ref it cloned and fails with the exact
+command to run when none exists. Before pinning a client to a new ref,
+generate and commit its lockfile with `scripts/generate-openclaw-lockfile.sh
+<ref>`; delete a ref's file once no instance pins it. Build-time patches
+pinned to a specific OpenClaw source (the stream diagnostics patch) may also
+need `OPENCLAW_STREAM_METADATA_PATCH=0` on a client pinned to a ref they
+have not been ported to — see `docs/openai-stream-diagnostics.md`.
+
 Provisioning sets `PORT=8080`, `OPENCLAW_STATE_DIR=/data/.openclaw`, and
 `OPENCLAW_WORKSPACE_DIR=/data/workspace` as explicit Railway service
 variables even though the root `railway.toml` already declares an

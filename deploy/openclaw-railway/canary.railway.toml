@@ -38,7 +38,7 @@ watchPatterns = [
   "/scripts/relax-openclaw-extension-versions.mjs",
   "/scripts/patch-openai-stream-metadata.mjs",
   "/scripts/openai-stream-metadata.ts",
-  "/deploy/openclaw-railway/openclaw.pnpm-lock.yaml",
+  "/deploy/openclaw-railway/lockfiles/**",
   "/Dockerfile",
   "/.dockerignore"
 ]

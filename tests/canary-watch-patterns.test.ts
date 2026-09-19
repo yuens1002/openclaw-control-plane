@@ -124,6 +124,18 @@ describe("canary watch patterns", () => {
     }
   });
 
+  // Every per-ref lockfile is a build input: the build selects one by the
+  // cloned OPENCLAW_GIT_REF, so adding or changing any of them must rebuild.
+  it("matches every per-ref OpenClaw lockfile, including ones added later", () => {
+    for (const path of [
+      "deploy/openclaw-railway/lockfiles/v2026.9.4.pnpm-lock.yaml",
+      "deploy/openclaw-railway/lockfiles/v2026.7.1-2.pnpm-lock.yaml",
+      "deploy/openclaw-railway/lockfiles/v2099.1.1.pnpm-lock.yaml"
+    ]) {
+      expect(matchesAnyPattern(path, canaryPatterns)).toBe(true);
+    }
+  });
+
   it("matches the Dockerfile itself and .dockerignore", () => {
     expect(matchesAnyPattern("Dockerfile", canaryPatterns)).toBe(true);
     expect(matchesAnyPattern(".dockerignore", canaryPatterns)).toBe(true);
@@ -144,7 +156,6 @@ describe("canary watch patterns", () => {
       "CHANGELOG.md",
       "package.json",
       "package-lock.json",
-      "deploy/openclaw-railway/openclaw.pnpm-lock.meta.json",
       "scripts/generate-openclaw-lockfile.sh",
       "scripts/write-precheck-stamp.mjs",
       "scripts/check-acs-coverage.mjs",

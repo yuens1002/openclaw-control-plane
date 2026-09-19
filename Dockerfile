@@ -354,6 +354,9 @@ WORKDIR /openclaw
 
 ARG OPENCLAW_GIT_REF=v2026.9.4
 RUN git clone --depth 1 --branch "${OPENCLAW_GIT_REF}" https://github.com/openclaw/openclaw.git .
+# Record the ref actually cloned: build ARGs do not carry into child stages,
+# and openclaw-build selects its committed lockfile by this exact value.
+RUN printf '%s\n' "${OPENCLAW_GIT_REF}" > /tmp/openclaw-git-ref
 
 # Extracted to scripts/relax-openclaw-extension-versions.mjs (issue #104) so
 # both this real build and the deliberate lockfile-regeneration path below
@@ -364,8 +367,8 @@ RUN node /tmp/relax-openclaw-extension-versions.mjs .
 
 # Deliberate, NOT part of the real build below -- built only via
 # `docker build --target openclaw-lockfile-refresh` (see
-# scripts/generate-openclaw-lockfile.sh), run manually whenever
-# OPENCLAW_GIT_REF bumps. This is the one deliberate point where dependency
+# scripts/generate-openclaw-lockfile.sh [<ref>]), run manually once per
+# OpenClaw ref an instance may pin. This is the one deliberate point where dependency
 # resolution touches the live npm registry; every ordinary build below uses
 # the committed, frozen result instead. Before this split, EVERY build ran
 # `pnpm install --no-frozen-lockfile` here, re-resolving this ~162-workspace
@@ -393,7 +396,20 @@ RUN if [ "${OPENCLAW_STREAM_METADATA_PATCH}" = "0" ]; then \
     else \
       node /tmp/patch-openai-stream-metadata.mjs /openclaw; \
     fi
-COPY deploy/openclaw-railway/openclaw.pnpm-lock.yaml ./pnpm-lock.yaml
+# One committed lockfile per OpenClaw ref (deploy/openclaw-railway/lockfiles/
+# <ref>.pnpm-lock.yaml), so an instance can pin OPENCLAW_GIT_REF to any ref
+# that has one -- not only the default -- and still install frozen. A ref
+# without a committed lockfile fails here with the command that creates it,
+# rather than as an opaque pnpm lockfile mismatch.
+COPY deploy/openclaw-railway/lockfiles /tmp/openclaw-lockfiles
+RUN ref="$(cat /tmp/openclaw-git-ref)" \
+  && lockfile="/tmp/openclaw-lockfiles/${ref}.pnpm-lock.yaml" \
+  && if [ ! -f "${lockfile}" ]; then \
+       echo "no committed lockfile for OPENCLAW_GIT_REF=${ref}; run: scripts/generate-openclaw-lockfile.sh ${ref}" >&2; \
+       exit 1; \
+     fi \
+  && cp "${lockfile}" ./pnpm-lock.yaml \
+  && echo "using committed lockfile ${ref}.pnpm-lock.yaml"
 RUN pnpm install --frozen-lockfile
 RUN pnpm build
 ENV OPENCLAW_PREFER_PNPM=1
